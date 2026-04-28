@@ -101,6 +101,7 @@ export type WorkoutType =
   | "long"
   | "progression"
   | "strength"
+  | "cross_training"
   | "rest";
 
 export interface WorkoutSegment {

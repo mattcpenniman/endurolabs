@@ -18,8 +18,32 @@ interface OnboardingFormProps {
 
 const DAYS = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
 
+// Validate runner profile for common inconsistencies
+function validateProfile(profile: RunnerProfile): string[] {
+  const warnings: string[] = [];
+
+  if (profile.peakHistoricalWeeklyMileage < profile.currentWeeklyMileage) {
+    warnings.push("Peak weekly mileage is lower than your current mileage — peak should be ≥ current.");
+  }
+  if (profile.longestRecentLongRun > profile.currentWeeklyMileage) {
+    warnings.push("Longest run exceeds your current weekly mileage — that doesn't add up.");
+  }
+  if (profile.currentMarathonPR && profile.currentMarathonPR < profile.goalMarathonTime) {
+    warnings.push("Your marathon PR is faster than your goal time — consider setting a more ambitious goal or using your PR as the goal.");
+  }
+  if (profile.longestRecentLongRun < 4) {
+    warnings.push("Longest recent run is under 4 miles — you may want to build up to longer runs before starting a marathon plan.");
+  }
+  if (profile.currentWeeklyMileage < 10) {
+    warnings.push("Current weekly mileage is under 10 mi — marathon training will require a significant build-up. Consider a couch-to-5K plan first.");
+  }
+
+  return warnings;
+}
+
 export default function OnboardingForm({ onSubmit, isLoading }: OnboardingFormProps) {
   const [step, setStep] = useState(1);
+  const [warnings, setWarnings] = useState<string[]>([]);
 
   // Step 1: Goal & timing
   const [goalTime, setGoalTime] = useState({ hours: 4, minutes: 0 });
@@ -56,7 +80,7 @@ export default function OnboardingForm({ onSubmit, isLoading }: OnboardingFormPr
     }
   };
 
-  const handleSubmit = () => {
+  const handleSubmit = (skipValidation: boolean = false) => {
     const profile: RunnerProfile = {
       currentWeeklyMileage: currentMileage,
       peakHistoricalWeeklyMileage: peakMileage,
@@ -80,6 +104,15 @@ export default function OnboardingForm({ onSubmit, isLoading }: OnboardingFormPr
       weeksOverride: weeksOverride ? parseInt(weeksOverride, 10) : null,
       runsPerWeekOverride: runsPerWeek ? parseInt(runsPerWeek, 10) : null,
     };
+
+    if (!skipValidation) {
+      const profileWarnings = validateProfile(profile);
+      if (profileWarnings.length > 0) {
+        setWarnings(profileWarnings);
+        return;
+      }
+    }
+
     onSubmit(profile);
   };
 
@@ -326,6 +359,21 @@ export default function OnboardingForm({ onSubmit, isLoading }: OnboardingFormPr
         <div className="space-y-6">
           <h2 className="text-2xl font-bold text-gray-900">Preferences</h2>
 
+          {/* Validation warnings */}
+          {warnings.length > 0 && (
+            <div className="rounded-lg border border-amber-200 bg-amber-50 p-4">
+              <h3 className="mb-2 text-sm font-semibold text-amber-800">⚠️ Profile Warnings</h3>
+              <ul className="list-inside list-disc space-y-1">
+                {warnings.map((w, i) => (
+                  <li key={i} className="text-sm text-amber-700">{w}</li>
+                ))}
+              </ul>
+              <p className="mt-2 text-xs text-amber-600">
+                You can fix these in previous steps or proceed anyway.
+              </p>
+            </div>
+          )}
+
           <div>
             <label className="mb-2 block text-sm font-medium text-gray-700">Workout Experience</label>
             <div className="grid grid-cols-3 gap-2">
@@ -411,14 +459,26 @@ export default function OnboardingForm({ onSubmit, isLoading }: OnboardingFormPr
             Next
           </button>
         ) : (
-          <button
-            type="button"
-            onClick={handleSubmit}
-            disabled={isLoading || !raceDate}
-            className="rounded-lg bg-enduro-600 px-6 py-2 text-sm font-medium text-white hover:bg-enduro-700 disabled:opacity-50"
-          >
-            {isLoading ? "Generating..." : "Generate Plan"}
-          </button>
+          <div className="flex gap-3">
+            <button
+              type="button"
+              onClick={() => handleSubmit(false)}
+              disabled={isLoading || !raceDate}
+              className="rounded-lg bg-enduro-600 px-6 py-2 text-sm font-medium text-white hover:bg-enduro-700 disabled:opacity-50"
+            >
+              {isLoading ? "Generating..." : "Generate Plan"}
+            </button>
+            {warnings.length > 0 && (
+              <button
+                type="button"
+                onClick={() => handleSubmit(true)}
+                disabled={isLoading || !raceDate}
+                className="rounded-lg border border-amber-300 bg-amber-50 px-6 py-2 text-sm font-medium text-amber-700 hover:bg-amber-100 disabled:opacity-50"
+              >
+                Proceed Anyway
+              </button>
+            )}
+          </div>
         )}
       </div>
     </div>

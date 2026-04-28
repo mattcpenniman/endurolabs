@@ -3,19 +3,29 @@
 // ============================================================
 // EnduroLab — Weekly Plan Card
 // ============================================================
-// Collapsible card showing a single week&apos;s schedule with
+// Collapsible card showing a single week's schedule with
 // daily workouts, mileage totals, and phase indicator.
+// Supports client-side workout swapping.
 // ============================================================
 
 import React from "react";
-import { useState } from "react";
-import { WeeklyPlan, DailyPlan } from "@/lib/training/models";
+import { useState, useEffect } from "react";
+import { WeeklyPlan, DailyPlan, Workout, WorkoutType } from "@/lib/training/models";
 
 interface WeeklyPlanCardProps {
   week: WeeklyPlan;
   isExpanded: boolean;
   onToggle: () => void;
 }
+
+// Swap targets a runner can choose from
+const swapOptions: Array<{ type: WorkoutType; label: string; emoji: string }> = [
+  { type: "easy", label: "Easy Run", emoji: "🏃" },
+  { type: "recovery", label: "Recovery Run", emoji: "🚶" },
+  { type: "cross_training", label: "Cross Training", emoji: "🚴" },
+  { type: "strength", label: "Strength", emoji: "💪" },
+  { type: "rest", label: "Rest Day", emoji: "😴" },
+];
 
 const workoutEmoji: Record<string, string> = {
   easy: "🏃",
@@ -26,6 +36,7 @@ const workoutEmoji: Record<string, string> = {
   long: "🦵",
   progression: "📈",
   strength: "💪",
+  cross_training: "🚴",
   rest: "😴",
 };
 
@@ -38,11 +49,14 @@ const workoutColor: Record<string, string> = {
   long: "text-purple-600",
   progression: "text-blue-500",
   strength: "text-pink-600",
+  cross_training: "text-teal-600",
   rest: "text-gray-400",
 };
 
-function renderDay(day: DailyPlan) {
-  if (day.isRestDay || !day.workout) {
+function renderDay(day: DailyPlan, isSwapped: boolean) {
+  const currentWorkout = day.workout;
+
+  if (day.isRestDay || !currentWorkout) {
     return (
       <div key={day.dayOfWeek} className="flex items-center gap-3 py-2">
         <span className="w-16 text-xs font-medium text-gray-400">{day.dayOfWeek.slice(0, 3)}</span>
@@ -59,16 +73,41 @@ function renderDay(day: DailyPlan) {
       <div className="flex-1 space-y-1">
         {/* Primary workout */}
         <div className="flex items-center gap-2">
-          <span className="text-lg">{workoutEmoji[day.workout.type] ?? "🏃"}</span>
+          <span className="text-lg">{workoutEmoji[currentWorkout.type] ?? "🏃"}</span>
           <div className="flex-1">
-            <p className={`text-sm font-medium ${workoutColor[day.workout.type] ?? "text-gray-700"}`}>
-              {day.workout.title}
+            <p className={`text-sm font-medium ${workoutColor[currentWorkout.type] ?? "text-gray-700"}`}>
+              {currentWorkout.title}
+              {isSwapped && <span className="ml-2 text-xs text-gray-400">(swapped)</span>}
             </p>
             <p className="text-xs text-gray-500">
-              {day.workout.totalDistance > 0 ? `${day.workout.totalDistance} mi · ` : ""}
-              {Math.floor(day.workout.estimatedDuration / 60)}h {day.workout.estimatedDuration % 60}min
+              {currentWorkout.totalDistance > 0 ? `${currentWorkout.totalDistance} mi · ` : ""}
+              {Math.floor(currentWorkout.estimatedDuration / 60)}h {currentWorkout.estimatedDuration % 60}min
             </p>
           </div>
+          {/* Swap dropdown */}
+          <select
+            defaultValue=""
+            aria-label={`Swap workout for ${day.dayOfWeek}`}
+            className="rounded border border-gray-200 bg-gray-50 px-2 py-1 text-xs text-gray-600 focus:border-enduro-500 focus:outline-none focus:ring-1 focus:ring-enduro-500/20"
+            onChange={(e) => {
+              const selectedType = e.target.value as WorkoutType;
+              if (!selectedType) return;
+
+              // Dispatch custom event for swap
+              window.dispatchEvent(
+                new CustomEvent("workout-swap", {
+                  detail: { dayOfWeek: day.dayOfWeek, workoutType: selectedType },
+                })
+              );
+            }}
+          >
+            <option value="" disabled>↻ Swap</option>
+            {swapOptions.map((opt) => (
+              <option key={opt.type} value={opt.type}>
+                {opt.emoji} {opt.label}
+              </option>
+            ))}
+          </select>
         </div>
         {/* Secondary workout (double-day) */}
         {hasSecondary && day.secondaryWorkout && (
@@ -91,6 +130,92 @@ function renderDay(day: DailyPlan) {
 }
 
 export default function WeeklyPlanCard({ week, isExpanded, onToggle }: WeeklyPlanCardProps) {
+  // Track swapped workouts by day-of-week key
+  const [swappedWorkouts, setSwappedWorkouts] = useState<Record<string, Workout | null>>({});
+
+  // Listen for swap events from child renders
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const customEvent = e as CustomEvent;
+      const { dayOfWeek, workoutType } = customEvent.detail as { dayOfWeek: string; workoutType: WorkoutType };
+
+      setSwappedWorkouts((prev) => {
+        // Create a placeholder workout for the swap
+        let swapped: Workout | null = null;
+        switch (workoutType) {
+          case "easy":
+            swapped = {
+              id: `swapped-easy-${dayOfWeek}`,
+              type: "easy",
+              title: "3 mi Easy Run",
+              description: "Steady, conversational-paced run.",
+              segments: [],
+              totalDistance: 3,
+              estimatedDuration: 30,
+              weeklyMileageContribution: 3,
+              intensityCategory: "easy",
+            };
+            break;
+          case "recovery":
+            swapped = {
+              id: `swapped-recovery-${dayOfWeek}`,
+              type: "recovery",
+              title: "2 mi Recovery Run",
+              description: "Very relaxed jog to promote recovery.",
+              segments: [],
+              totalDistance: 2,
+              estimatedDuration: 25,
+              weeklyMileageContribution: 2,
+              intensityCategory: "easy",
+            };
+            break;
+          case "cross_training":
+            swapped = {
+              id: `swapped-cross-${dayOfWeek}`,
+              type: "cross_training",
+              title: "45 min Cross Training",
+              description: "Low-impact cardio — cycling, swimming, elliptical.",
+              segments: [],
+              totalDistance: 0,
+              estimatedDuration: 45,
+              weeklyMileageContribution: 0,
+              intensityCategory: "easy",
+            };
+            break;
+          case "strength":
+            swapped = {
+              id: `swapped-strength-${dayOfWeek}`,
+              type: "strength",
+              title: "Strength Training (30 min)",
+              description: "Single-leg work, core, and hip stability.",
+              segments: [],
+              totalDistance: 0,
+              estimatedDuration: 30,
+              weeklyMileageContribution: 0,
+              intensityCategory: "moderate",
+            };
+            break;
+          case "rest":
+            swapped = null;
+            break;
+          default:
+            swapped = null;
+        }
+
+        return { ...prev, [dayOfWeek]: swapped };
+      });
+    };
+
+    window.addEventListener("workout-swap", handler);
+    return () => window.removeEventListener("workout-swap", handler);
+  }, []);
+
+  // Recalculate weekly mileage with swaps applied
+  const adjustedMileage = week.days.reduce((sum, day) => {
+    const workout = swappedWorkouts[day.dayOfWeek] ?? day.workout;
+    return sum + (workout?.weeklyMileageContribution ?? 0);
+  }, 0);
+
   return (
     <div className="overflow-hidden rounded-xl border border-gray-200 bg-white shadow-sm">
       {/* Header */}
@@ -105,7 +230,7 @@ export default function WeeklyPlanCard({ week, isExpanded, onToggle }: WeeklyPla
             Week {week.weekNumber}
           </span>
           <span className="text-sm font-medium text-gray-700">
-            {week.totalMileage} mi · Long: {week.longRunDistance} mi
+            {adjustedMileage} mi{Object.keys(swappedWorkouts).length > 0 ? " (adjusted)" : ""} · Long: {week.longRunDistance} mi
           </span>
           {week.isDownWeek && (
             <span className="text-xs text-green-600">Recovery Week</span>
@@ -124,9 +249,19 @@ export default function WeeklyPlanCard({ week, isExpanded, onToggle }: WeeklyPla
             </span>
           </div>
 
-          {/* Days */}
+          {/* Days — apply swaps */}
           <div className="divide-y divide-gray-50">
-            {week.days.map(renderDay)}
+            {week.days.map((day) => {
+              const swapped = swappedWorkouts[day.dayOfWeek];
+              const effectiveWorkout = swapped !== undefined ? swapped : day.workout;
+              const isSwapped = swapped !== undefined;
+              const adjustedDay: DailyPlan = {
+                ...day,
+                workout: effectiveWorkout,
+                isRestDay: swapped === null,
+              };
+              return renderDay(adjustedDay, isSwapped);
+            })}
           </div>
 
           {/* Intensity breakdown */}

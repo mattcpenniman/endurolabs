@@ -370,6 +370,36 @@ export function createRestDay(): Workout | null {
   return null;
 }
 
+// ─── Cross Training ─────────────────────────────────────────
+
+export function createCrossTraining(
+  week: number,
+  index: number,
+  duration: number = 45
+): Workout {
+  const segments: WorkoutSegment[] = [
+    {
+      description: `Cross-training session — ${duration} minutes`,
+      duration,
+      effort: "Moderate effort — cycling, swimming, elliptical, or pool run",
+      type: "cross_training",
+    },
+  ];
+
+  return {
+    id: makeId("cross_training", week, index),
+    type: "cross_training",
+    title: `${duration} min Cross Training`,
+    description:
+      "Low-impact cardio to maintain aerobic fitness while reducing joint stress. Cycling, swimming, elliptical, or pool run.",
+    segments,
+    totalDistance: 0,
+    estimatedDuration: duration,
+    weeklyMileageContribution: 0,
+    intensityCategory: "easy",
+  };
+}
+
 // ─── Public API ─────────────────────────────────────────────
 
 export const WorkoutLibrary = {
@@ -381,5 +411,6 @@ export const WorkoutLibrary = {
   createLongRun,
   createProgressionRun,
   createStrengthSession,
+  createCrossTraining,
   createRestDay,
 };

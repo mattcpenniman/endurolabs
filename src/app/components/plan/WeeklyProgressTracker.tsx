@@ -9,7 +9,7 @@
 
 import { useState } from "react";
 import { WeeklyPlan, MarathonPlan } from "@/lib/training/models";
-import { addLog, analyzeProgress } from "@/lib/training/progress-tracker";
+import { addLog, analyzeProgress, loadLogs } from "@/lib/training/progress-tracker";
 
 interface WeeklyProgressTrackerProps {
   plan: MarathonPlan;
@@ -22,8 +22,11 @@ export default function WeeklyProgressTracker({ plan }: WeeklyProgressTrackerPro
   const [feelRating, setFeelRating] = useState(5);
   const [adherence, setAdherence] = useState(100);
   const [notes, setNotes] = useState("");
+  const [refresh, setRefresh] = useState(0); // bump to reload logs
 
-  const progress = analyzeProgress(plan, []);
+  // Load logs fresh each render cycle
+  const logs = loadLogs(plan.id);
+  const progress = analyzeProgress(plan, logs);
   const currentWeekNum = plan.weeks[plan.weeks.length - 1]?.weekNumber ?? plan.totalWeeks;
 
   const handleSave = (weekNumber: number) => {
@@ -40,13 +43,20 @@ export default function WeeklyProgressTracker({ plan }: WeeklyProgressTrackerPro
     };
     addLog(plan.id, log);
     setEditingWeek(null);
+    setRefresh((r) => r + 1); // trigger reload
   };
 
   const getWeekStatus = (week: WeeklyPlan) => {
-    // In a real app, check logs here
+    const log = logs.find((l) => l.weekNumber === week.weekNumber);
+    if (log) return "logged";
     if (week.weekNumber > currentWeekNum) return "upcoming";
-    return "logged";
+    return "current";
   };
+
+  // Determine if adaptive volume reduction should be shown
+  const shouldSuggestReduction = progress.adjustmentSuggestions.some(
+    (s) => s.includes("reducing") || s.includes("back off") || s.includes("recovery week")
+  );
 
   return (
     <div className="rounded-2xl border border-gray-200 bg-white p-6 shadow-sm">
@@ -92,6 +102,7 @@ export default function WeeklyProgressTracker({ plan }: WeeklyProgressTrackerPro
             {plan.weeks.map((week) => {
               const status = getWeekStatus(week);
               const isCurrent = week.weekNumber === currentWeekNum;
+              const log = logs.find((l) => l.weekNumber === week.weekNumber);
 
               return (
                 <tr
@@ -106,29 +117,39 @@ export default function WeeklyProgressTracker({ plan }: WeeklyProgressTrackerPro
                   </td>
                   <td className="py-3 text-gray-700">{week.totalMileage} mi</td>
                   <td className="py-3 text-gray-700">
-                    {status === "logged" ? "—" : "—"}
+                    {log ? `${log.actualMileage} mi` : "—"}
                   </td>
                   <td className="py-3 text-gray-700">
-                    {week.longRunDistance} mi
+                    {log ? `${log.longRunActual} / ${week.longRunDistance} mi` : `${week.longRunDistance} mi`}
                   </td>
                   <td className="py-3">
-                    {status === "logged" ? (
-                      <span className="inline-block rounded-full bg-gray-100 px-2 py-0.5 text-xs">
-                        —
+                    {log ? (
+                      <span className={`inline-block rounded-full px-2 py-0.5 text-xs ${
+                        log.feelRating >= 7 ? "bg-green-100 text-green-700" :
+                        log.feelRating >= 4 ? "bg-amber-100 text-amber-700" :
+                        "bg-red-100 text-red-700"
+                      }`}>
+                        {log.feelRating}/10
                       </span>
                     ) : (
                       <span className="text-gray-400">—</span>
                     )}
                   </td>
                   <td className="py-3">
-                    {status === "logged" ? (
-                      <span className="text-gray-400">—</span>
+                    {log ? (
+                      <span className={`inline-block rounded-full px-2 py-0.5 text-xs ${
+                        log.adherence >= 80 ? "bg-green-100 text-green-700" :
+                        log.adherence >= 60 ? "bg-amber-100 text-amber-700" :
+                        "bg-red-100 text-red-700"
+                      }`}>
+                        {log.adherence}%
+                      </span>
                     ) : (
                       <span className="text-gray-400">—</span>
                     )}
                   </td>
                   <td className="py-3">
-                    {status === "upcoming" ? (
+                    {status !== "logged" ? (
                       <button
                         onClick={() => {
                           setEditingWeek(week.weekNumber);
@@ -143,7 +164,7 @@ export default function WeeklyProgressTracker({ plan }: WeeklyProgressTrackerPro
                         Log
                       </button>
                     ) : (
-                      <span className="text-xs text-gray-400">✓</span>
+                      <span className="text-xs text-green-600">✓ Logged</span>
                     )}
                   </td>
                 </tr>
