@@ -38,6 +38,7 @@ export default function OnboardingForm({ onSubmit, isLoading }: OnboardingFormPr
   const [trainingDays, setTrainingDays] = useState(5);
   const [restDay, setRestDay] = useState("Monday");
   const [longRunDays, setLongRunDays] = useState<string[]>(["Sunday"]);
+  const [runsPerWeek, setRunsPerWeek] = useState("");
 
   // Step 4: Preferences
   const [comfortLevel, setComfortLevel] = useState<"beginner" | "intermediate" | "advanced">("intermediate");
@@ -77,6 +78,7 @@ export default function OnboardingForm({ onSubmit, isLoading }: OnboardingFormPr
       strengthTrainingAvailability: strength,
       peakMileageOverride: peakMileageOverride ? parseInt(peakMileageOverride, 10) : null,
       weeksOverride: weeksOverride ? parseInt(weeksOverride, 10) : null,
+      runsPerWeekOverride: runsPerWeek ? parseInt(runsPerWeek, 10) : null,
     };
     onSubmit(profile);
   };
@@ -264,6 +266,24 @@ export default function OnboardingForm({ onSubmit, isLoading }: OnboardingFormPr
               onChange={(e) => setTrainingDays(parseInt(e.target.value))}
               className="w-full accent-enduro-500"
             />
+          </div>
+
+          <div>
+            <label className="mb-2 block text-sm font-medium text-gray-700">
+              Runs per Week (optional)
+            </label>
+            <input
+              type="number"
+              min={3}
+              max={10}
+              placeholder={`Defaults to ${trainingDays} (one per training day)`}
+              value={runsPerWeek}
+              onChange={(e) => setRunsPerWeek(e.target.value)}
+              className="w-full rounded-lg border border-gray-300 px-4 py-2 focus:border-enduro-500 focus:outline-none focus:ring-2 focus:ring-enduro-500/20"
+            />
+            <p className="mt-1 text-xs text-gray-500">
+              Range: 3–10. Setting higher than training days creates AM/PM double-days.
+            </p>
           </div>
 
           <div>

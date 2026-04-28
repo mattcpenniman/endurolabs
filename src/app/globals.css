@@ -15,6 +15,14 @@
   --color-border: #e5e7eb;
 }
 
+[data-theme="dark"] {
+  --color-bg: #0f172a;
+  --color-bg-secondary: #1e293b;
+  --color-text: #f1f5f9;
+  --color-text-secondary: #94a3b8;
+  --color-border: #334155;
+}
+
 /* ─── Base Reset ──── */
 html {
   scroll-behavior: smooth;

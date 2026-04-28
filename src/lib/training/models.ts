@@ -66,6 +66,7 @@ export interface RunnerProfile {
   // User-adjustable overrides
   peakMileageOverride?: number | null;    // miles — caps peak weekly mileage
   weeksOverride?: number | null;          // total weeks — overrides auto-calc from race date
+  runsPerWeekOverride?: number | null;    // runs per week (3–10) — >trainingDays creates double-days
 }
 
 // ─── Pace Zones ────────────────────────────────────────────
@@ -132,6 +133,7 @@ export interface DailyPlan {
   date: string;              // ISO date
   dayOfWeek: string;
   workout: Workout | null;
+  secondaryWorkout?: Workout | null;  // AM/PM double-day run
   isRestDay: boolean;
   plannedMileage: number;
 }

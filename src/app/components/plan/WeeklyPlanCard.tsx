@@ -51,18 +51,40 @@ function renderDay(day: DailyPlan) {
     );
   }
 
+  const hasSecondary = !!day.secondaryWorkout;
+
   return (
-    <div key={day.dayOfWeek} className="flex items-center gap-3 py-2">
-      <span className="w-16 text-xs font-medium text-gray-500">{day.dayOfWeek.slice(0, 3)}</span>
-      <span className="text-lg">{workoutEmoji[day.workout.type] ?? "🏃"}</span>
-      <div className="flex-1">
-        <p className={`text-sm font-medium ${workoutColor[day.workout.type] ?? "text-gray-700"}`}>
-          {day.workout.title}
-        </p>
-        <p className="text-xs text-gray-500">
-          {day.workout.totalDistance > 0 ? `${day.workout.totalDistance} mi · ` : ""}
-          {Math.floor(day.workout.estimatedDuration / 60)}h {day.workout.estimatedDuration % 60}min
-        </p>
+    <div key={day.dayOfWeek} className="flex items-start gap-3 py-2">
+      <span className="w-16 shrink-0 text-xs font-medium text-gray-500 pt-0.5">{day.dayOfWeek.slice(0, 3)}</span>
+      <div className="flex-1 space-y-1">
+        {/* Primary workout */}
+        <div className="flex items-center gap-2">
+          <span className="text-lg">{workoutEmoji[day.workout.type] ?? "🏃"}</span>
+          <div className="flex-1">
+            <p className={`text-sm font-medium ${workoutColor[day.workout.type] ?? "text-gray-700"}`}>
+              {day.workout.title}
+            </p>
+            <p className="text-xs text-gray-500">
+              {day.workout.totalDistance > 0 ? `${day.workout.totalDistance} mi · ` : ""}
+              {Math.floor(day.workout.estimatedDuration / 60)}h {day.workout.estimatedDuration % 60}min
+            </p>
+          </div>
+        </div>
+        {/* Secondary workout (double-day) */}
+        {hasSecondary && day.secondaryWorkout && (
+          <div className="flex items-center gap-2 pl-7">
+            <span className="text-base">🏃</span>
+            <div className="flex-1">
+              <p className={`text-sm font-medium ${workoutColor[day.secondaryWorkout.type] ?? "text-gray-700"}`}>
+                {day.secondaryWorkout.title}
+              </p>
+              <p className="text-xs text-gray-500">
+                {day.secondaryWorkout.totalDistance > 0 ? `${day.secondaryWorkout.totalDistance} mi · ` : ""}
+                {Math.floor(day.secondaryWorkout.estimatedDuration / 60)}h {day.secondaryWorkout.estimatedDuration % 60}min
+              </p>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );

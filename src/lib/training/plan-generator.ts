@@ -219,7 +219,8 @@ function assignWorkoutsForWeek(
   powerZones: PowerZones | undefined,
   comfortLevel: "beginner" | "intermediate" | "advanced",
   _strengthAvailability: "none" | "light" | "regular",
-  isDownWeek: boolean
+  isDownWeek: boolean,
+  runsPerWeek: number
 ): DailyPlan[] {
   const days: DailyPlan[] = [];
   const allDays = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
@@ -230,6 +231,9 @@ function assignWorkoutsForWeek(
   // Determine workout complexity based on comfort level
   const canDoIntervals = comfortLevel !== "beginner" || week > 4;
   const canDoThreshold = comfortLevel !== "beginner" || week > 2;
+
+  // How many double-days? (runs exceeding training days)
+  const doubleDayCount = Math.max(0, runsPerWeek - trainingDays.length);
 
   // Distribute workouts across training days
   let workoutIndex = 0;
@@ -318,6 +322,24 @@ function assignWorkoutsForWeek(
         plannedMileage: easyMilePerDay,
       });
       easyDaysUsed++;
+    }
+  }
+
+  // 4. Add double-day secondary runs (shorter easy runs on existing training days)
+  if (doubleDayCount > 0) {
+    const doubleDayMiles = Math.min(4, Math.round(remainingMileage / doubleDayCount));
+    const candidateDays = days.filter((d) => !d.isRestDay && d.workout && d.secondaryWorkout !== undefined);
+
+    for (let i = 0; i < Math.min(doubleDayCount, candidateDays.length); i++) {
+      const secondary = WorkoutLibrary.createEasyRun(
+        week,
+        workoutIndex++,
+        doubleDayMiles,
+        paceZones,
+        powerZones
+      );
+      candidateDays[i].secondaryWorkout = secondary;
+      candidateDays[i].plannedMileage += doubleDayMiles;
     }
   }
 
@@ -425,6 +447,11 @@ export function generatePlan(profile: RunnerProfile): MarathonPlan {
   );
   const longRunDay = profile.availableLongRunDays[0] ?? "Sunday";
 
+  // Runs per week: user override clamped 3–10, defaults to training days count
+  const runsPerWeek = profile.runsPerWeekOverride
+    ? Math.max(3, Math.min(10, profile.runsPerWeekOverride))
+    : profile.trainingDaysPerWeek;
+
   // Generate weeks
   const weeks: WeeklyPlan[] = [];
 
@@ -445,7 +472,8 @@ export function generatePlan(profile: RunnerProfile): MarathonPlan {
       powerZones,
       profile.comfortLevelWithWorkouts,
       profile.strengthTrainingAvailability,
-      isDownWeek
+      isDownWeek,
+      runsPerWeek
     );
 
     // Calculate dates
@@ -480,6 +508,25 @@ export function generatePlan(profile: RunnerProfile): MarathonPlan {
             break;
           case "vo2":
             intensityDist.vo2 += d.workout.totalDistance;
+            break;
+        }
+      }
+      // Count secondary (double-day) workouts too
+      if (d.secondaryWorkout) {
+        switch (d.secondaryWorkout.type) {
+          case "easy":
+          case "long":
+          case "recovery":
+            intensityDist.easy += d.secondaryWorkout.totalDistance;
+            break;
+          case "threshold":
+            intensityDist.threshold += d.secondaryWorkout.totalDistance;
+            break;
+          case "marathon_pace":
+            intensityDist.marathon += d.secondaryWorkout.totalDistance;
+            break;
+          case "vo2":
+            intensityDist.vo2 += d.secondaryWorkout.totalDistance;
             break;
         }
       }

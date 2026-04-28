@@ -42,6 +42,8 @@ export default function PlanPage(): React.ReactNode {
   const [expectedTempF, setExpectedTempF] = useState(50);
   const [savedPlans, setSavedPlans] = useState<SavedPlanRow[]>([]);
   const [isSaving, setIsSaving] = useState(false);
+  const [runsPerWeek, setRunsPerWeek] = useState<number | null>(null);
+  const [weeksOverride, setWeeksOverride] = useState<number | null>(null);
 
   // Load saved plans on mount
   useEffect(() => {
@@ -92,6 +94,16 @@ export default function PlanPage(): React.ReactNode {
       }
 
       setPlan(generatedPlan);
+      setRunsPerWeek(
+        profile.runsPerWeekOverride
+          ? Math.max(3, Math.min(10, profile.runsPerWeekOverride))
+          : profile.trainingDaysPerWeek
+      );
+      setWeeksOverride(
+        profile.weeksOverride
+          ? Math.max(14, Math.min(28, profile.weeksOverride))
+          : generatedPlan.totalWeeks
+      );
     } catch (err) {
       setError(err instanceof Error ? err.message : "An unexpected error occurred");
     } finally {
@@ -134,8 +146,94 @@ export default function PlanPage(): React.ReactNode {
       if (!res.ok) throw new Error("Failed to load plan");
       const saved = await res.json();
       setPlan(saved.planData);
+      setRunsPerWeek(
+        saved.runnerProfile.runsPerWeekOverride
+          ? Math.max(3, Math.min(10, saved.runnerProfile.runsPerWeekOverride))
+          : saved.runnerProfile.trainingDaysPerWeek
+      );
+      setWeeksOverride(
+        saved.runnerProfile.weeksOverride
+          ? Math.max(14, Math.min(28, saved.runnerProfile.weeksOverride))
+          : saved.planData.totalWeeks
+      );
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to load plan");
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleAdjustRunsPerWeek = async (newRuns: number) => {
+    if (!plan) return;
+    setIsLoading(true);
+    try {
+      const profile = { ...plan.runnerProfile, runsPerWeekOverride: newRuns };
+      const response = await fetch("/api/plan/generate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(profile),
+      });
+      if (!response.ok) throw new Error("Failed to regenerate plan");
+      const regenerated = await response.json();
+      setPlan(regenerated);
+      setRunsPerWeek(newRuns);
+      // Auto-save
+      const saveRes = await fetch("/api/plan/save", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          id: regenerated.id,
+          runnerProfile: regenerated.runnerProfile,
+          planData: regenerated,
+          peakMileageOverride: profile.peakMileageOverride,
+          weeksOverride: profile.weeksOverride,
+          raceName: profile.raceName || null,
+        }),
+      });
+      if (saveRes.ok) {
+        const listRes = await fetch("/api/plan/list");
+        if (listRes.ok) setSavedPlans(await listRes.json());
+      }
+    } catch {
+      // Silently fail
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleAdjustWeeks = async (newWeeks: number) => {
+    if (!plan) return;
+    setIsLoading(true);
+    try {
+      const profile = { ...plan.runnerProfile, weeksOverride: newWeeks };
+      const response = await fetch("/api/plan/generate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(profile),
+      });
+      if (!response.ok) throw new Error("Failed to regenerate plan");
+      const regenerated = await response.json();
+      setPlan(regenerated);
+      setWeeksOverride(newWeeks);
+      // Auto-save
+      const saveRes = await fetch("/api/plan/save", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          id: regenerated.id,
+          runnerProfile: regenerated.runnerProfile,
+          planData: regenerated,
+          peakMileageOverride: profile.peakMileageOverride,
+          weeksOverride: profile.weeksOverride,
+          raceName: profile.raceName || null,
+        }),
+      });
+      if (saveRes.ok) {
+        const listRes = await fetch("/api/plan/list");
+        if (listRes.ok) setSavedPlans(await listRes.json());
+      }
+    } catch {
+      // Silently fail
     } finally {
       setIsLoading(false);
     }
@@ -286,7 +384,55 @@ export default function PlanPage(): React.ReactNode {
                 : `${plan.runnerProfile.goalMarathonTime}:00`} goal
             </p>
           </div>
-          <div className="flex gap-2">
+          <div className="flex items-center gap-2">
+            {/* Runs per week control */}
+            {runsPerWeek !== null && (
+              <div className="flex items-center gap-1 rounded-lg border border-gray-300 bg-white pr-3">
+                <button
+                  onClick={() => handleAdjustRunsPerWeek(Math.max(3, runsPerWeek - 1))}
+                  disabled={runsPerWeek <= 3 || isLoading}
+                  className="px-2 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-30"
+                  aria-label="Decrease runs per week"
+                >
+                  −
+                </button>
+                <span className="min-w-[2.5rem] text-center text-sm font-semibold text-gray-900">
+                  {runsPerWeek} runs/wk
+                </span>
+                <button
+                  onClick={() => handleAdjustRunsPerWeek(Math.min(10, runsPerWeek + 1))}
+                  disabled={runsPerWeek >= 10 || isLoading}
+                  className="px-2 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-30"
+                  aria-label="Increase runs per week"
+                >
+                  +
+                </button>
+              </div>
+            )}
+            {/* Weeks control */}
+            {weeksOverride !== null && (
+              <div className="flex items-center gap-1 rounded-lg border border-gray-300 bg-white pr-3">
+                <button
+                  onClick={() => handleAdjustWeeks(Math.max(14, weeksOverride - 1))}
+                  disabled={weeksOverride <= 14 || isLoading}
+                  className="px-2 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-30"
+                  aria-label="Decrease weeks"
+                >
+                  −
+                </button>
+                <span className="min-w-[2.5rem] text-center text-sm font-semibold text-gray-900">
+                  {weeksOverride} wks
+                </span>
+                <button
+                  onClick={() => handleAdjustWeeks(Math.min(28, weeksOverride + 1))}
+                  disabled={weeksOverride >= 28 || isLoading}
+                  className="px-2 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-30"
+                  aria-label="Increase weeks"
+                >
+                  +
+                </button>
+              </div>
+            )}
             <button
               onClick={handleSavePlan}
               disabled={isSaving}
