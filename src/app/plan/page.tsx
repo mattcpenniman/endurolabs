@@ -9,21 +9,47 @@
 // ============================================================
 
 import React from "react";
-import { useState } from "react";
-import { RunnerProfile, MarathonPlan } from "@/lib/training/models";
+import { useState, useEffect } from "react";
+import { RunnerProfile, MarathonPlan, RaceDayPlan } from "@/lib/training/models";
 import OnboardingForm from "@/app/components/onboarding/OnboardingForm";
 import PlanOverviewCard from "@/app/components/plan/PlanOverviewCard";
 import PaceZonesCard from "@/app/components/plan/PaceZonesCard";
 import WeeklyPlanCard from "@/app/components/plan/WeeklyPlanCard";
+import RaceDayPlanCard from "@/app/components/plan/RaceDayPlanCard";
+import WeeklyProgressTracker from "@/app/components/plan/WeeklyProgressTracker";
 import MileageTrendChart from "@/app/components/charts/MileageTrendChart";
 import LongRunProgressionChart from "@/app/components/charts/LongRunProgressionChart";
 import IntensityDistributionChart from "@/app/components/charts/IntensityDistributionChart";
+import { generateRaceDayPlan } from "@/lib/training/race-day-plan";
+
+// Shape of a saved plan row from the database
+interface SavedPlanRow {
+  id: string;
+  runnerProfile: RunnerProfile;
+  planData: MarathonPlan;
+  peakMileageOverride: number | null;
+  weeksOverride: number | null;
+  raceName: string | null;
+  created_at: string;
+}
 
 export default function PlanPage(): React.ReactNode {
   const [plan, setPlan] = useState<MarathonPlan | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [expandedWeeks, setExpandedWeeks] = useState<Set<number>>(new Set());
   const [error, setError] = useState<string | null>(null);
+  const [pacingStrategy, setPacingStrategy] = useState<"even" | "negative" | "positive" | "progressive">("even");
+  const [expectedTempF, setExpectedTempF] = useState(50);
+  const [savedPlans, setSavedPlans] = useState<SavedPlanRow[]>([]);
+  const [isSaving, setIsSaving] = useState(false);
+
+  // Load saved plans on mount
+  useEffect(() => {
+    fetch("/api/plan/list")
+      .then((res) => res.json())
+      .then((data) => setSavedPlans(data))
+      .catch(() => setSavedPlans([]));
+  }, []);
 
   const handleGenerate = async (profile: RunnerProfile) => {
     setIsLoading(true);
@@ -41,9 +67,75 @@ export default function PlanPage(): React.ReactNode {
       }
 
       const generatedPlan = await response.json();
+
+      // Auto-save to database
+      const saveRes = await fetch("/api/plan/save", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          id: generatedPlan.id,
+          runnerProfile: generatedPlan.runnerProfile,
+          planData: generatedPlan,
+          peakMileageOverride: profile.peakMileageOverride,
+          weeksOverride: profile.weeksOverride,
+          raceName: profile.raceName || null,
+        }),
+      });
+
+      if (saveRes.ok) {
+        const saveData = await saveRes.json();
+        // Refresh saved plans list
+        const listRes = await fetch("/api/plan/list");
+        if (listRes.ok) {
+          setSavedPlans(await listRes.json());
+        }
+      }
+
       setPlan(generatedPlan);
     } catch (err) {
       setError(err instanceof Error ? err.message : "An unexpected error occurred");
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleSavePlan = async () => {
+    if (!plan) return;
+    setIsSaving(true);
+    try {
+      await fetch("/api/plan/save", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          id: plan.id,
+          runnerProfile: plan.runnerProfile,
+          planData: plan,
+          peakMileageOverride: plan.runnerProfile.peakMileageOverride,
+          weeksOverride: plan.runnerProfile.weeksOverride,
+          raceName: plan.runnerProfile.raceName || null,
+        }),
+      });
+      // Refresh list
+      const listRes = await fetch("/api/plan/list");
+      if (listRes.ok) {
+        setSavedPlans(await listRes.json());
+      }
+    } catch {
+      // Silently fail — plan is still usable in session
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  const handleLoadPlan = async (planId: string) => {
+    setIsLoading(true);
+    try {
+      const res = await fetch(`/api/plan/${planId}`);
+      if (!res.ok) throw new Error("Failed to load plan");
+      const saved = await res.json();
+      setPlan(saved.planData);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to load plan");
     } finally {
       setIsLoading(false);
     }
@@ -99,6 +191,45 @@ export default function PlanPage(): React.ReactNode {
               Fill in your profile below and we&apos;ll create a personalized marathon plan.
             </p>
           </div>
+
+          {/* Saved plans list */}
+          {savedPlans.length > 0 && (
+            <div className="mb-8">
+              <h2 className="text-xl font-semibold text-gray-800 mb-3">Saved Plans</h2>
+              <div className="space-y-2">
+                {savedPlans.map((row) => {
+                  const goalMin = row.runnerProfile.goalMarathonTime;
+                  const goalStr =
+                    goalMin / 60 >= 1
+                      ? `${Math.floor(goalMin / 60)}:${String(goalMin % 60).padStart(2, "0")}`
+                      : `${goalMin}:00`;
+                  const created = new Date(row.created_at).toLocaleDateString();
+                  return (
+                    <div
+                      key={row.id}
+                      className="flex items-center justify-between rounded-lg border border-gray-200 bg-white p-4 hover:border-enduro-300"
+                    >
+                      <div>
+                        <p className="font-medium text-gray-900">
+                          {row.raceName || `Goal ${goalStr}`}
+                        </p>
+                        <p className="text-sm text-gray-500">
+                          {row.planData.totalWeeks} weeks · Peak {row.planData.peakWeeklyMileage} mi/week · Created {created}
+                        </p>
+                      </div>
+                      <button
+                        onClick={() => handleLoadPlan(row.id)}
+                        className="rounded-lg bg-enduro-600 px-4 py-2 text-sm font-medium text-white hover:bg-enduro-700"
+                      >
+                        Load
+                      </button>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
           <OnboardingForm onSubmit={handleGenerate} isLoading={isLoading} />
           {error && (
             <div className="mt-4 rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-700">
@@ -157,6 +288,13 @@ export default function PlanPage(): React.ReactNode {
           </div>
           <div className="flex gap-2">
             <button
+              onClick={handleSavePlan}
+              disabled={isSaving}
+              className="rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50"
+            >
+              💾 Save
+            </button>
+            <button
               onClick={handleExportCalendar}
               className="rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50"
             >
@@ -188,6 +326,51 @@ export default function PlanPage(): React.ReactNode {
         </div>
         <div className="mb-8">
           <IntensityDistributionChart plan={plan} />
+        </div>
+
+        {/* Race Day Plan */}
+        <div className="mb-8">
+          <div className="mb-4 flex items-center justify-between">
+            <h2 className="text-2xl font-bold text-gray-900">Race Day Plan</h2>
+            <div className="flex gap-3">
+              <select
+                value={pacingStrategy}
+                onChange={(e) => setPacingStrategy(e.target.value as typeof pacingStrategy)}
+                className="rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-700 focus:border-enduro-500 focus:outline-none focus:ring-2 focus:ring-enduro-500/20"
+              >
+                <option value="even">Even Pacing</option>
+                <option value="negative">Negative Split</option>
+                <option value="progressive">Progressive</option>
+                <option value="positive">Positive Split</option>
+              </select>
+              <div className="flex items-center gap-2">
+                <label className="text-sm text-gray-600">Temp (°F):</label>
+                <input
+                  type="number"
+                  value={expectedTempF}
+                  onChange={(e) => setExpectedTempF(parseInt(e.target.value) || 50)}
+                  min="-10"
+                  max="110"
+                  className="w-16 rounded-lg border border-gray-300 px-2 py-2 text-sm text-center focus:border-enduro-500 focus:outline-none focus:ring-2 focus:ring-enduro-500/20"
+                />
+              </div>
+            </div>
+          </div>
+          {plan && (
+            <RaceDayPlanCard
+              plan={generateRaceDayPlan(
+                plan.runnerProfile.goalMarathonTime,
+                plan.runnerProfile.raceDate,
+                expectedTempF,
+                pacingStrategy
+              )}
+            />
+          )}
+        </div>
+
+        {/* Weekly progress tracker */}
+        <div className="mb-8">
+          <WeeklyProgressTracker plan={plan} />
         </div>
 
         {/* Weekly plan */}

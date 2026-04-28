@@ -2,15 +2,19 @@
 
 A science-backed marathon training planner that generates personalized, week-by-week training plans based on runner profiles, pace zones, and goal race times. Built around Daniels' Running Formula methodology with Apple Watch power data integration.
 
+Plans are persisted to PostgreSQL so you can load and revisit them across sessions.
+
 ## Features
 
 - **Personalized plans** — Based on your current fitness, PRs, weekly mileage, and race date
-- **Pace zones** — Easy, recovery, threshold, VO2 max, and marathon pace calculated via VDTO estimation
+- **Pace zones** — Easy, recovery, threshold, VO2 max, and marathon pace calculated via VDOT estimation
 - **Power zones** — Optional Apple Watch running power equivalents
 - **Visual charts** — Mileage trends, long run progression, intensity distribution
 - **Calendar export** — Download your plan as an `.ics` file for Google/Apple/Outlook Calendar
 - **Goal assessment** — Feasibility rating (Feasible / Plausible / Ambitious / Unrealistic) with risk warnings
 - **Adjustment guidelines** — Built-in rules for fatigue, illness, injury, and sleep
+- **User overrides** — Adjust peak weekly mileage and training week count to suit your schedule
+- **Plan persistence** — Save and reload plans across sessions via PostgreSQL
 
 ## Tech Stack
 

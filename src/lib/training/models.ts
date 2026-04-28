@@ -46,6 +46,7 @@ export interface RunnerProfile {
   currentHalfMarathonPR: number | null;   // minutes
   goalMarathonTime: number;               // minutes
   raceDate: string;                       // ISO date string
+  raceName?: string;                      // optional label for the race
   trainingDaysPerWeek: number;
   preferredRestDay: string;               // "Monday", "Tuesday", etc.
   recentInjuryHistory: string;            // free text
@@ -62,6 +63,9 @@ export interface RunnerProfile {
   comfortLevelWithWorkouts: "beginner" | "intermediate" | "advanced";
   availableLongRunDays: string[];         // e.g. ["Sunday", "Saturday"]
   strengthTrainingAvailability: "none" | "light" | "regular";
+  // User-adjustable overrides
+  peakMileageOverride?: number | null;    // miles — caps peak weekly mileage
+  weeksOverride?: number | null;          // total weeks — overrides auto-calc from race date
 }
 
 // ─── Pace Zones ────────────────────────────────────────────
@@ -197,6 +201,70 @@ export interface AdjustmentRule {
   condition: string;
   action: string;
   severity: "low" | "medium" | "high";
+}
+
+// ─── Weekly Progress Tracking ───────────────────────────────
+
+export interface WeeklyLog {
+  weekNumber: number;
+  actualMileage: number;
+  plannedMileage: number;
+  longRunActual: number;
+  longRunPlanned: number;
+  feelRating: number;           // 1-10 how the week felt
+  adherence: number;            // 0-100 % of planned workouts completed
+  notes: string;
+  loggedAt: string;             // ISO timestamp
+}
+
+export interface WeeklyProgress {
+  logs: WeeklyLog[];
+  currentWeek: number;
+  totalWeeks: number;
+  averageFeel: number;
+  averageAdherence: number;
+  projectedPeakMileage: number;
+  adjustmentSuggestions: string[];
+}
+
+// ─── Race Day Plan ────────────────────────────────────────
+
+export interface RaceSplit {
+  mile: number;
+  targetPace: number;       // min/mile
+  targetTime: number;       // cumulative minutes
+  cumulativeDistance: number;
+  effort: string;
+  notes: string;
+}
+
+export interface RaceDayPlan {
+  raceDate: string;
+  goalTime: number;         // total minutes
+  goalPace: number;         // min/mile
+  splits: RaceSplit[];
+  nutritionPlan: NutritionCue[];
+  weatherAdjustments: WeatherAdjustment[];
+  preRaceRoutine: PreRaceCue[];
+  pacingStrategy: "even" | "negative" | "positive" | "progressive";
+}
+
+export interface NutritionCue {
+  mile: number;
+  type: "fuel" | "fluid" | "electrolyte";
+  description: string;
+}
+
+export interface WeatherAdjustment {
+  condition: string;
+  threshold: number;        // temperature in F
+  adjustment: string;
+  paceDelta: number;        // seconds per mile to add/subtract
+}
+
+export interface PreRaceCue {
+  timeBeforeStart: number;  // minutes before race
+  description: string;
 }
 
 // ─── Plan Metadata ─────────────────────────────────────────

@@ -46,7 +46,10 @@ const DAY_INDEX: Record<string, number> = {
 
 // ─── Week Count Calculation ─────────────────────────────────
 
-function calculateWeeks(raceDate: string): number {
+function calculateWeeks(raceDate: string, weeksOverride?: number | null): number {
+  if (weeksOverride) {
+    return Math.max(MIN_WEEKS, Math.min(MAX_WEEKS, weeksOverride));
+  }
   const weeks = dayjs(raceDate).diff(dayjs(), "week", true);
   return Math.max(MIN_WEEKS, Math.min(MAX_WEEKS, Math.floor(weeks)));
 }
@@ -405,13 +408,16 @@ function getPhaseForWeek(week: number, phases: PhaseInfo[]): TrainingPhase {
 // ─── Main Plan Generation ──────────────────────────────────
 
 export function generatePlan(profile: RunnerProfile): MarathonPlan {
-  const totalWeeks = calculateWeeks(profile.raceDate);
+  const totalWeeks = calculateWeeks(profile.raceDate, profile.weeksOverride);
   const phases = dividePhases(totalWeeks);
   const assessment = assessGoal(profile);
   const paceZones = calculatePaceZones(profile);
   const powerZones = calculatePowerZones(profile, paceZones);
 
-  const peakMileage = assessment.recommendedPeakMileage;
+  // Use user override if set, otherwise fall back to assessment recommendation
+  const peakMileage = profile.peakMileageOverride
+    ? Math.max(10, Math.min(120, profile.peakMileageOverride))
+    : assessment.recommendedPeakMileage;
   const trainingDays = selectTrainingDays(
     profile.trainingDaysPerWeek,
     profile.preferredRestDay,

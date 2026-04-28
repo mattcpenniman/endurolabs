@@ -24,6 +24,7 @@ export default function OnboardingForm({ onSubmit, isLoading }: OnboardingFormPr
   // Step 1: Goal & timing
   const [goalTime, setGoalTime] = useState({ hours: 4, minutes: 0 });
   const [raceDate, setRaceDate] = useState("");
+  const [weeksOverride, setWeeksOverride] = useState("");
 
   // Step 2: Current fitness
   const [currentMileage, setCurrentMileage] = useState(20);
@@ -31,6 +32,7 @@ export default function OnboardingForm({ onSubmit, isLoading }: OnboardingFormPr
   const [marathonPR, setMarathonPR] = useState("");
   const [halfPR, setHalfPR] = useState("");
   const [longestRun, setLongestRun] = useState(8);
+  const [peakMileageOverride, setPeakMileageOverride] = useState("");
 
   // Step 3: Schedule
   const [trainingDays, setTrainingDays] = useState(5);
@@ -73,6 +75,8 @@ export default function OnboardingForm({ onSubmit, isLoading }: OnboardingFormPr
       comfortLevelWithWorkouts: comfortLevel,
       availableLongRunDays: longRunDays,
       strengthTrainingAvailability: strength,
+      peakMileageOverride: peakMileageOverride ? parseInt(peakMileageOverride, 10) : null,
+      weeksOverride: weeksOverride ? parseInt(weeksOverride, 10) : null,
     };
     onSubmit(profile);
   };
@@ -136,6 +140,24 @@ export default function OnboardingForm({ onSubmit, isLoading }: OnboardingFormPr
               min={new Date().toISOString().split("T")[0]}
               className="w-full rounded-lg border border-gray-300 px-4 py-2 focus:border-enduro-500 focus:outline-none focus:ring-2 focus:ring-enduro-500/20"
             />
+          </div>
+
+          <div>
+            <label className="mb-2 block text-sm font-medium text-gray-700">
+              Training Weeks (optional)
+            </label>
+            <input
+              type="number"
+              min={14}
+              max={28}
+              placeholder="Auto-calculated from race date"
+              value={weeksOverride}
+              onChange={(e) => setWeeksOverride(e.target.value)}
+              className="w-full rounded-lg border border-gray-300 px-4 py-2 focus:border-enduro-500 focus:outline-none focus:ring-2 focus:ring-enduro-500/20"
+            />
+            <p className="mt-1 text-xs text-gray-500">
+              Leave blank to auto-calculate. Range: 14–28 weeks.
+            </p>
           </div>
         </div>
       )}
@@ -203,6 +225,24 @@ export default function OnboardingForm({ onSubmit, isLoading }: OnboardingFormPr
               onChange={(e) => setLongestRun(parseInt(e.target.value) || 1)}
               className="w-full rounded-lg border border-gray-300 px-4 py-2 focus:border-enduro-500 focus:outline-none focus:ring-2 focus:ring-enduro-500/20"
             />
+          </div>
+
+          <div>
+            <label className="mb-2 block text-sm font-medium text-gray-700">
+              Peak Weekly Mileage Override (optional)
+            </label>
+            <input
+              type="number"
+              min={10}
+              max={120}
+              placeholder="Auto-recommended based on goal time"
+              value={peakMileageOverride}
+              onChange={(e) => setPeakMileageOverride(e.target.value)}
+              className="w-full rounded-lg border border-gray-300 px-4 py-2 focus:border-enduro-500 focus:outline-none focus:ring-2 focus:ring-enduro-500/20"
+            />
+            <p className="mt-1 text-xs text-gray-500">
+              Leave blank for auto-recommendation. Range: 10–120 mi/week.
+            </p>
           </div>
         </div>
       )}
