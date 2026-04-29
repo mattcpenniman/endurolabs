@@ -13,9 +13,18 @@ interface IntensityDistributionChartProps {
   plan: MarathonPlan;
 }
 
+function formatWeekEndDate(date: string): string {
+  return new Intl.DateTimeFormat("en-US", {
+    month: "short",
+    day: "numeric",
+  }).format(new Date(date));
+}
+
 export default function IntensityDistributionChart({ plan }: IntensityDistributionChartProps) {
   const data = plan.weeks.map((week) => ({
     week: week.weekNumber,
+    weekLabel: `W${week.weekNumber} · ${formatWeekEndDate(week.endDate)}`,
+    weekEndDate: formatWeekEndDate(week.endDate),
     easy: Math.round(week.intensityDistribution.easy),
     threshold: Math.round(week.intensityDistribution.threshold),
     marathon: Math.round(week.intensityDistribution.marathon),
@@ -30,9 +39,10 @@ export default function IntensityDistributionChart({ plan }: IntensityDistributi
           <BarChart data={data}>
             <CartesianGrid strokeDasharray="3 3" stroke="#f3f4f6" />
             <XAxis
-              dataKey="week"
+              dataKey="weekLabel"
               tick={{ fontSize: 12, fill: "#9ca3af" }}
               axisLine={{ stroke: "#e5e7eb" }}
+              interval="preserveStartEnd"
             />
             <YAxis
               tick={{ fontSize: 12, fill: "#9ca3af" }}
@@ -40,6 +50,10 @@ export default function IntensityDistributionChart({ plan }: IntensityDistributi
             />
             <Tooltip
               contentStyle={{ borderRadius: "8px", border: "1px solid #e5e7eb", fontSize: 13 }}
+              labelFormatter={(_, payload) => {
+                const point = payload?.[0]?.payload as { week: number; weekEndDate: string } | undefined;
+                return point ? `Week ${point.week} ending ${point.weekEndDate}` : "";
+              }}
             />
             <Legend wrapperStyle={{ fontSize: 12 }} />
             <Bar dataKey="easy" stackId="a" fill="#22c55e" name="Easy" />

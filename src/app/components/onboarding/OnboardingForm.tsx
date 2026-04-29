@@ -46,6 +46,7 @@ export default function OnboardingForm({ onSubmit, isLoading }: OnboardingFormPr
   const [warnings, setWarnings] = useState<string[]>([]);
 
   // Step 1: Goal & timing
+  const [planName, setPlanName] = useState("");
   const [goalTime, setGoalTime] = useState({ hours: 4, minutes: 0 });
   const [raceDate, setRaceDate] = useState("");
   const [weeksOverride, setWeeksOverride] = useState("");
@@ -88,6 +89,7 @@ export default function OnboardingForm({ onSubmit, isLoading }: OnboardingFormPr
       currentHalfMarathonPR: halfPR ? parseInt(halfPR, 10) : null,
       goalMarathonTime: goalMinutes,
       raceDate,
+      raceName: planName.trim() || undefined,
       trainingDaysPerWeek: trainingDays,
       preferredRestDay: restDay,
       recentInjuryHistory: injuryHistory || "None",
@@ -137,6 +139,17 @@ export default function OnboardingForm({ onSubmit, isLoading }: OnboardingFormPr
       {step === 1 && (
         <div className="space-y-6">
           <h2 className="text-2xl font-bold text-gray-900">What&apos;s your marathon goal?</h2>
+
+          <div>
+            <label className="mb-2 block text-sm font-medium text-gray-700">Plan Name</label>
+            <input
+              type="text"
+              value={planName}
+              onChange={(e) => setPlanName(e.target.value)}
+              placeholder="e.g. Boston build, Fall A race, Base rebuild"
+              className="w-full rounded-lg border border-gray-300 px-4 py-2 focus:border-enduro-500 focus:outline-none focus:ring-2 focus:ring-enduro-500/20"
+            />
+          </div>
 
           <div>
             <label className="mb-2 block text-sm font-medium text-gray-700">Goal Time</label>

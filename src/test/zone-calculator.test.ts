@@ -10,8 +10,8 @@ function makeProfile(overrides: Partial<RunnerProfile> = {}): RunnerProfile {
   return {
     currentWeeklyMileage: 30,
     peakHistoricalWeeklyMileage: 40,
-    currentMarathonPR: 270, // 4:30/mi
-    currentHalfMarathonPR: 125, // ~5:08/mi
+    currentMarathonPR: 270, // 4:30 marathon
+    currentHalfMarathonPR: 125, // 2:05 half marathon
     goalMarathonTime: 270,
     raceDate: "2026-09-01",
     trainingDaysPerWeek: 5,
@@ -36,6 +36,7 @@ describe("calculatePaceZones", () => {
     expect(zones).toHaveProperty("marathon");
     expect(zones).toHaveProperty("threshold");
     expect(zones).toHaveProperty("vo2");
+    expect(zones).toHaveProperty("vo2MaxEstimate");
     expect(zones).toHaveProperty("recovery");
     expect(zones).toHaveProperty("easyEffort");
     expect(zones).toHaveProperty("marathonEffort");
@@ -61,13 +62,34 @@ describe("calculatePaceZones", () => {
     expect(zones.easy.min - zones.easy.max).toBeLessThan(45);
   });
 
-  it("adjusts zones for a faster marathon PR", () => {
+  it("orders training paces around marathon pace correctly", () => {
+    const zones = calculatePaceZones(makeProfile({ goalMarathonTime: 240 }));
+
+    expect(zones.recovery).toBeGreaterThan(zones.easy.min);
+    expect(zones.easy.min).toBeGreaterThan(zones.easy.max);
+    expect(zones.easy.max).toBeGreaterThan(zones.marathon);
+    expect(zones.threshold).toBeLessThan(zones.marathon);
+    expect(zones.vo2).toBeLessThan(zones.threshold);
+  });
+
+  it("uses the anticipated marathon time for displayed marathon pace", () => {
+    const zones = calculatePaceZones(
+      makeProfile({
+        currentMarathonPR: 300,
+        goalMarathonTime: 240,
+      })
+    );
+
+    expect(zones.marathon).toBeCloseTo(240 / 26.2, 2);
+  });
+
+  it("adjusts supporting zones for a faster marathon PR while preserving goal pace", () => {
     const fastZones = calculatePaceZones(makeProfile({ currentMarathonPR: 210 })); // 3:45 marathon
     const slowZones = calculatePaceZones(makeProfile({ currentMarathonPR: 330 })); // 5:30 marathon
 
-    // Fast runner should have faster (lower) zone paces
-    expect(fastZones.marathon).toBeLessThan(slowZones.marathon);
+    expect(fastZones.marathon).toBe(slowZones.marathon);
     expect(fastZones.threshold).toBeLessThan(slowZones.threshold);
+    expect(fastZones.vo2).toBeLessThan(slowZones.vo2);
   });
 
   it("handles missing PR data by falling back to goal time", () => {
@@ -84,6 +106,7 @@ describe("calculatePaceZones", () => {
     expect(zones.recovery).toBeGreaterThan(0);
     expect(zones.thresholdEffort).toContain("discomfort");
     expect(zones.vo2Effort).toContain("Hard");
+    expect(zones.vo2MaxEstimate).toBeGreaterThan(20);
   });
 });
 
@@ -101,5 +124,14 @@ describe("calculatePowerZones", () => {
     expect(zones).toHaveProperty("marathon");
     expect(zones).toHaveProperty("threshold");
     expect(zones).toHaveProperty("vo2");
+  });
+
+  it("estimates higher power for faster marathon paces", () => {
+    const slowPaceZones = calculatePaceZones(makeProfile({ goalMarathonTime: 300 }));
+    const fastPaceZones = calculatePaceZones(makeProfile({ goalMarathonTime: 210 }));
+    const slowPower = calculatePowerZones(makeProfile({ goalMarathonTime: 300, hasAppleWatchPower: true }), slowPaceZones);
+    const fastPower = calculatePowerZones(makeProfile({ goalMarathonTime: 210, hasAppleWatchPower: true }), fastPaceZones);
+
+    expect(fastPower?.marathon).toBeGreaterThan(slowPower?.marathon ?? 0);
   });
 });

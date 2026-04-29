@@ -77,6 +77,7 @@ export interface PaceZones {
   threshold: number;                             // min/mile
   vo2: number;                                   // min/mile
   recovery: number;                              // min/mile
+  vo2MaxEstimate?: number;                       // Garmin-style reference, ml/kg/min
   easyEffort: string;                            // RPE descriptor
   marathonEffort: string;
   thresholdEffort: string;

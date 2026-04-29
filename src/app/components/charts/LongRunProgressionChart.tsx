@@ -13,9 +13,18 @@ interface LongRunProgressionChartProps {
   plan: MarathonPlan;
 }
 
+function formatWeekEndDate(date: string): string {
+  return new Intl.DateTimeFormat("en-US", {
+    month: "short",
+    day: "numeric",
+  }).format(new Date(date));
+}
+
 export default function LongRunProgressionChart({ plan }: LongRunProgressionChartProps) {
   const data = plan.weeks.map((week) => ({
     week: week.weekNumber,
+    weekLabel: `W${week.weekNumber} · ${formatWeekEndDate(week.endDate)}`,
+    weekEndDate: formatWeekEndDate(week.endDate),
     distance: week.longRunDistance,
   }));
 
@@ -27,9 +36,10 @@ export default function LongRunProgressionChart({ plan }: LongRunProgressionChar
           <AreaChart data={data}>
             <CartesianGrid strokeDasharray="3 3" stroke="#f3f4f6" />
             <XAxis
-              dataKey="week"
+              dataKey="weekLabel"
               tick={{ fontSize: 12, fill: "#9ca3af" }}
               axisLine={{ stroke: "#e5e7eb" }}
+              interval="preserveStartEnd"
             />
             <YAxis
               tick={{ fontSize: 12, fill: "#9ca3af" }}
@@ -39,6 +49,10 @@ export default function LongRunProgressionChart({ plan }: LongRunProgressionChar
             <Tooltip
               contentStyle={{ borderRadius: "8px", border: "1px solid #e5e7eb", fontSize: 13 }}
               formatter={(value: number) => [`${value} mi`, "Distance"]}
+              labelFormatter={(_, payload) => {
+                const point = payload?.[0]?.payload as { week: number; weekEndDate: string } | undefined;
+                return point ? `Week ${point.week} ending ${point.weekEndDate}` : "";
+              }}
             />
             <ReferenceLine
               y={Math.max(...data.map((d) => d.distance))}

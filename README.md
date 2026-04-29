@@ -27,6 +27,26 @@ Plans are persisted to PostgreSQL so you can load and revisit them across sessio
 
 ## Getting Started
 
+### Run with Docker
+
+Bring up the full app stack, including PostgreSQL, with one command:
+
+```bash
+docker compose up --build
+```
+
+This starts the app at **`http://localhost:${PORT:-3000}`** and initializes the database schema automatically. To run it in the background:
+
+```bash
+docker compose up --build -d
+```
+
+Stop the stack with:
+
+```bash
+docker compose down
+```
+
 ### Prerequisites
 
 - Node.js 18+ (Node 20+ recommended)

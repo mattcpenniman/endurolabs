@@ -57,7 +57,18 @@ export default function PaceZonesCard({ paceZones, powerZones }: PaceZonesCardPr
 
   return (
     <div className="rounded-xl border border-gray-200 bg-white p-6 shadow-sm">
-      <h3 className="mb-4 text-lg font-semibold text-gray-900">Pace Zones</h3>
+      <div className="mb-4 flex items-start justify-between gap-4">
+        <div>
+          <h3 className="text-lg font-semibold text-gray-900">Pace Zones</h3>
+          <p className="text-xs text-gray-500">Paces are keyed to the anticipated marathon time.</p>
+        </div>
+        {paceZones.vo2MaxEstimate && (
+          <div className="rounded-lg bg-gray-100 px-3 py-2 text-right">
+            <p className="text-xs font-medium uppercase tracking-wide text-gray-500">Garmin VO2 Max Ref</p>
+            <p className="text-lg font-bold text-gray-900">{paceZones.vo2MaxEstimate}</p>
+          </div>
+        )}
+      </div>
       <div className="space-y-3">
         {zones.map((zone) => (
           <div key={zone.name} className={`rounded-lg p-3 ${zone.color}`}>

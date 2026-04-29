@@ -13,16 +13,22 @@ import {
 } from "./models";
 
 // ─── VDOT Estimation ────────────────────────────────────────
-// Approximate VDOT from race time (minutes, miles).
-// Uses a simplified Riegel/VDOT hybrid — accurate enough for
-// training-zone purposes without a 500-row lookup table.
+// Approximate VDOT/VO2 max from race time (minutes, miles).
+// Uses the Daniels oxygen cost and fractional VO2 max equations.
 
 function estimateVDOTFromTime(distanceMiles: number, timeMinutes: number): number {
-  const pace = timeMinutes / distanceMiles;
+  const meters = distanceMiles * 1609.344;
+  const velocityMetersPerMinute = meters / timeMinutes;
+  const oxygenCost =
+    -4.6 +
+    0.182258 * velocityMetersPerMinute +
+    0.000104 * velocityMetersPerMinute ** 2;
+  const fractionalVO2Max =
+    0.8 +
+    0.1894393 * Math.exp(-0.012778 * timeMinutes) +
+    0.2989558 * Math.exp(-0.1932605 * timeMinutes);
 
-  // VDOT approximation (inverse of pace, scaled)
-  // Ranges: elite ~100+, sub-3 marathoner ~45-50, 4:00 ~30
-  const vdot = Math.max(20, Math.min(100, (250 / pace) - 10));
+  const vdot = oxygenCost / fractionalVO2Max;
   return vdot;
 }
 
@@ -31,47 +37,40 @@ function estimateVDOTFromTime(distanceMiles: number, timeMinutes: number): numbe
 // Derived from Daniels' Running Formula tables.
 
 function getEasyPaceFactor(vdot: number): number {
-  // Easy pace is ~70-80% of max HR, roughly 1.45-1.65x marathon pace
-  return vdot > 50 ? 1.55 : vdot > 35 ? 1.6 : 1.65;
+  // Easy pace is slower than marathon pace, with a slightly wider gap for newer runners.
+  return vdot > 55 ? 1.13 : vdot > 45 ? 1.18 : vdot > 35 ? 1.24 : 1.3;
 }
 
 function getRecoveryPaceFactor(vdot: number): number {
-  // Recovery is even slower than easy — ~85-95% of easy pace
-  return getEasyPaceFactor(vdot) * 1.1;
+  // Recovery is slower than easy.
+  return getEasyPaceFactor(vdot) + 0.12;
 }
 
 function getThresholdPaceFactor(vdot: number): number {
-  // Threshold is ~1.15-1.25x marathon pace
-  return vdot > 50 ? 1.18 : vdot > 35 ? 1.2 : 1.22;
+  // Threshold is faster than marathon pace, roughly 1-hour race effort.
+  return vdot > 55 ? 0.9 : vdot > 45 ? 0.91 : vdot > 35 ? 0.93 : 0.95;
 }
 
 function getVO2PaceFactor(vdot: number): number {
-  // VO2 is ~1.3-1.4x marathon pace
-  return vdot > 50 ? 1.3 : vdot > 35 ? 1.33 : 1.36;
+  // VO2 max intervals approximate 3K-5K effort and must be faster than threshold.
+  return vdot > 55 ? 0.8 : vdot > 45 ? 0.82 : vdot > 35 ? 0.84 : 0.86;
 }
 
 // ─── Core Zone Calculation ──────────────────────────────────
 
 export function calculatePaceZones(profile: RunnerProfile): PaceZones {
-  // Determine best available VDOT source
-  let vdot: number;
-  let marathonPace: number;
+  // The displayed marathon pace should match the anticipated race time.
+  let marathonPace = profile.goalMarathonTime / 26.2;
+  let vdot = estimateVDOTFromTime(26.2, profile.goalMarathonTime);
 
+  // Use recent performances to tune training zones only when supplied.
   if (profile.currentMarathonPR) {
     vdot = estimateVDOTFromTime(26.2, profile.currentMarathonPR);
-    marathonPace = profile.currentMarathonPR / 26.2;
   } else if (profile.currentHalfMarathonPR) {
     vdot = estimateVDOTFromTime(13.1, profile.currentHalfMarathonPR);
-    // Convert half pace to estimated marathon pace
-    const halfPace = profile.currentHalfMarathonPR / 13.1;
-    marathonPace = halfPace * 1.12; // ~7% slowdown from half to full
-  } else {
-    // Fallback: use goal marathon time to back-calculate
-    vdot = estimateVDOTFromTime(26.2, profile.goalMarathonTime);
-    marathonPace = profile.goalMarathonTime / 26.2;
   }
 
-  // Override with user-provided paces if available
+  // Override marathon pace only with an explicit user-provided training anchor.
   if (profile.averageMarathonPace) {
     marathonPace = profile.averageMarathonPace;
     vdot = estimateVDOTFromTime(26.2, marathonPace * 26.2);
@@ -98,6 +97,7 @@ export function calculatePaceZones(profile: RunnerProfile): PaceZones {
     threshold: Math.round(thresholdPace * 100) / 100,
     vo2: Math.round(vo2Pace * 100) / 100,
     recovery: Math.round(recoveryPace * 100) / 100,
+    vo2MaxEstimate: Math.round(vdot),
     easyEffort: "Conversational — you could speak in full sentences",
     marathonEffort: "Comfortably hard — brief phrases only",
     thresholdEffort: "Sustainable discomfort — a few words at a time",
@@ -139,7 +139,7 @@ export function calculatePowerZones(
   // Fallback: estimate power from marathon pace using a rough curve
   // Apple Watch power tends to read ~2-3W lower than Stryd at same pace
   const mp = paceZones.marathon;
-  const estimatedMPPower = Math.round(5.2 * mp - 18); // rough fit from AW data
+  const estimatedMPPower = Math.round(2100 / mp); // rough fit from AW data
 
   return {
     easy: {

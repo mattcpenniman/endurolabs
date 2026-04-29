@@ -10,7 +10,7 @@
 
 import React from "react";
 import { useState, useEffect } from "react";
-import { RunnerProfile, MarathonPlan, RaceDayPlan } from "@/lib/training/models";
+import { RunnerProfile, MarathonPlan } from "@/lib/training/models";
 import OnboardingForm from "@/app/components/onboarding/OnboardingForm";
 import PlanOverviewCard from "@/app/components/plan/PlanOverviewCard";
 import PaceZonesCard from "@/app/components/plan/PaceZonesCard";
@@ -30,7 +30,13 @@ interface SavedPlanRow {
   peakMileageOverride: number | null;
   weeksOverride: number | null;
   raceName: string | null;
-  created_at: string;
+  createdAt: string;
+}
+
+interface SavePlanResponse {
+  success: boolean;
+  id: string;
+  planData: MarathonPlan;
 }
 
 export default function PlanPage(): React.ReactNode {
@@ -44,6 +50,7 @@ export default function PlanPage(): React.ReactNode {
   const [isSaving, setIsSaving] = useState(false);
   const [runsPerWeek, setRunsPerWeek] = useState<number | null>(null);
   const [weeksOverride, setWeeksOverride] = useState<number | null>(null);
+  const [planName, setPlanName] = useState("");
 
   // Load saved plans on mount
   useEffect(() => {
@@ -52,6 +59,51 @@ export default function PlanPage(): React.ReactNode {
       .then((data) => setSavedPlans(data))
       .catch(() => setSavedPlans([]));
   }, []);
+
+  const refreshSavedPlans = async (): Promise<void> => {
+    const listRes = await fetch("/api/plan/list");
+    if (listRes.ok) {
+      setSavedPlans(await listRes.json());
+    }
+  };
+
+  const persistPlan = async (
+    targetPlan: MarathonPlan,
+    customName: string,
+    options: { saveAsNew?: boolean } = {}
+  ): Promise<MarathonPlan | null> => {
+    const trimmedName = customName.trim();
+    const runnerProfile: RunnerProfile = {
+      ...targetPlan.runnerProfile,
+      raceName: trimmedName || undefined,
+    };
+    const planData: MarathonPlan = {
+      ...targetPlan,
+      id: options.saveAsNew ? `plan-copy-${Date.now()}` : targetPlan.id,
+      runnerProfile,
+    };
+
+    const saveRes = await fetch("/api/plan/save", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        id: options.saveAsNew ? undefined : targetPlan.id,
+        runnerProfile,
+        planData,
+        peakMileageOverride: runnerProfile.peakMileageOverride,
+        weeksOverride: runnerProfile.weeksOverride,
+        raceName: trimmedName || null,
+      }),
+    });
+
+    if (!saveRes.ok) {
+      return null;
+    }
+
+    const saveData = (await saveRes.json()) as SavePlanResponse;
+    await refreshSavedPlans();
+    return saveData.planData;
+  };
 
   const handleGenerate = async (profile: RunnerProfile) => {
     setIsLoading(true);
@@ -69,31 +121,13 @@ export default function PlanPage(): React.ReactNode {
       }
 
       const generatedPlan = await response.json();
+      const initialPlanName = profile.raceName?.trim() ?? "";
+      setPlanName(initialPlanName);
 
       // Auto-save to database
-      const saveRes = await fetch("/api/plan/save", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          id: generatedPlan.id,
-          runnerProfile: generatedPlan.runnerProfile,
-          planData: generatedPlan,
-          peakMileageOverride: profile.peakMileageOverride,
-          weeksOverride: profile.weeksOverride,
-          raceName: profile.raceName || null,
-        }),
-      });
+      const savedPlan = await persistPlan(generatedPlan, initialPlanName);
 
-      if (saveRes.ok) {
-        const saveData = await saveRes.json();
-        // Refresh saved plans list
-        const listRes = await fetch("/api/plan/list");
-        if (listRes.ok) {
-          setSavedPlans(await listRes.json());
-        }
-      }
-
-      setPlan(generatedPlan);
+      setPlan(savedPlan ?? generatedPlan);
       setRunsPerWeek(
         profile.runsPerWeekOverride
           ? Math.max(3, Math.min(10, profile.runsPerWeekOverride))
@@ -115,22 +149,24 @@ export default function PlanPage(): React.ReactNode {
     if (!plan) return;
     setIsSaving(true);
     try {
-      await fetch("/api/plan/save", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          id: plan.id,
-          runnerProfile: plan.runnerProfile,
-          planData: plan,
-          peakMileageOverride: plan.runnerProfile.peakMileageOverride,
-          weeksOverride: plan.runnerProfile.weeksOverride,
-          raceName: plan.runnerProfile.raceName || null,
-        }),
-      });
-      // Refresh list
-      const listRes = await fetch("/api/plan/list");
-      if (listRes.ok) {
-        setSavedPlans(await listRes.json());
+      const savedPlan = await persistPlan(plan, planName);
+      if (savedPlan) {
+        setPlan(savedPlan);
+      }
+    } catch {
+      // Silently fail — plan is still usable in session
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  const handleSaveAsNewPlan = async () => {
+    if (!plan) return;
+    setIsSaving(true);
+    try {
+      const savedPlan = await persistPlan(plan, planName, { saveAsNew: true });
+      if (savedPlan) {
+        setPlan(savedPlan);
       }
     } catch {
       // Silently fail — plan is still usable in session
@@ -146,6 +182,7 @@ export default function PlanPage(): React.ReactNode {
       if (!res.ok) throw new Error("Failed to load plan");
       const saved = await res.json();
       setPlan(saved.planData);
+      setPlanName(saved.raceName ?? saved.runnerProfile.raceName ?? "");
       setRunsPerWeek(
         saved.runnerProfile.runsPerWeekOverride
           ? Math.max(3, Math.min(10, saved.runnerProfile.runsPerWeekOverride))
@@ -167,7 +204,11 @@ export default function PlanPage(): React.ReactNode {
     if (!plan) return;
     setIsLoading(true);
     try {
-      const profile = { ...plan.runnerProfile, runsPerWeekOverride: newRuns };
+      const profile = {
+        ...plan.runnerProfile,
+        raceName: planName.trim() || undefined,
+        runsPerWeekOverride: newRuns,
+      };
       const response = await fetch("/api/plan/generate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -175,25 +216,11 @@ export default function PlanPage(): React.ReactNode {
       });
       if (!response.ok) throw new Error("Failed to regenerate plan");
       const regenerated = await response.json();
-      setPlan(regenerated);
+      regenerated.id = plan.id;
       setRunsPerWeek(newRuns);
       // Auto-save
-      const saveRes = await fetch("/api/plan/save", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          id: regenerated.id,
-          runnerProfile: regenerated.runnerProfile,
-          planData: regenerated,
-          peakMileageOverride: profile.peakMileageOverride,
-          weeksOverride: profile.weeksOverride,
-          raceName: profile.raceName || null,
-        }),
-      });
-      if (saveRes.ok) {
-        const listRes = await fetch("/api/plan/list");
-        if (listRes.ok) setSavedPlans(await listRes.json());
-      }
+      const savedPlan = await persistPlan(regenerated, planName);
+      setPlan(savedPlan ?? regenerated);
     } catch {
       // Silently fail
     } finally {
@@ -205,7 +232,11 @@ export default function PlanPage(): React.ReactNode {
     if (!plan) return;
     setIsLoading(true);
     try {
-      const profile = { ...plan.runnerProfile, weeksOverride: newWeeks };
+      const profile = {
+        ...plan.runnerProfile,
+        raceName: planName.trim() || undefined,
+        weeksOverride: newWeeks,
+      };
       const response = await fetch("/api/plan/generate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -213,25 +244,11 @@ export default function PlanPage(): React.ReactNode {
       });
       if (!response.ok) throw new Error("Failed to regenerate plan");
       const regenerated = await response.json();
-      setPlan(regenerated);
+      regenerated.id = plan.id;
       setWeeksOverride(newWeeks);
       // Auto-save
-      const saveRes = await fetch("/api/plan/save", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          id: regenerated.id,
-          runnerProfile: regenerated.runnerProfile,
-          planData: regenerated,
-          peakMileageOverride: profile.peakMileageOverride,
-          weeksOverride: profile.weeksOverride,
-          raceName: profile.raceName || null,
-        }),
-      });
-      if (saveRes.ok) {
-        const listRes = await fetch("/api/plan/list");
-        if (listRes.ok) setSavedPlans(await listRes.json());
-      }
+      const savedPlan = await persistPlan(regenerated, planName);
+      setPlan(savedPlan ?? regenerated);
     } catch {
       // Silently fail
     } finally {
@@ -301,7 +318,7 @@ export default function PlanPage(): React.ReactNode {
                     goalMin / 60 >= 1
                       ? `${Math.floor(goalMin / 60)}:${String(goalMin % 60).padStart(2, "0")}`
                       : `${goalMin}:00`;
-                  const created = new Date(row.created_at).toLocaleDateString();
+                  const created = new Date(row.createdAt).toLocaleDateString();
                   return (
                     <div
                       key={row.id}
@@ -374,8 +391,8 @@ export default function PlanPage(): React.ReactNode {
     <div className="section-padding">
       <div className="container-narrow">
         {/* Header */}
-        <div className="mb-8 flex items-center justify-between">
-          <div>
+        <div className="mb-8 flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
+          <div className="min-w-0">
             <h1 className="text-3xl font-bold text-gray-900">Your Marathon Plan</h1>
             <p className="text-gray-600">
               {plan.totalWeeks} weeks · Peak {plan.peakWeeklyMileage} mi/week ·{" "}
@@ -384,7 +401,18 @@ export default function PlanPage(): React.ReactNode {
                 : `${plan.runnerProfile.goalMarathonTime}:00`} goal
             </p>
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
+            <label className="sr-only" htmlFor="plan-name">
+              Plan name
+            </label>
+            <input
+              id="plan-name"
+              type="text"
+              value={planName}
+              onChange={(e) => setPlanName(e.target.value)}
+              placeholder="Plan name"
+              className="h-10 w-full min-w-0 rounded-lg border border-gray-300 bg-white px-3 text-sm text-gray-900 focus:border-enduro-500 focus:outline-none focus:ring-2 focus:ring-enduro-500/20 sm:w-56"
+            />
             {/* Runs per week control */}
             {runsPerWeek !== null && (
               <div className="flex items-center gap-1 rounded-lg border border-gray-300 bg-white pr-3">
@@ -438,16 +466,26 @@ export default function PlanPage(): React.ReactNode {
               disabled={isSaving}
               className="rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50"
             >
-              💾 Save
+              Save
+            </button>
+            <button
+              onClick={handleSaveAsNewPlan}
+              disabled={isSaving}
+              className="rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50"
+            >
+              Save As New
             </button>
             <button
               onClick={handleExportCalendar}
               className="rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50"
             >
-              📅 Export Calendar
+              Export Calendar
             </button>
             <button
-              onClick={() => setPlan(null)}
+              onClick={() => {
+                setPlan(null);
+                setPlanName("");
+              }}
               className="rounded-lg bg-enduro-600 px-4 py-2 text-sm font-medium text-white hover:bg-enduro-700"
             >
               New Plan

@@ -1,6 +1,25 @@
-version: "3.9"
-
 services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: endurolab-app
+    restart: unless-stopped
+    environment:
+      NODE_ENV: development
+      PORT: ${PORT:-3000}
+      DATABASE_URL: postgresql://${POSTGRES_USER:-enduro}:${POSTGRES_PASSWORD:-endurodev}@db:5432/${POSTGRES_DB:-endurolab}
+    ports:
+      - "${PORT:-3000}:${PORT:-3000}"
+    volumes:
+      - .:/app
+      - node_modules:/app/node_modules
+      - next_cache:/app/.next
+    depends_on:
+      db:
+        condition: service_healthy
+    command: sh -c "npm run db:push && npm run dev"
+
   db:
     image: postgres:16-alpine
     container_name: endurolab-db
@@ -14,10 +33,12 @@ services:
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-enduro}"]
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-enduro} -d ${POSTGRES_DB:-endurolab}"]
       interval: 5s
       timeout: 3s
       retries: 5
 
 volumes:
   pgdata:
+  node_modules:
+  next_cache:
