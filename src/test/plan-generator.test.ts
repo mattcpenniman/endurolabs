@@ -29,6 +29,28 @@ function makeProfile(overrides: Partial<RunnerProfile> = {}): RunnerProfile {
   };
 }
 
+function scheduledMileage(week: ReturnType<typeof generatePlan>["weeks"][number]): number {
+  return Math.round(
+    week.days.reduce(
+      (sum, day) =>
+        sum +
+        (day.workout?.weeklyMileageContribution ?? 0) +
+        (day.secondaryWorkout?.weeklyMileageContribution ?? 0),
+      0
+    ) * 10
+  ) / 10;
+}
+
+function scheduledRunCount(week: ReturnType<typeof generatePlan>["weeks"][number]): number {
+  return week.days.reduce(
+    (sum, day) =>
+      sum +
+      (day.workout && day.workout.weeklyMileageContribution > 0 ? 1 : 0) +
+      (day.secondaryWorkout && day.secondaryWorkout.weeklyMileageContribution > 0 ? 1 : 0),
+    0
+  );
+}
+
 describe("generatePlan", () => {
   it("returns a MarathonPlan with all required fields", () => {
     const plan = generatePlan(makeProfile());
@@ -109,5 +131,36 @@ describe("generatePlan", () => {
     const plan = generatePlan(makeProfile({ currentWeeklyMileage: 10 }));
     expect(plan.riskWarnings).toBeDefined();
     expect(Array.isArray(plan.riskWarnings)).toBe(true);
+  });
+
+  it("schedules workout mileage to match each weekly target", () => {
+    const plan = generatePlan(makeProfile({ weeksOverride: 18, peakMileageOverride: 55 }));
+
+    for (const week of plan.weeks) {
+      expect(scheduledMileage(week)).toBeCloseTo(week.totalMileage, 1);
+    }
+  });
+
+  it("reaches the requested peak mileage", () => {
+    const plan = generatePlan(makeProfile({ weeksOverride: 18, peakMileageOverride: 55 }));
+    const peakScheduledMileage = Math.max(...plan.weeks.map(scheduledMileage));
+
+    expect(plan.peakWeeklyMileage).toBe(55);
+    expect(peakScheduledMileage).toBeCloseTo(55, 1);
+  });
+
+  it("honors requested runs per week with double days", () => {
+    const plan = generatePlan(
+      makeProfile({
+        trainingDaysPerWeek: 5,
+        runsPerWeekOverride: 7,
+        weeksOverride: 18,
+        peakMileageOverride: 55,
+      })
+    );
+
+    for (const week of plan.weeks) {
+      expect(scheduledRunCount(week)).toBe(7);
+    }
   });
 });
