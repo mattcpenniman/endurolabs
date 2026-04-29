@@ -21,6 +21,7 @@ import MileageTrendChart from "@/app/components/charts/MileageTrendChart";
 import LongRunProgressionChart from "@/app/components/charts/LongRunProgressionChart";
 import IntensityDistributionChart from "@/app/components/charts/IntensityDistributionChart";
 import { generateRaceDayPlan } from "@/lib/training/race-day-plan";
+import { calculatePaceZones, calculatePowerZones } from "@/lib/training/zone-calculator";
 
 // Shape of a saved plan row from the database
 interface SavedPlanRow {
@@ -77,10 +78,13 @@ export default function PlanPage(): React.ReactNode {
       ...targetPlan.runnerProfile,
       raceName: trimmedName || undefined,
     };
+    const paceZones = calculatePaceZones(runnerProfile);
     const planData: MarathonPlan = {
       ...targetPlan,
       id: options.saveAsNew ? `plan-copy-${Date.now()}` : targetPlan.id,
       runnerProfile,
+      paceZones,
+      powerZones: calculatePowerZones(runnerProfile, paceZones),
     };
 
     const saveRes = await fetch("/api/plan/save", {
@@ -386,6 +390,8 @@ export default function PlanPage(): React.ReactNode {
 
   // Plan display
   if (!plan) return null;
+  const currentPaceZones = calculatePaceZones(plan.runnerProfile);
+  const currentPowerZones = calculatePowerZones(plan.runnerProfile, currentPaceZones);
 
   return (
     <div className="section-padding">
@@ -499,7 +505,7 @@ export default function PlanPage(): React.ReactNode {
             <PlanOverviewCard plan={plan} />
           </div>
           <div>
-            <PaceZonesCard paceZones={plan.paceZones} powerZones={plan.powerZones} />
+            <PaceZonesCard paceZones={currentPaceZones} powerZones={currentPowerZones} />
           </div>
         </div>
 

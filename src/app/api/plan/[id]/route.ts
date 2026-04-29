@@ -8,6 +8,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db/client";
 import { plans } from "@/lib/db/schema";
 import { eq } from "drizzle-orm";
+import { calculatePaceZones, calculatePowerZones } from "@/lib/training/zone-calculator";
+import { MarathonPlan, RunnerProfile } from "@/lib/training/models";
 
 export async function GET(
   _request: NextRequest,
@@ -28,7 +30,20 @@ export async function GET(
       );
     }
 
-    return NextResponse.json(plan);
+    const planData = plan.planData as MarathonPlan;
+    const runnerProfile = (planData.runnerProfile ?? plan.runnerProfile) as RunnerProfile;
+    const paceZones = calculatePaceZones(runnerProfile);
+
+    return NextResponse.json({
+      ...plan,
+      runnerProfile,
+      planData: {
+        ...planData,
+        runnerProfile,
+        paceZones,
+        powerZones: calculatePowerZones(runnerProfile, paceZones),
+      },
+    });
   } catch (error) {
     console.error("Failed to fetch plan:", error);
     return NextResponse.json(
