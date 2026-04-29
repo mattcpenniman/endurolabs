@@ -52,6 +52,7 @@ export default function PlanPage(): React.ReactNode {
   const [runsPerWeek, setRunsPerWeek] = useState<number | null>(null);
   const [weeksOverride, setWeeksOverride] = useState<number | null>(null);
   const [planName, setPlanName] = useState("");
+  const [activePlanTab, setActivePlanTab] = useState<"training" | "race">("training");
 
   // Load saved plans on mount
   useEffect(() => {
@@ -499,54 +500,116 @@ export default function PlanPage(): React.ReactNode {
           </div>
         </div>
 
-        {/* Overview + Zones */}
-        <div className="mb-8 grid gap-6 lg:grid-cols-3">
-          <div className="lg:col-span-2">
-            <PlanOverviewCard plan={plan} />
-          </div>
-          <div>
-            <PaceZonesCard paceZones={currentPaceZones} powerZones={currentPowerZones} />
-          </div>
+        <div className="mb-6 flex rounded-lg bg-gray-100 p-1">
+          {[
+            { id: "training", label: "Training Plan" },
+            { id: "race", label: "Race Day" },
+          ].map((tab) => (
+            <button
+              key={tab.id}
+              type="button"
+              onClick={() => setActivePlanTab(tab.id as "training" | "race")}
+              className={`flex-1 rounded-md px-4 py-2 text-sm font-medium transition-colors ${
+                activePlanTab === tab.id
+                  ? "bg-white text-enduro-700 shadow-sm"
+                  : "text-gray-600 hover:text-gray-900"
+              }`}
+            >
+              {tab.label}
+            </button>
+          ))}
         </div>
 
-        {/* Charts */}
-        <div className="mb-8 grid gap-6 lg:grid-cols-2">
-          <MileageTrendChart plan={plan} />
-          <LongRunProgressionChart plan={plan} />
-        </div>
-        <div className="mb-8">
-          <IntensityDistributionChart plan={plan} />
-        </div>
-
-        {/* Race Day Plan */}
-        <div className="mb-8">
-          <div className="mb-4 flex items-center justify-between">
-            <h2 className="text-2xl font-bold text-gray-900">Race Day Plan</h2>
-            <div className="flex gap-3">
-              <select
-                value={pacingStrategy}
-                onChange={(e) => setPacingStrategy(e.target.value as typeof pacingStrategy)}
-                className="rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-700 focus:border-enduro-500 focus:outline-none focus:ring-2 focus:ring-enduro-500/20"
-              >
-                <option value="even">Even Pacing</option>
-                <option value="negative">Negative Split</option>
-                <option value="progressive">Progressive</option>
-                <option value="positive">Positive Split</option>
-              </select>
-              <div className="flex items-center gap-2">
-                <label className="text-sm text-gray-600">Temp (°F):</label>
-                <input
-                  type="number"
-                  value={expectedTempF}
-                  onChange={(e) => setExpectedTempF(parseInt(e.target.value) || 50)}
-                  min="-10"
-                  max="110"
-                  className="w-16 rounded-lg border border-gray-300 px-2 py-2 text-sm text-center focus:border-enduro-500 focus:outline-none focus:ring-2 focus:ring-enduro-500/20"
-                />
+        {activePlanTab === "training" ? (
+          <>
+            {/* Overview + Zones */}
+            <div className="mb-8 grid gap-6 lg:grid-cols-3">
+              <div className="lg:col-span-2">
+                <PlanOverviewCard plan={plan} />
+              </div>
+              <div>
+                <PaceZonesCard paceZones={currentPaceZones} powerZones={currentPowerZones} />
               </div>
             </div>
-          </div>
-          {plan && (
+
+            {/* Charts */}
+            <div className="mb-8 grid gap-6 lg:grid-cols-2">
+              <MileageTrendChart plan={plan} />
+              <LongRunProgressionChart plan={plan} />
+            </div>
+            <div className="mb-8">
+              <IntensityDistributionChart plan={plan} />
+            </div>
+
+            {/* Weekly progress tracker */}
+            <div className="mb-8">
+              <WeeklyProgressTracker plan={plan} />
+            </div>
+
+            {/* Weekly plan */}
+            <div className="mb-8">
+              <h2 className="mb-4 text-2xl font-bold text-gray-900">Weekly Schedule</h2>
+              <div className="space-y-3">
+                {plan.weeks.map((week) => (
+                  <WeeklyPlanCard
+                    key={week.weekNumber}
+                    week={week}
+                    isExpanded={expandedWeeks.has(week.weekNumber)}
+                    onToggle={() => toggleWeek(week.weekNumber)}
+                  />
+                ))}
+              </div>
+            </div>
+
+            {/* Adjustment rules */}
+            {plan.adjustmentRules.length > 0 && (
+              <div className="mb-8 rounded-xl border border-amber-200 bg-amber-50 p-6">
+                <h3 className="mb-4 text-lg font-semibold text-amber-900">Adjustment Guidelines</h3>
+                <ul className="space-y-3">
+                  {plan.adjustmentRules.map((rule, i) => (
+                    <li key={i} className="flex gap-3">
+                      <span className={`mt-1 inline-block h-2 w-2 shrink-0 rounded-full ${
+                        rule.severity === "high" ? "bg-red-500" :
+                        rule.severity === "medium" ? "bg-amber-500" : "bg-green-500"
+                      }`} />
+                      <div>
+                        <p className="text-sm font-medium text-amber-900">{rule.condition}</p>
+                        <p className="text-sm text-amber-700">{rule.action}</p>
+                      </div>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+          </>
+        ) : (
+          <div className="mb-8">
+            <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+              <h2 className="text-2xl font-bold text-gray-900">Race Day Plan</h2>
+              <div className="flex flex-wrap gap-3">
+                <select
+                  value={pacingStrategy}
+                  onChange={(e) => setPacingStrategy(e.target.value as typeof pacingStrategy)}
+                  className="rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-700 focus:border-enduro-500 focus:outline-none focus:ring-2 focus:ring-enduro-500/20"
+                >
+                  <option value="even">Even Pacing</option>
+                  <option value="negative">Negative Split</option>
+                  <option value="progressive">Progressive</option>
+                  <option value="positive">Positive Split</option>
+                </select>
+                <div className="flex items-center gap-2">
+                  <label className="text-sm text-gray-600">Temp (F):</label>
+                  <input
+                    type="number"
+                    value={expectedTempF}
+                    onChange={(e) => setExpectedTempF(parseInt(e.target.value) || 50)}
+                    min="-10"
+                    max="110"
+                    className="w-16 rounded-lg border border-gray-300 px-2 py-2 text-center text-sm focus:border-enduro-500 focus:outline-none focus:ring-2 focus:ring-enduro-500/20"
+                  />
+                </div>
+              </div>
+            </div>
             <RaceDayPlanCard
               plan={generateRaceDayPlan(
                 plan.runnerProfile.goalMarathonTime,
@@ -555,47 +618,6 @@ export default function PlanPage(): React.ReactNode {
                 pacingStrategy
               )}
             />
-          )}
-        </div>
-
-        {/* Weekly progress tracker */}
-        <div className="mb-8">
-          <WeeklyProgressTracker plan={plan} />
-        </div>
-
-        {/* Weekly plan */}
-        <div className="mb-8">
-          <h2 className="mb-4 text-2xl font-bold text-gray-900">Weekly Schedule</h2>
-          <div className="space-y-3">
-            {plan.weeks.map((week) => (
-              <WeeklyPlanCard
-                key={week.weekNumber}
-                week={week}
-                isExpanded={expandedWeeks.has(week.weekNumber)}
-                onToggle={() => toggleWeek(week.weekNumber)}
-              />
-            ))}
-          </div>
-        </div>
-
-        {/* Adjustment rules */}
-        {plan.adjustmentRules.length > 0 && (
-          <div className="mb-8 rounded-xl border border-amber-200 bg-amber-50 p-6">
-            <h3 className="mb-4 text-lg font-semibold text-amber-900">Adjustment Guidelines</h3>
-            <ul className="space-y-3">
-              {plan.adjustmentRules.map((rule, i) => (
-                <li key={i} className="flex gap-3">
-                  <span className={`mt-1 inline-block h-2 w-2 shrink-0 rounded-full ${
-                    rule.severity === "high" ? "bg-red-500" :
-                    rule.severity === "medium" ? "bg-amber-500" : "bg-green-500"
-                  }`} />
-                  <div>
-                    <p className="text-sm font-medium text-amber-900">{rule.condition}</p>
-                    <p className="text-sm text-amber-700">{rule.action}</p>
-                  </div>
-                </li>
-              ))}
-            </ul>
           </div>
         )}
       </div>

@@ -21,58 +21,60 @@ function generateSplits(
 ): RaceSplit[] {
   const splits: RaceSplit[] = [];
   let cumulativeTime = 0;
+  const segments = [
+    ...Array.from({ length: 26 }, (_, index) => ({
+      mile: index + 1,
+      distance: 1,
+      midpoint: index + 0.5,
+    })),
+    { mile: 26.2, distance: 0.2, midpoint: 26.1 },
+  ];
 
-  for (let mile = 1; mile <= 26.2; mile++) {
-    let paceDelta = 0;
+  const rawOffsetsSeconds = segments.map((segment) => {
+    const progress = segment.midpoint / 26.2;
 
     switch (pacingStrategy) {
       case "even":
-        paceDelta = 0;
-        break;
+        return 0;
       case "negative":
-        // Slow down 1-2 sec/mile each half
-        if (mile > 13) {
-          paceDelta = (mile - 13) * 1.0;
-        }
-        break;
+        // Start controlled and finish faster.
+        return 10 - progress * 20;
       case "positive":
-        // Start 1-2 sec/mile faster, then slow
-        if (mile <= 13) {
-          paceDelta = -(13 - mile) * 0.5;
-        } else {
-          paceDelta = (mile - 13) * 1.5;
-        }
-        break;
+        // Start assertive and accept a controlled fade.
+        return -8 + progress * 16;
       case "progressive":
-        // Gradually speed up through first half, then hold steady
-        if (mile <= 13) {
-          paceDelta = -(mile - 1) * 0.5;
-        } else {
-          // Second half holds at the fastest pace achieved
-          paceDelta = -(12 * 0.5);
-        }
-        break;
+        // A more pronounced gradual squeeze from relaxed to fast.
+        return 14 - progress * 26;
     }
+  });
 
-    const targetPace = Math.max(goalPace + paceDelta, goalPace - 3);
-    cumulativeTime += targetPace;
+  const weightedOffsetAverage =
+    rawOffsetsSeconds.reduce(
+      (sum, offset, index) => sum + offset * segments[index].distance,
+      0
+    ) / 26.2;
+
+  segments.forEach((segment, index) => {
+    const paceDeltaMinutes = (rawOffsetsSeconds[index] - weightedOffsetAverage) / 60;
+    const targetPace = Math.max(goalPace + paceDeltaMinutes, goalPace * 0.92);
+    cumulativeTime += targetPace * segment.distance;
 
     let effort = "Easy — stay relaxed";
     let notes = "";
 
-    if (mile <= 3) {
+    if (segment.mile <= 3) {
       effort = "Easy — resist the urge to go fast";
-      notes = mile === 1 ? "Start slower than goal pace" : "";
-    } else if (mile <= 10) {
+      notes = segment.mile === 1 ? "Start slower than goal pace" : "";
+    } else if (segment.mile <= 10) {
       effort = "Comfortable — find your rhythm";
-    } else if (mile <= 13) {
+    } else if (segment.mile <= 13) {
       effort = "Steady — you're in the groove";
-    } else if (mile <= 20) {
+    } else if (segment.mile <= 20) {
       effort = "Hard — focus on form and breathing";
-      if (pacingStrategy === "negative" && mile > 13) {
+      if (pacingStrategy === "negative" && segment.mile > 13) {
         notes = "This is where the race begins — hold your form";
       }
-    } else if (mile <= 23) {
+    } else if (segment.mile <= 23) {
       effort = "Very hard — dig deep, stay positive";
       notes = "Mental toughness zone — break it into 3-mile chunks";
     } else {
@@ -81,14 +83,14 @@ function generateSplits(
     }
 
     splits.push({
-      mile,
+      mile: segment.mile,
       targetPace: Math.round(targetPace * 100) / 100,
       targetTime: Math.round(cumulativeTime * 100) / 100,
-      cumulativeDistance: mile,
+      cumulativeDistance: segment.mile,
       effort,
       notes,
     });
-  }
+  });
 
   return splits;
 }

@@ -19,9 +19,9 @@ describe("generateRaceDayPlan", () => {
     expect(plan).toHaveProperty("pacingStrategy");
   });
 
-  it("generates exactly 26.2 splits", () => {
+  it("generates mile splits plus the final 0.2", () => {
     const plan = generateRaceDayPlan(270, "2026-09-01", 50, "even");
-    expect(plan.splits.length).toBe(26);
+    expect(plan.splits.length).toBe(27);
   });
 
   it("first split is at mile 1", () => {
@@ -29,9 +29,14 @@ describe("generateRaceDayPlan", () => {
     expect(plan.splits[0].mile).toBe(1);
   });
 
-  it("last split is at mile 26", () => {
+  it("last split is at mile 26.2", () => {
     const plan = generateRaceDayPlan(270, "2026-09-01", 50, "even");
-    expect(plan.splits[plan.splits.length - 1].mile).toBe(26);
+    expect(plan.splits[plan.splits.length - 1].mile).toBe(26.2);
+  });
+
+  it("final cumulative time lands on the goal time", () => {
+    const plan = generateRaceDayPlan(270, "2026-09-01", 50, "even");
+    expect(plan.splits[plan.splits.length - 1].targetTime).toBeCloseTo(270, 1);
   });
 
   it("goal pace is goalTime / 26.2", () => {
@@ -47,18 +52,28 @@ describe("generateRaceDayPlan", () => {
     expect(maxDiff).toBeLessThan(2);
   });
 
-  it("negative split has faster first half than second half", () => {
+  it("negative split has a faster second half than first half", () => {
     const plan = generateRaceDayPlan(270, "2026-09-01", 50, "negative");
     const firstHalfAvg = plan.splits.slice(0, 13).reduce((sum, s) => sum + s.targetPace, 0) / 13;
-    const secondHalfAvg = plan.splits.slice(13).reduce((sum, s) => sum + s.targetPace, 0) / 13;
+    const secondHalfAvg = plan.splits.slice(13, 26).reduce((sum, s) => sum + s.targetPace, 0) / 13;
+    expect(secondHalfAvg).toBeLessThan(firstHalfAvg);
+    expect(plan.splits[plan.splits.length - 1].targetTime).toBeCloseTo(270, 1);
+  });
+
+  it("positive split has a slower second half than first half", () => {
+    const plan = generateRaceDayPlan(270, "2026-09-01", 50, "positive");
+    const firstHalfAvg = plan.splits.slice(0, 13).reduce((sum, s) => sum + s.targetPace, 0) / 13;
+    const secondHalfAvg = plan.splits.slice(13, 26).reduce((sum, s) => sum + s.targetPace, 0) / 13;
     expect(secondHalfAvg).toBeGreaterThan(firstHalfAvg);
+    expect(plan.splits[plan.splits.length - 1].targetTime).toBeCloseTo(270, 1);
   });
 
   it("progressive pacing has faster second half than first half", () => {
     const plan = generateRaceDayPlan(270, "2026-09-01", 50, "progressive");
     const firstHalfAvg = plan.splits.slice(0, 13).reduce((sum, s) => sum + s.targetPace, 0) / 13;
-    const secondHalfAvg = plan.splits.slice(13).reduce((sum, s) => sum + s.targetPace, 0) / 13;
+    const secondHalfAvg = plan.splits.slice(13, 26).reduce((sum, s) => sum + s.targetPace, 0) / 13;
     expect(secondHalfAvg).toBeLessThan(firstHalfAvg);
+    expect(plan.splits[plan.splits.length - 1].targetTime).toBeCloseTo(270, 1);
   });
 
   it("has nutrition cues", () => {
