@@ -221,6 +221,17 @@ export interface WeeklyLog {
   loggedAt: string;             // ISO timestamp
 }
 
+export interface DailyLog {
+  weekNumber: number;
+  date: string;
+  dayOfWeek: string;
+  actualMileage: number;
+  completed: boolean;
+  feelRating: number;           // 1-10 how the day felt
+  notes: string;
+  loggedAt: string;             // ISO timestamp
+}
+
 export interface WeeklyProgress {
   logs: WeeklyLog[];
   currentWeek: number;

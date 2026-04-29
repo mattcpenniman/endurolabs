@@ -10,12 +10,16 @@
 
 import React from "react";
 import { useState, useEffect } from "react";
-import { WeeklyPlan, DailyPlan, Workout, WorkoutType } from "@/lib/training/models";
+import { DailyLog, WeeklyPlan, DailyPlan, Workout, WorkoutType } from "@/lib/training/models";
+import { addDailyLog } from "@/lib/training/progress-tracker";
 
 interface WeeklyPlanCardProps {
+  planId: string;
   week: WeeklyPlan;
   isExpanded: boolean;
   onToggle: () => void;
+  dailyLogs: DailyLog[];
+  onDailyLogSaved: () => void;
 }
 
 // Swap targets a runner can choose from
@@ -53,14 +57,67 @@ const workoutColor: Record<string, string> = {
   rest: "text-gray-400",
 };
 
-function renderDay(day: DailyPlan, isSwapped: boolean) {
+function formatShortDate(date: string): string {
+  return new Intl.DateTimeFormat("en-US", {
+    month: "short",
+    day: "numeric",
+  }).format(new Date(date));
+}
+
+interface DayLogDraft {
+  actualMileage: number;
+  completed: boolean;
+  feelRating: number;
+  notes: string;
+}
+
+function renderDay(
+  planId: string,
+  weekNumber: number,
+  day: DailyPlan,
+  isSwapped: boolean,
+  log: DailyLog | undefined,
+  draft: DayLogDraft,
+  onDraftChange: (dayOfWeek: string, patch: Partial<DayLogDraft>) => void,
+  onSaved: () => void
+) {
   const currentWorkout = day.workout;
+  const plannedMileage =
+    (currentWorkout?.weeklyMileageContribution ?? 0) +
+    (day.secondaryWorkout?.weeklyMileageContribution ?? 0);
+
+  const handleSaveLog = () => {
+    addDailyLog(planId, {
+      weekNumber,
+      date: day.date,
+      dayOfWeek: day.dayOfWeek,
+      actualMileage: draft.actualMileage,
+      completed: draft.completed,
+      feelRating: draft.feelRating,
+      notes: draft.notes,
+      loggedAt: new Date().toISOString(),
+    });
+    onSaved();
+  };
 
   if (day.isRestDay || !currentWorkout) {
     return (
-      <div key={day.dayOfWeek} className="flex items-center gap-3 py-2">
-        <span className="w-16 text-xs font-medium text-gray-400">{day.dayOfWeek.slice(0, 3)}</span>
-        <span className="text-sm text-gray-400">Rest</span>
+      <div key={day.dayOfWeek} className="grid gap-3 py-3 lg:grid-cols-[6rem_1fr]">
+        <div>
+          <p className="text-xs font-medium text-gray-400">{day.dayOfWeek.slice(0, 3)}</p>
+          <p className="text-xs text-gray-400">{formatShortDate(day.date)}</p>
+        </div>
+        <div className="rounded-lg bg-gray-50 p-3">
+          <p className="text-sm text-gray-400">Rest</p>
+          <DailyLogControls
+            day={day}
+            draft={draft}
+            log={log}
+            plannedMileage={0}
+            onDraftChange={onDraftChange}
+            onSave={handleSaveLog}
+          />
+        </div>
       </div>
     );
   }
@@ -68,9 +125,12 @@ function renderDay(day: DailyPlan, isSwapped: boolean) {
   const hasSecondary = !!day.secondaryWorkout;
 
   return (
-    <div key={day.dayOfWeek} className="flex items-start gap-3 py-2">
-      <span className="w-16 shrink-0 text-xs font-medium text-gray-500 pt-0.5">{day.dayOfWeek.slice(0, 3)}</span>
-      <div className="flex-1 space-y-1">
+    <div key={day.dayOfWeek} className="grid gap-3 py-3 lg:grid-cols-[6rem_1fr]">
+      <div>
+        <p className="text-xs font-medium text-gray-500">{day.dayOfWeek.slice(0, 3)}</p>
+        <p className="text-xs text-gray-400">{formatShortDate(day.date)}</p>
+      </div>
+      <div className="flex-1 space-y-3 rounded-lg border border-gray-100 p-3">
         {/* Primary workout */}
         <div className="flex items-center gap-2">
           <span className="text-lg">{workoutEmoji[currentWorkout.type] ?? "🏃"}</span>
@@ -124,14 +184,110 @@ function renderDay(day: DailyPlan, isSwapped: boolean) {
             </div>
           </div>
         )}
+        <DailyLogControls
+          day={day}
+          draft={draft}
+          log={log}
+          plannedMileage={plannedMileage}
+          onDraftChange={onDraftChange}
+          onSave={handleSaveLog}
+        />
       </div>
     </div>
   );
 }
 
-export default function WeeklyPlanCard({ week, isExpanded, onToggle }: WeeklyPlanCardProps) {
+function DailyLogControls({
+  day,
+  draft,
+  log,
+  plannedMileage,
+  onDraftChange,
+  onSave,
+}: {
+  day: DailyPlan;
+  draft: DayLogDraft;
+  log?: DailyLog;
+  plannedMileage: number;
+  onDraftChange: (dayOfWeek: string, patch: Partial<DayLogDraft>) => void;
+  onSave: () => void;
+}) {
+  return (
+    <div className="grid gap-2 border-t border-gray-100 pt-3 sm:grid-cols-[8rem_8rem_1fr_auto] sm:items-end">
+      <label className="block">
+        <span className="text-xs font-medium text-gray-500">Actual mi</span>
+        <input
+          type="number"
+          min={0}
+          max={40}
+          step={0.1}
+          value={draft.actualMileage}
+          onChange={(e) =>
+            onDraftChange(day.dayOfWeek, { actualMileage: parseFloat(e.target.value) || 0 })
+          }
+          className="mt-1 w-full rounded border border-gray-300 px-2 py-1 text-sm focus:border-enduro-500 focus:outline-none focus:ring-1 focus:ring-enduro-500/20"
+        />
+      </label>
+      <label className="block">
+        <span className="text-xs font-medium text-gray-500">Feel</span>
+        <select
+          value={draft.feelRating}
+          onChange={(e) => onDraftChange(day.dayOfWeek, { feelRating: parseInt(e.target.value) })}
+          className="mt-1 w-full rounded border border-gray-300 px-2 py-1 text-sm focus:border-enduro-500 focus:outline-none focus:ring-1 focus:ring-enduro-500/20"
+        >
+          {Array.from({ length: 10 }, (_, index) => index + 1).map((value) => (
+            <option key={value} value={value}>
+              {value}/10
+            </option>
+          ))}
+        </select>
+      </label>
+      <label className="block">
+        <span className="text-xs font-medium text-gray-500">Notes</span>
+        <input
+          type="text"
+          value={draft.notes}
+          onChange={(e) => onDraftChange(day.dayOfWeek, { notes: e.target.value })}
+          placeholder="How did it go?"
+          className="mt-1 w-full rounded border border-gray-300 px-2 py-1 text-sm focus:border-enduro-500 focus:outline-none focus:ring-1 focus:ring-enduro-500/20"
+        />
+      </label>
+      <div className="flex items-center gap-2">
+        <label className="flex items-center gap-1 text-xs text-gray-600">
+          <input
+            type="checkbox"
+            checked={draft.completed}
+            onChange={(e) => onDraftChange(day.dayOfWeek, { completed: e.target.checked })}
+            className="rounded border-gray-300 text-enduro-600 focus:ring-enduro-500"
+          />
+          Done
+        </label>
+        <button
+          type="button"
+          onClick={onSave}
+          className="rounded bg-enduro-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-enduro-700"
+        >
+          {log ? "Update" : "Log"}
+        </button>
+      </div>
+      <p className="text-xs text-gray-400 sm:col-span-4">
+        Planned {plannedMileage} mi{log ? ` · Logged ${log.actualMileage} mi` : ""}
+      </p>
+    </div>
+  );
+}
+
+export default function WeeklyPlanCard({
+  planId,
+  week,
+  isExpanded,
+  onToggle,
+  dailyLogs,
+  onDailyLogSaved,
+}: WeeklyPlanCardProps) {
   // Track swapped workouts by day-of-week key
   const [swappedWorkouts, setSwappedWorkouts] = useState<Record<string, Workout | null>>({});
+  const [drafts, setDrafts] = useState<Record<string, DayLogDraft>>({});
 
   // Listen for swap events from child renders
   useEffect(() => {
@@ -210,6 +366,48 @@ export default function WeeklyPlanCard({ week, isExpanded, onToggle }: WeeklyPla
     return () => window.removeEventListener("workout-swap", handler);
   }, []);
 
+  useEffect(() => {
+    setDrafts((prev) => {
+      const next = { ...prev };
+      week.days.forEach((day) => {
+        const log = dailyLogs.find(
+          (entry) => entry.weekNumber === week.weekNumber && entry.dayOfWeek === day.dayOfWeek
+        );
+        const plannedMileage =
+          (day.workout?.weeklyMileageContribution ?? 0) +
+          (day.secondaryWorkout?.weeklyMileageContribution ?? 0);
+        next[day.dayOfWeek] = {
+          actualMileage: log?.actualMileage ?? plannedMileage,
+          completed: log?.completed ?? false,
+          feelRating: log?.feelRating ?? 5,
+          notes: log?.notes ?? "",
+        };
+      });
+      return next;
+    });
+  }, [dailyLogs, week]);
+
+  const updateDraft = (dayOfWeek: string, patch: Partial<DayLogDraft>) => {
+    setDrafts((prev) => {
+      const existing =
+        prev[dayOfWeek] ??
+        ({
+          actualMileage: 0,
+          completed: false,
+          feelRating: 5,
+          notes: "",
+        } satisfies DayLogDraft);
+
+      return {
+        ...prev,
+        [dayOfWeek]: {
+          ...existing,
+          ...patch,
+        },
+      };
+    });
+  };
+
   // Recalculate weekly mileage with swaps applied
   const adjustedMileage = week.days.reduce((sum, day) => {
     const workout = swappedWorkouts[day.dayOfWeek] ?? day.workout;
@@ -260,7 +458,28 @@ export default function WeeklyPlanCard({ week, isExpanded, onToggle }: WeeklyPla
                 workout: effectiveWorkout,
                 isRestDay: swapped === null,
               };
-              return renderDay(adjustedDay, isSwapped);
+              const log = dailyLogs.find(
+                (entry) => entry.weekNumber === week.weekNumber && entry.dayOfWeek === day.dayOfWeek
+              );
+              const plannedMileage =
+                (adjustedDay.workout?.weeklyMileageContribution ?? 0) +
+                (adjustedDay.secondaryWorkout?.weeklyMileageContribution ?? 0);
+              const draft = drafts[day.dayOfWeek] ?? {
+                actualMileage: log?.actualMileage ?? plannedMileage,
+                completed: log?.completed ?? false,
+                feelRating: log?.feelRating ?? 5,
+                notes: log?.notes ?? "",
+              };
+              return renderDay(
+                planId,
+                week.weekNumber,
+                adjustedDay,
+                isSwapped,
+                log,
+                draft,
+                updateDraft,
+                onDailyLogSaved
+              );
             })}
           </div>
 

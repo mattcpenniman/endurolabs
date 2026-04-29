@@ -3,8 +3,8 @@
 // ============================================================
 
 import { describe, it, expect } from "vitest";
-import { analyzeProgress, getMileageTrend } from "@/lib/training/progress-tracker";
-import { MarathonPlan, WeeklyLog } from "@/lib/training/models";
+import { analyzeProgress, dailyLogsToWeeklyLogs, getMileageTrend } from "@/lib/training/progress-tracker";
+import { DailyLog, MarathonPlan, WeeklyLog } from "@/lib/training/models";
 
 function makePlan(): MarathonPlan {
   return {
@@ -50,7 +50,49 @@ function makePlan(): MarathonPlan {
         longRunDistance: 6,
         isDownWeek: false,
         intensityDistribution: { easy: 32, threshold: 0, marathon: 0, vo2: 0 },
-        days: [],
+        days: [
+          {
+            date: "2026-05-04",
+            dayOfWeek: "Monday",
+            workout: null,
+            isRestDay: true,
+            plannedMileage: 0,
+          },
+          {
+            date: "2026-05-05",
+            dayOfWeek: "Tuesday",
+            workout: {
+              id: "easy-1",
+              type: "easy",
+              title: "Easy",
+              description: "",
+              segments: [],
+              totalDistance: 4,
+              estimatedDuration: 40,
+              weeklyMileageContribution: 4,
+              intensityCategory: "easy",
+            },
+            isRestDay: false,
+            plannedMileage: 4,
+          },
+          {
+            date: "2026-05-10",
+            dayOfWeek: "Sunday",
+            workout: {
+              id: "long-1",
+              type: "long",
+              title: "Long",
+              description: "",
+              segments: [],
+              totalDistance: 6,
+              estimatedDuration: 60,
+              weeklyMileageContribution: 6,
+              intensityCategory: "easy",
+            },
+            isRestDay: false,
+            plannedMileage: 6,
+          },
+        ],
       },
       {
         weekNumber: 2,
@@ -207,6 +249,45 @@ describe("analyzeProgress", () => {
     ];
     const result = analyzeProgress(plan, logs);
     expect(result.adjustmentSuggestions.some((s) => s.toLowerCase().includes("track"))).toBe(true);
+  });
+});
+
+describe("dailyLogsToWeeklyLogs", () => {
+  it("aggregates daily logs into weekly progress", () => {
+    const plan = makePlan();
+    const dailyLogs: DailyLog[] = [
+      {
+        weekNumber: 1,
+        date: "2026-05-05",
+        dayOfWeek: "Tuesday",
+        actualMileage: 4,
+        completed: true,
+        feelRating: 7,
+        notes: "smooth",
+        loggedAt: "2026-05-05T12:00:00.000Z",
+      },
+      {
+        weekNumber: 1,
+        date: "2026-05-10",
+        dayOfWeek: "Sunday",
+        actualMileage: 5,
+        completed: false,
+        feelRating: 5,
+        notes: "cut short",
+        loggedAt: "2026-05-10T12:00:00.000Z",
+      },
+    ];
+
+    const weeklyLogs = dailyLogsToWeeklyLogs(plan, dailyLogs);
+
+    expect(weeklyLogs).toHaveLength(1);
+    expect(weeklyLogs[0].actualMileage).toBe(9);
+    expect(weeklyLogs[0].longRunActual).toBe(5);
+    expect(weeklyLogs[0].longRunPlanned).toBe(6);
+    expect(weeklyLogs[0].feelRating).toBe(6);
+    expect(weeklyLogs[0].adherence).toBe(50);
+    expect(weeklyLogs[0].notes).toContain("smooth");
+    expect(weeklyLogs[0].notes).toContain("cut short");
   });
 });
 

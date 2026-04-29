@@ -16,12 +16,12 @@ import PlanOverviewCard from "@/app/components/plan/PlanOverviewCard";
 import PaceZonesCard from "@/app/components/plan/PaceZonesCard";
 import WeeklyPlanCard from "@/app/components/plan/WeeklyPlanCard";
 import RaceDayPlanCard from "@/app/components/plan/RaceDayPlanCard";
-import WeeklyProgressTracker from "@/app/components/plan/WeeklyProgressTracker";
 import MileageTrendChart from "@/app/components/charts/MileageTrendChart";
 import LongRunProgressionChart from "@/app/components/charts/LongRunProgressionChart";
 import IntensityDistributionChart from "@/app/components/charts/IntensityDistributionChart";
 import { generateRaceDayPlan } from "@/lib/training/race-day-plan";
 import { calculatePaceZones, calculatePowerZones } from "@/lib/training/zone-calculator";
+import { analyzeProgress, dailyLogsToWeeklyLogs, loadDailyLogs } from "@/lib/training/progress-tracker";
 
 // Shape of a saved plan row from the database
 interface SavedPlanRow {
@@ -53,6 +53,7 @@ export default function PlanPage(): React.ReactNode {
   const [weeksOverride, setWeeksOverride] = useState<number | null>(null);
   const [planName, setPlanName] = useState("");
   const [activePlanTab, setActivePlanTab] = useState<"training" | "race">("training");
+  const [dailyLogRefresh, setDailyLogRefresh] = useState(0);
 
   // Load saved plans on mount
   useEffect(() => {
@@ -393,6 +394,10 @@ export default function PlanPage(): React.ReactNode {
   if (!plan) return null;
   const currentPaceZones = calculatePaceZones(plan.runnerProfile);
   const currentPowerZones = calculatePowerZones(plan.runnerProfile, currentPaceZones);
+  const dailyLogs = loadDailyLogs(plan.id);
+  const weeklyLogs = dailyLogsToWeeklyLogs(plan, dailyLogs);
+  const progress = analyzeProgress(plan, weeklyLogs);
+  void dailyLogRefresh;
 
   return (
     <div className="section-padding">
@@ -541,21 +546,50 @@ export default function PlanPage(): React.ReactNode {
               <IntensityDistributionChart plan={plan} />
             </div>
 
-            {/* Weekly progress tracker */}
-            <div className="mb-8">
-              <WeeklyProgressTracker plan={plan} />
-            </div>
-
             {/* Weekly plan */}
             <div className="mb-8">
-              <h2 className="mb-4 text-2xl font-bold text-gray-900">Weekly Schedule</h2>
+              <div className="mb-4 flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
+                <div>
+                  <h2 className="text-2xl font-bold text-gray-900">Weekly Schedule</h2>
+                  <p className="text-sm text-gray-500">Log actual mileage, completion, feel, and notes inside each day.</p>
+                </div>
+                <div className="grid grid-cols-3 gap-3 text-center">
+                  <div className="rounded-lg bg-enduro-50 px-4 py-3">
+                    <p className="text-lg font-bold text-enduro-700">{progress.averageFeel || "-"}</p>
+                    <p className="text-xs text-enduro-600">Avg Feel</p>
+                  </div>
+                  <div className="rounded-lg bg-blue-50 px-4 py-3">
+                    <p className="text-lg font-bold text-blue-700">{progress.averageAdherence || "-"}%</p>
+                    <p className="text-xs text-blue-600">Adherence</p>
+                  </div>
+                  <div className="rounded-lg bg-purple-50 px-4 py-3">
+                    <p className="text-lg font-bold text-purple-700">{progress.projectedPeakMileage || "-"}</p>
+                    <p className="text-xs text-purple-600">Projected Peak</p>
+                  </div>
+                </div>
+              </div>
+              {progress.adjustmentSuggestions.length > 0 && (
+                <div className="mb-4 rounded-xl border border-amber-200 bg-amber-50 p-4">
+                  <h3 className="mb-2 text-sm font-semibold text-amber-900">Progress Suggestions</h3>
+                  <ul className="space-y-1">
+                    {progress.adjustmentSuggestions.map((suggestion, index) => (
+                      <li key={index} className="text-sm text-amber-800">
+                        {suggestion}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
               <div className="space-y-3">
                 {plan.weeks.map((week) => (
                   <WeeklyPlanCard
                     key={week.weekNumber}
+                    planId={plan.id}
                     week={week}
                     isExpanded={expandedWeeks.has(week.weekNumber)}
                     onToggle={() => toggleWeek(week.weekNumber)}
+                    dailyLogs={dailyLogs}
+                    onDailyLogSaved={() => setDailyLogRefresh((value) => value + 1)}
                   />
                 ))}
               </div>

@@ -5,11 +5,12 @@
 // and generates adjustment suggestions based on trends.
 // ============================================================
 
-import { WeeklyLog, WeeklyProgress, MarathonPlan } from "./models";
+import { DailyLog, WeeklyLog, WeeklyProgress, MarathonPlan } from "./models";
 
 // ─── Storage Keys ─────────────────────────────────────────
 
 const STORAGE_KEY = "endurlab-progress";
+const DAILY_STORAGE_KEY = "endurlab-daily-progress";
 
 // ─── Load / Save ──────────────────────────────────────────
 
@@ -40,6 +41,77 @@ export function addLog(planId: string, log: WeeklyLog): WeeklyLog[] {
   }
   saveLogs(planId, logs);
   return logs;
+}
+
+export function loadDailyLogs(planId: string): DailyLog[] {
+  try {
+    const raw = localStorage.getItem(`${DAILY_STORAGE_KEY}-${planId}`);
+    return raw ? JSON.parse(raw) : [];
+  } catch {
+    return [];
+  }
+}
+
+export function saveDailyLogs(planId: string, logs: DailyLog[]): void {
+  try {
+    localStorage.setItem(`${DAILY_STORAGE_KEY}-${planId}`, JSON.stringify(logs));
+  } catch {
+    // Storage full or unavailable — silently fail
+  }
+}
+
+export function addDailyLog(planId: string, log: DailyLog): DailyLog[] {
+  const logs = loadDailyLogs(planId);
+  const existingIdx = logs.findIndex(
+    (l) => l.weekNumber === log.weekNumber && l.dayOfWeek === log.dayOfWeek
+  );
+
+  if (existingIdx >= 0) {
+    logs[existingIdx] = log;
+  } else {
+    logs.push(log);
+  }
+
+  saveDailyLogs(planId, logs);
+  return logs;
+}
+
+export function dailyLogsToWeeklyLogs(plan: MarathonPlan, dailyLogs: DailyLog[]): WeeklyLog[] {
+  return plan.weeks
+    .map((week) => {
+      const weekLogs = dailyLogs.filter((log) => log.weekNumber === week.weekNumber);
+      if (weekLogs.length === 0) return null;
+
+      const longRunDay = week.days.find((day) => day.workout?.type === "long");
+      const longRunLog = longRunDay
+        ? weekLogs.find((log) => log.dayOfWeek === longRunDay.dayOfWeek)
+        : undefined;
+      const completedCount = weekLogs.filter((log) => log.completed).length;
+      const plannedWorkoutCount = week.days.filter((day) => !day.isRestDay && day.workout).length;
+      const adherence =
+        plannedWorkoutCount > 0
+          ? Math.round((completedCount / plannedWorkoutCount) * 100)
+          : 100;
+
+      return {
+        weekNumber: week.weekNumber,
+        actualMileage: Math.round(weekLogs.reduce((sum, log) => sum + log.actualMileage, 0) * 10) / 10,
+        plannedMileage: week.totalMileage,
+        longRunActual: longRunLog?.actualMileage ?? 0,
+        longRunPlanned: week.longRunDistance,
+        feelRating:
+          Math.round(
+            (weekLogs.reduce((sum, log) => sum + log.feelRating, 0) / weekLogs.length) * 10
+          ) / 10,
+        adherence,
+        notes: weekLogs
+          .map((log) => log.notes.trim())
+          .filter(Boolean)
+          .join(" | "),
+        loggedAt: weekLogs[weekLogs.length - 1].loggedAt,
+      };
+    })
+    .filter((log): log is WeeklyLog => log !== null);
 }
 
 // ─── Progress Analysis ────────────────────────────────────
