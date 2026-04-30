@@ -21,7 +21,7 @@ function makeId(type: WorkoutType, week: number, index: number): string {
 }
 
 function roundMiles(distance: number): number {
-  return Math.round(distance * 10) / 10;
+  return Math.round(distance * 4) / 4;
 }
 
 function formatMiles(distance: number): string {
@@ -104,7 +104,9 @@ export function createThresholdRun(
   paceZones: PaceZones,
   powerZones?: PowerZones
 ): Workout {
-  const easyDistance = totalDistance - thresholdDistance;
+  const actualTotalDistance = roundMiles(totalDistance);
+  const workDistance = roundMiles(thresholdDistance);
+  const easyDistance = Math.max(0, actualTotalDistance - workDistance);
   const warmupDistance = roundMiles(easyDistance / 2);
   const cooldownDistance = roundMiles(easyDistance - warmupDistance);
   const segments: WorkoutSegment[] = [
@@ -116,8 +118,8 @@ export function createThresholdRun(
       type: "easy",
     },
     {
-      description: `Threshold block — ${formatMiles(thresholdDistance)} at threshold pace`,
-      distance: thresholdDistance,
+      description: `Threshold block — ${formatMiles(workDistance)} at threshold pace`,
+      distance: workDistance,
       pace: paceZones.threshold,
       power: powerZones?.threshold,
       effort: paceZones.thresholdEffort,
@@ -135,15 +137,15 @@ export function createThresholdRun(
   return {
     id: makeId("threshold", week, index),
     type: "threshold",
-    title: `${thresholdDistance} mi Threshold Run`,
+    title: `${workDistance} mi Threshold Run`,
     description: `Sustained effort at lactate threshold. Build up gradually, settle into threshold pace, hold steady.`,
     segments,
-    totalDistance,
+    totalDistance: actualTotalDistance,
     estimatedDuration: Math.round(
       easyDistance * ((paceZones.easy.min + paceZones.easy.max) / 2) +
-      thresholdDistance * paceZones.threshold
+      workDistance * paceZones.threshold
     ),
-    weeklyMileageContribution: totalDistance,
+    weeklyMileageContribution: actualTotalDistance,
     intensityCategory: "hard",
   };
 }
@@ -297,27 +299,31 @@ export function createMarathonPaceRun(
   paceZones: PaceZones,
   powerZones?: PowerZones
 ): Workout {
-  const easyDistance = totalDistance - mpDistance;
+  const actualTotalDistance = roundMiles(totalDistance);
+  const marathonDistance = roundMiles(mpDistance);
+  const easyDistance = Math.max(0, actualTotalDistance - marathonDistance);
+  const warmupDistance = roundMiles(easyDistance / 2);
+  const cooldownDistance = roundMiles(easyDistance - warmupDistance);
 
   const segments: WorkoutSegment[] = [
     {
-      description: "Warm-up — easy pace",
-      distance: easyDistance * 0.3,
+      description: `Warm-up — ${formatMiles(warmupDistance)} easy pace`,
+      distance: warmupDistance,
       pace: (paceZones.easy.min + paceZones.easy.max) / 2,
       effort: paceZones.easyEffort,
       type: "easy",
     },
     {
-      description: `${mpDistance} miles at marathon goal pace`,
-      distance: mpDistance,
+      description: `${formatMiles(marathonDistance)} at marathon goal pace`,
+      distance: marathonDistance,
       pace: paceZones.marathon,
       power: powerZones?.marathon,
       effort: paceZones.marathonEffort,
       type: "marathon_pace",
     },
     {
-      description: "Cool-down — easy pace",
-      distance: easyDistance * 0.7,
+      description: `Cool-down — ${formatMiles(cooldownDistance)} easy pace`,
+      distance: cooldownDistance,
       pace: (paceZones.easy.min + paceZones.easy.max) / 2,
       effort: paceZones.easyEffort,
       type: "easy",
@@ -327,15 +333,15 @@ export function createMarathonPaceRun(
   return {
     id: makeId("marathon_pace", week, index),
     type: "marathon_pace",
-    title: `${mpDistance} mi @ Marathon Pace`,
+    title: `${marathonDistance} mi @ Marathon Pace`,
     description: `Practice at goal marathon pace. Focus on even splits and consistent effort.`,
     segments,
-    totalDistance,
+    totalDistance: actualTotalDistance,
     estimatedDuration: Math.round(
       easyDistance * ((paceZones.easy.min + paceZones.easy.max) / 2) +
-      mpDistance * paceZones.marathon
+      marathonDistance * paceZones.marathon
     ),
-    weeklyMileageContribution: totalDistance,
+    weeklyMileageContribution: actualTotalDistance,
     intensityCategory: "moderate",
   };
 }
@@ -382,27 +388,30 @@ export function createProgressionRun(
   paceZones: PaceZones,
   powerZones?: PowerZones
 ): Workout {
-  const third = totalDistance / 3;
+  const actualTotalDistance = roundMiles(totalDistance);
+  const first = roundMiles(actualTotalDistance / 3);
+  const middle = roundMiles(actualTotalDistance / 3);
+  const final = roundMiles(actualTotalDistance - first - middle);
 
   const segments: WorkoutSegment[] = [
     {
-      description: "First third — easy pace",
-      distance: third,
+      description: `First section — ${formatMiles(first)} easy pace`,
+      distance: first,
       pace: (paceZones.easy.min + paceZones.easy.max) / 2,
       effort: paceZones.easyEffort,
       type: "easy",
     },
     {
-      description: "Middle third — marathon pace",
-      distance: third,
+      description: `Middle section — ${formatMiles(middle)} marathon pace`,
+      distance: middle,
       pace: paceZones.marathon,
       power: powerZones?.marathon,
       effort: paceZones.marathonEffort,
       type: "marathon_pace",
     },
     {
-      description: "Final third — threshold pace",
-      distance: third,
+      description: `Final section — ${formatMiles(final)} threshold pace`,
+      distance: final,
       pace: paceZones.threshold,
       power: powerZones?.threshold,
       effort: paceZones.thresholdEffort,
@@ -413,16 +422,16 @@ export function createProgressionRun(
   return {
     id: makeId("progression", week, index),
     type: "progression",
-    title: `${totalDistance} mi Progression Run`,
+    title: `${actualTotalDistance} mi Progression Run`,
     description: `Start easy, finish strong. Gradually increase pace through marathon to threshold.`,
     segments,
-    totalDistance,
+    totalDistance: actualTotalDistance,
     estimatedDuration: Math.round(
-      third * ((paceZones.easy.min + paceZones.easy.max) / 2) +
-      third * paceZones.marathon +
-      third * paceZones.threshold
+      first * ((paceZones.easy.min + paceZones.easy.max) / 2) +
+      middle * paceZones.marathon +
+      final * paceZones.threshold
     ),
-    weeklyMileageContribution: totalDistance,
+    weeklyMileageContribution: actualTotalDistance,
     intensityCategory: "moderate",
   };
 }

@@ -105,10 +105,9 @@ function selectTrainingDays(
   longRunDays: string[]
 ): string[] {
   const allDays = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
-  const restDayIndex = DAY_INDEX[preferredRestDay] ?? 0;
 
   // Start with all days, remove rest days
-  const trainingDays = allDays.filter((_, i) => i !== restDayIndex);
+  const trainingDays = allDays.filter((day) => day !== preferredRestDay);
 
   // If fewer days requested, remove days adjacent to rest day first
   while (trainingDays.length > daysPerWeek) {
@@ -226,7 +225,7 @@ function nearestVO2RepDistance(vo2Pace: number, targetRepMinutes: number): numbe
 }
 
 function roundMiles(distance: number): number {
-  return Math.round(distance * 10) / 10;
+  return Math.round(distance * 4) / 4;
 }
 
 function distributeVariedMileage(totalMileage: number, dayCount: number, week: number): number[] {
@@ -451,7 +450,7 @@ function assignWorkoutsForWeek(
     }
   }
 
-  const mileageDelta = Math.round((weeklyMileage - assignedMileage) * 10) / 10;
+  const mileageDelta = roundMiles(weeklyMileage - assignedMileage);
   if (Math.abs(mileageDelta) >= 0.1) {
     const adjustableDay =
       days.find((d) => d.dayOfWeek !== longRunDay && d.workout?.type === "easy") ??
@@ -461,12 +460,12 @@ function assignWorkoutsForWeek(
     if (adjustableDay?.workout) {
       const adjustedDistance = Math.max(
         1,
-        Math.round((adjustableDay.workout.totalDistance + mileageDelta) * 10) / 10
+        roundMiles(adjustableDay.workout.totalDistance + mileageDelta)
       );
       const contributionDelta = adjustedDistance - adjustableDay.workout.totalDistance;
       adjustableDay.workout.totalDistance = adjustedDistance;
       adjustableDay.workout.weeklyMileageContribution = adjustedDistance;
-      adjustableDay.plannedMileage = Math.round((adjustableDay.plannedMileage + contributionDelta) * 10) / 10;
+      adjustableDay.plannedMileage = roundMiles(adjustableDay.plannedMileage + contributionDelta);
     }
   }
 

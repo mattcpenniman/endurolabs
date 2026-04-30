@@ -40,6 +40,10 @@ interface SavePlanResponse {
   planData: MarathonPlan;
 }
 
+type PlanTab = "overview" | "schedule" | "race" | "settings";
+
+const DAYS_OF_WEEK = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
+
 export default function PlanPage(): React.ReactNode {
   const [plan, setPlan] = useState<MarathonPlan | null>(null);
   const [isLoading, setIsLoading] = useState(false);
@@ -52,7 +56,7 @@ export default function PlanPage(): React.ReactNode {
   const [runsPerWeek, setRunsPerWeek] = useState<number | null>(null);
   const [weeksOverride, setWeeksOverride] = useState<number | null>(null);
   const [planName, setPlanName] = useState("");
-  const [activePlanTab, setActivePlanTab] = useState<"overview" | "schedule" | "race">("overview");
+  const [activePlanTab, setActivePlanTab] = useState<PlanTab>("overview");
   const [dailyLogRefresh, setDailyLogRefresh] = useState(0);
 
   // Load saved plans on mount
@@ -262,6 +266,32 @@ export default function PlanPage(): React.ReactNode {
     }
   };
 
+  const handleAdjustRestDay = async (newRestDay: string) => {
+    if (!plan || newRestDay === plan.runnerProfile.preferredRestDay) return;
+    setIsLoading(true);
+    try {
+      const profile = {
+        ...plan.runnerProfile,
+        raceName: planName.trim() || undefined,
+        preferredRestDay: newRestDay,
+      };
+      const response = await fetch("/api/plan/generate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(profile),
+      });
+      if (!response.ok) throw new Error("Failed to regenerate plan");
+      const regenerated = await response.json();
+      regenerated.id = plan.id;
+      const savedPlan = await persistPlan(regenerated, planName);
+      setPlan(savedPlan ?? regenerated);
+    } catch {
+      // Silently fail
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
   const handleExportCalendar = async () => {
     if (!plan) return;
 
@@ -397,6 +427,14 @@ export default function PlanPage(): React.ReactNode {
   const dailyLogs = loadDailyLogs(plan.id);
   const weeklyLogs = dailyLogsToWeeklyLogs(plan, dailyLogs);
   const progress = analyzeProgress(plan, weeklyLogs);
+  const trainingDayCount = plan.runnerProfile.trainingDaysPerWeek;
+  const currentRunCount =
+    runsPerWeek ??
+    (plan.runnerProfile.runsPerWeekOverride
+      ? Math.max(3, Math.min(10, plan.runnerProfile.runsPerWeekOverride))
+      : trainingDayCount);
+  const doubleUpDays = Math.max(0, currentRunCount - trainingDayCount);
+  const maxDoubleUpDays = Math.max(0, 10 - trainingDayCount);
   void dailyLogRefresh;
 
   return (
@@ -510,11 +548,12 @@ export default function PlanPage(): React.ReactNode {
             { id: "overview", label: "Plan Overview" },
             { id: "schedule", label: "Weekly Schedule" },
             { id: "race", label: "Race Day" },
+            { id: "settings", label: "Settings" },
           ].map((tab) => (
             <button
               key={tab.id}
               type="button"
-              onClick={() => setActivePlanTab(tab.id as "overview" | "schedule" | "race")}
+              onClick={() => setActivePlanTab(tab.id as PlanTab)}
               className={`flex-1 rounded-md px-4 py-2 text-sm font-medium transition-colors ${
                 activePlanTab === tab.id
                   ? "bg-white text-enduro-700 shadow-sm"
@@ -620,7 +659,7 @@ export default function PlanPage(): React.ReactNode {
               </div>
             )}
           </>
-        ) : (
+        ) : activePlanTab === "race" ? (
           <div className="mb-8">
             <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
               <h2 className="text-2xl font-bold text-gray-900">Race Day Plan</h2>
@@ -656,6 +695,62 @@ export default function PlanPage(): React.ReactNode {
                 pacingStrategy
               )}
             />
+          </div>
+        ) : (
+          <div className="mb-8">
+            <div className="mb-6">
+              <h2 className="text-2xl font-bold text-gray-900">Plan Settings</h2>
+              <p className="text-sm text-gray-500">Changes regenerate and save the current plan.</p>
+            </div>
+
+            <div className="grid gap-4 md:grid-cols-2">
+              <div className="rounded-lg border border-gray-200 bg-white p-5">
+                <label htmlFor="rest-day" className="block text-sm font-semibold text-gray-900">
+                  Rest day
+                </label>
+                <p className="mt-1 text-sm text-gray-500">
+                  Long run day: {plan.runnerProfile.availableLongRunDays[0] ?? "Sunday"}
+                </p>
+                <select
+                  id="rest-day"
+                  value={plan.runnerProfile.preferredRestDay}
+                  onChange={(e) => handleAdjustRestDay(e.target.value)}
+                  disabled={isLoading}
+                  className="mt-4 w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-700 focus:border-enduro-500 focus:outline-none focus:ring-2 focus:ring-enduro-500/20 disabled:opacity-60"
+                >
+                  {DAYS_OF_WEEK.map((day) => {
+                    const isLongRunDay = day === (plan.runnerProfile.availableLongRunDays[0] ?? "Sunday");
+                    return (
+                      <option key={day} value={day} disabled={isLongRunDay}>
+                        {day}{isLongRunDay ? " (long run)" : ""}
+                      </option>
+                    );
+                  })}
+                </select>
+              </div>
+
+              <div className="rounded-lg border border-gray-200 bg-white p-5">
+                <label htmlFor="double-up-days" className="block text-sm font-semibold text-gray-900">
+                  Double-up days
+                </label>
+                <p className="mt-1 text-sm text-gray-500">
+                  {trainingDayCount} training days, {currentRunCount} total runs per week.
+                </p>
+                <select
+                  id="double-up-days"
+                  value={doubleUpDays}
+                  onChange={(e) => handleAdjustRunsPerWeek(trainingDayCount + Number(e.target.value))}
+                  disabled={isLoading}
+                  className="mt-4 w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-700 focus:border-enduro-500 focus:outline-none focus:ring-2 focus:ring-enduro-500/20 disabled:opacity-60"
+                >
+                  {Array.from({ length: maxDoubleUpDays + 1 }, (_, count) => (
+                    <option key={count} value={count}>
+                      {count === 0 ? "No double-up days" : `${count} double-up ${count === 1 ? "day" : "days"}`}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            </div>
           </div>
         )}
       </div>

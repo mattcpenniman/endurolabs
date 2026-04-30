@@ -51,6 +51,10 @@ function scheduledRunCount(week: ReturnType<typeof generatePlan>["weeks"][number
   );
 }
 
+function isQuarterMile(distance: number): boolean {
+  return Number.isInteger(Math.round(distance * 100) / 25);
+}
+
 describe("generatePlan", () => {
   it("returns a MarathonPlan with all required fields", () => {
     const plan = generatePlan(makeProfile());
@@ -124,8 +128,25 @@ describe("generatePlan", () => {
       const longRun = week.days.find((day) => day.workout?.type === "long")?.workout;
 
       expect(longRun).toBeDefined();
-      expect(longRun?.totalDistance).toBe(Math.round(week.totalMileage * 0.25 * 10) / 10);
+      expect(longRun?.totalDistance).toBe(Math.round(week.totalMileage * 0.25 * 4) / 4);
       expect(week.longRunDistance).toBe(longRun?.totalDistance);
+    }
+  });
+
+  it("rounds scheduled run distances to the nearest quarter mile", () => {
+    const plan = generatePlan(makeProfile({ weeksOverride: 18, peakMileageOverride: 55 }));
+
+    for (const week of plan.weeks) {
+      for (const day of week.days) {
+        if (day.workout && day.workout.weeklyMileageContribution > 0) {
+          expect(isQuarterMile(day.workout.totalDistance)).toBe(true);
+          expect(isQuarterMile(day.workout.weeklyMileageContribution)).toBe(true);
+        }
+        if (day.secondaryWorkout && day.secondaryWorkout.weeklyMileageContribution > 0) {
+          expect(isQuarterMile(day.secondaryWorkout.totalDistance)).toBe(true);
+          expect(isQuarterMile(day.secondaryWorkout.weeklyMileageContribution)).toBe(true);
+        }
+      }
     }
   });
 
@@ -141,6 +162,23 @@ describe("generatePlan", () => {
       }
     }
     expect(restDayCount).toBeGreaterThan(0);
+  });
+
+  it("uses the selected preferred rest day when generating the schedule", () => {
+    const plan = generatePlan(
+      makeProfile({
+        preferredRestDay: "Friday",
+        availableLongRunDays: ["Sunday"],
+        trainingDaysPerWeek: 5,
+        runsPerWeekOverride: 5,
+      })
+    );
+
+    for (const week of plan.weeks) {
+      const friday = week.days.find((day) => day.dayOfWeek === "Friday");
+      expect(friday?.isRestDay).toBe(true);
+      expect(friday?.workout).toBeNull();
+    }
   });
 
   it("has adjustment rules for low mileage runners", () => {

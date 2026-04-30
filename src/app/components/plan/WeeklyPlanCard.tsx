@@ -74,6 +74,10 @@ function formatShortDate(date: string): string {
   }).format(new Date(date));
 }
 
+function formatMiles(distance: number): string {
+  return Number.isInteger(distance) ? `${distance}` : `${distance.toFixed(2).replace(/0$/, "")}`;
+}
+
 interface DayLogDraft {
   actualMileage: number;
   completed: boolean;
@@ -431,26 +435,50 @@ export default function WeeklyPlanCard({
         : day.secondaryWorkout?.weeklyMileageContribution ?? 0;
     return sum + (workout?.weeklyMileageContribution ?? 0) + secondaryMileage;
   }, 0);
+  const phaseLabel =
+    week.phase === "base" ? "Base" : week.phase === "marathon_build" ? "Marathon" : "Taper";
+  const qualityTotals = [
+    { label: "T", value: week.intensityDistribution.threshold, className: "bg-amber-50 text-amber-700" },
+    { label: "MP", value: week.intensityDistribution.marathon, className: "bg-blue-50 text-blue-700" },
+    { label: "VO2", value: week.intensityDistribution.vo2, className: "bg-red-50 text-red-700" },
+  ].filter((item) => item.value > 0);
 
   return (
     <div className="overflow-hidden rounded-xl border border-gray-200 bg-white shadow-sm">
       {/* Header */}
       <button
         onClick={onToggle}
-        className="flex w-full items-center justify-between p-4 hover:bg-gray-50"
+        className="flex w-full items-center justify-between gap-4 p-4 text-left hover:bg-gray-50"
       >
-        <div className="flex items-center gap-3">
-          <span className={`rounded-full px-2 py-1 text-xs font-bold ${
-            week.isDownWeek ? "bg-green-100 text-green-700" : "bg-gray-100 text-gray-700"
-          }`}>
-            Week {week.weekNumber}
-          </span>
-          <span className="text-sm font-medium text-gray-700">
-            {adjustedMileage} mi{Object.keys(swappedWorkouts).length > 0 ? " (adjusted)" : ""} · Long: {week.longRunDistance} mi
-          </span>
-          {week.isDownWeek && (
-            <span className="text-xs text-green-600">Recovery Week</span>
-          )}
+        <div className="min-w-0 flex-1">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className={`rounded-full px-2 py-1 text-xs font-bold ${
+              week.isDownWeek ? "bg-green-100 text-green-700" : "bg-gray-100 text-gray-700"
+            }`}>
+              Week {week.weekNumber}
+            </span>
+            <span className="text-sm font-medium text-gray-800">
+              Starts {formatShortDate(week.startDate)}
+            </span>
+            <span className="text-xs font-medium text-enduro-700">{phaseLabel}</span>
+            {week.isDownWeek && (
+              <span className="text-xs text-green-600">Recovery Week</span>
+            )}
+          </div>
+          <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-gray-600">
+            <span className="font-medium">
+              {formatMiles(adjustedMileage)} mi{Object.keys(swappedWorkouts).length > 0 ? " adjusted" : ""} total
+            </span>
+            <span>Long {formatMiles(week.longRunDistance)} mi</span>
+            <span className="rounded bg-green-50 px-2 py-1 text-green-700">
+              Easy {formatMiles(week.intensityDistribution.easy)} mi
+            </span>
+            {qualityTotals.map((item) => (
+              <span key={item.label} className={`rounded px-2 py-1 ${item.className}`}>
+                {item.label} {formatMiles(item.value)} mi
+              </span>
+            ))}
+          </div>
         </div>
         <span className={`text-gray-400 transition-transform ${isExpanded ? "rotate-180" : ""}`}>▼</span>
       </button>
@@ -503,10 +531,10 @@ export default function WeeklyPlanCard({
 
           {/* Intensity breakdown */}
           <div className="mt-3 flex gap-2 text-xs text-gray-500">
-            <span className="rounded bg-green-50 px-2 py-1">Easy: {Math.round(week.intensityDistribution.easy)} mi</span>
-            <span className="rounded bg-amber-50 px-2 py-1">Threshold: {Math.round(week.intensityDistribution.threshold)} mi</span>
-            <span className="rounded bg-blue-50 px-2 py-1">MP: {Math.round(week.intensityDistribution.marathon)} mi</span>
-            <span className="rounded bg-red-50 px-2 py-1">VO2: {Math.round(week.intensityDistribution.vo2)} mi</span>
+            <span className="rounded bg-green-50 px-2 py-1">Easy: {formatMiles(week.intensityDistribution.easy)} mi</span>
+            <span className="rounded bg-amber-50 px-2 py-1">Threshold: {formatMiles(week.intensityDistribution.threshold)} mi</span>
+            <span className="rounded bg-blue-50 px-2 py-1">MP: {formatMiles(week.intensityDistribution.marathon)} mi</span>
+            <span className="rounded bg-red-50 px-2 py-1">VO2: {formatMiles(week.intensityDistribution.vo2)} mi</span>
           </div>
         </div>
       )}
