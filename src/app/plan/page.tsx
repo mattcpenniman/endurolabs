@@ -16,6 +16,7 @@ import PlanOverviewCard from "@/app/components/plan/PlanOverviewCard";
 import PaceZonesCard from "@/app/components/plan/PaceZonesCard";
 import WeeklyPlanCard from "@/app/components/plan/WeeklyPlanCard";
 import RaceDayPlanCard from "@/app/components/plan/RaceDayPlanCard";
+import Sub3Scorecard from "@/app/components/plan/Sub3Scorecard";
 import MileageTrendChart from "@/app/components/charts/MileageTrendChart";
 import LongRunProgressionChart from "@/app/components/charts/LongRunProgressionChart";
 import IntensityDistributionChart from "@/app/components/charts/IntensityDistributionChart";
@@ -40,9 +41,16 @@ interface SavePlanResponse {
   planData: MarathonPlan;
 }
 
-type PlanTab = "overview" | "schedule" | "race" | "settings";
+type PlanTab = "overview" | "schedule" | "race" | "scorecard" | "settings";
+type RaceDistanceKey = NonNullable<RunnerProfile["raceDistance"]>;
 
 const DAYS_OF_WEEK = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
+const RACE_DISTANCES: Array<{ key: RaceDistanceKey; label: string; miles: number }> = [
+  { key: "marathon", label: "Marathon", miles: 26.2 },
+  { key: "half_marathon", label: "Half Marathon", miles: 13.1 },
+  { key: "10k", label: "10K", miles: 6.2 },
+  { key: "5k", label: "5K", miles: 3.1 },
+];
 
 export default function PlanPage(): React.ReactNode {
   const [plan, setPlan] = useState<MarathonPlan | null>(null);
@@ -295,6 +303,53 @@ export default function PlanPage(): React.ReactNode {
     }
   };
 
+  const handleAdjustRaceDate = async (newRaceDate: string) => {
+    if (!plan || !newRaceDate || newRaceDate === plan.runnerProfile.raceDate) return;
+    setIsLoading(true);
+    try {
+      const profile = {
+        ...plan.runnerProfile,
+        raceName: planName.trim() || undefined,
+        raceDate: newRaceDate,
+      };
+      const response = await fetch("/api/plan/generate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(profile),
+      });
+      if (!response.ok) throw new Error("Failed to regenerate plan");
+      const regenerated = await response.json();
+      regenerated.id = plan.id;
+      const savedPlan = await persistPlan(regenerated, planName);
+      setPlan(savedPlan ?? regenerated);
+    } catch {
+      // Silently fail
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleAdjustRaceDistance = async (newRaceDistance: RaceDistanceKey) => {
+    if (!plan || newRaceDistance === (plan.runnerProfile.raceDistance ?? "marathon")) return;
+    setIsSaving(true);
+    try {
+      const updatedPlan: MarathonPlan = {
+        ...plan,
+        runnerProfile: {
+          ...plan.runnerProfile,
+          raceName: planName.trim() || undefined,
+          raceDistance: newRaceDistance,
+        },
+      };
+      const savedPlan = await persistPlan(updatedPlan, planName);
+      setPlan(savedPlan ?? updatedPlan);
+    } catch {
+      // Silently fail
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
   const handleAdjustRestDay = async (newRestDay: string) => {
     if (!plan || newRestDay === plan.runnerProfile.preferredRestDay) return;
     setIsLoading(true);
@@ -478,6 +533,11 @@ export default function PlanPage(): React.ReactNode {
     (preferredDoubleUpDays.length === doubleUpDays ? preferredDoubleUpDays : inferredDoubleUpDays)
       .filter((day) => eligibleDoubleUpDays.includes(day));
   const maxDoubleUpDays = Math.min(eligibleDoubleUpDays.length, Math.max(0, 10 - trainingDayCount));
+  const selectedRaceDistance =
+    RACE_DISTANCES.find((distance) => distance.key === (plan.runnerProfile.raceDistance ?? "marathon")) ??
+    RACE_DISTANCES[0];
+  const raceGoalPace = plan.runnerProfile.goalMarathonTime / 26.2;
+  const selectedRaceGoalTime = raceGoalPace * selectedRaceDistance.miles;
   void dailyLogRefresh;
 
   return (
@@ -591,6 +651,7 @@ export default function PlanPage(): React.ReactNode {
             { id: "overview", label: "Plan Overview" },
             { id: "schedule", label: "Weekly Schedule" },
             { id: "race", label: "Race Day" },
+            { id: "scorecard", label: "Score Card" },
             { id: "settings", label: "Settings" },
           ].map((tab) => (
             <button
@@ -622,7 +683,7 @@ export default function PlanPage(): React.ReactNode {
 
             {/* Charts */}
             <div className="mb-8 grid gap-6 lg:grid-cols-2">
-              <MileageTrendChart plan={plan} />
+              <MileageTrendChart plan={plan} dailyLogs={dailyLogs} />
               <LongRunProgressionChart plan={plan} />
             </div>
             <div className="mb-8">
@@ -708,6 +769,25 @@ export default function PlanPage(): React.ReactNode {
               <h2 className="text-2xl font-bold text-gray-900">Race Day Plan</h2>
               <div className="flex flex-wrap gap-3">
                 <select
+                  value={selectedRaceDistance.key}
+                  onChange={(e) => handleAdjustRaceDistance(e.target.value as RaceDistanceKey)}
+                  disabled={isSaving}
+                  className="rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-700 focus:border-enduro-500 focus:outline-none focus:ring-2 focus:ring-enduro-500/20 disabled:opacity-60"
+                >
+                  {RACE_DISTANCES.map((distance) => (
+                    <option key={distance.key} value={distance.key}>
+                      {distance.label}
+                    </option>
+                  ))}
+                </select>
+                <input
+                  type="date"
+                  value={plan.runnerProfile.raceDate.slice(0, 10)}
+                  onChange={(e) => handleAdjustRaceDate(e.target.value)}
+                  disabled={isLoading}
+                  className="rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-700 focus:border-enduro-500 focus:outline-none focus:ring-2 focus:ring-enduro-500/20 disabled:opacity-60"
+                />
+                <select
                   value={pacingStrategy}
                   onChange={(e) => setPacingStrategy(e.target.value as typeof pacingStrategy)}
                   className="rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-700 focus:border-enduro-500 focus:outline-none focus:ring-2 focus:ring-enduro-500/20"
@@ -732,12 +812,24 @@ export default function PlanPage(): React.ReactNode {
             </div>
             <RaceDayPlanCard
               plan={generateRaceDayPlan(
-                plan.runnerProfile.goalMarathonTime,
+                selectedRaceGoalTime,
                 plan.runnerProfile.raceDate,
                 expectedTempF,
-                pacingStrategy
+                pacingStrategy,
+                selectedRaceDistance.miles,
+                selectedRaceDistance.label
               )}
             />
+          </div>
+        ) : activePlanTab === "scorecard" ? (
+          <div className="mb-8">
+            <div className="mb-6">
+              <h2 className="text-2xl font-bold text-gray-900">Sub-3 Score Card</h2>
+              <p className="text-sm text-gray-500">
+                Objective markers scored against the generated plan and logged actuals.
+              </p>
+            </div>
+            <Sub3Scorecard plan={plan} dailyLogs={dailyLogs} />
           </div>
         ) : (
           <div className="mb-8">

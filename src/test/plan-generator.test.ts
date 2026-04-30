@@ -77,6 +77,16 @@ describe("generatePlan", () => {
     expect(plan.weeks.length).toBe(plan.totalWeeks);
   });
 
+  it("starts the plan based on race date and plan length", () => {
+    const plan = generatePlan(makeProfile({ raceDate: "2026-12-01", weeksOverride: 18 }));
+    const expectedStart = new Date("2026-12-01T00:00:00.000Z");
+    expectedStart.setUTCDate(expectedStart.getUTCDate() - 18 * 7);
+
+    expect(new Date(plan.weeks[0].startDate).toISOString().slice(0, 10)).toBe(
+      expectedStart.toISOString().slice(0, 10)
+    );
+  });
+
   it("generates at least 14 weeks for a typical plan", () => {
     const plan = generatePlan(makeProfile());
     expect(plan.totalWeeks).toBeGreaterThanOrEqual(14);

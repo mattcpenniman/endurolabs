@@ -46,6 +46,7 @@ export interface RunnerProfile {
   currentHalfMarathonPR: number | null;   // minutes
   goalMarathonTime: number;               // minutes
   raceDate: string;                       // ISO date string
+  raceDistance?: "marathon" | "half_marathon" | "10k" | "5k";
   raceName?: string;                      // optional label for the race
   trainingDaysPerWeek: number;
   preferredRestDay: string;               // "Monday", "Tuesday", etc.
@@ -256,6 +257,8 @@ export interface RaceSplit {
 
 export interface RaceDayPlan {
   raceDate: string;
+  raceDistanceMiles: number;
+  raceDistanceLabel: string;
   goalTime: number;         // total minutes
   goalPace: number;         // min/mile
   splits: RaceSplit[];

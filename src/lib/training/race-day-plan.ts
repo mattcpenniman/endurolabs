@@ -17,21 +17,29 @@ import {
 
 function generateSplits(
   goalPace: number,
+  raceDistanceMiles: number,
   pacingStrategy: "even" | "negative" | "positive" | "progressive"
 ): RaceSplit[] {
   const splits: RaceSplit[] = [];
   let cumulativeTime = 0;
   const segments = [
-    ...Array.from({ length: 26 }, (_, index) => ({
+    ...Array.from({ length: Math.floor(raceDistanceMiles) }, (_, index) => ({
       mile: index + 1,
       distance: 1,
       midpoint: index + 0.5,
     })),
-    { mile: 26.2, distance: 0.2, midpoint: 26.1 },
   ];
+  const finalSegmentDistance = Math.round((raceDistanceMiles - Math.floor(raceDistanceMiles)) * 100) / 100;
+  if (finalSegmentDistance > 0) {
+    segments.push({
+      mile: raceDistanceMiles,
+      distance: finalSegmentDistance,
+      midpoint: Math.floor(raceDistanceMiles) + finalSegmentDistance / 2,
+    });
+  }
 
   const rawOffsetsSeconds = segments.map((segment) => {
-    const progress = segment.midpoint / 26.2;
+    const progress = segment.midpoint / raceDistanceMiles;
 
     switch (pacingStrategy) {
       case "even":
@@ -52,7 +60,7 @@ function generateSplits(
     rawOffsetsSeconds.reduce(
       (sum, offset, index) => sum + offset * segments[index].distance,
       0
-    ) / 26.2;
+    ) / raceDistanceMiles;
 
   segments.forEach((segment, index) => {
     const paceDeltaMinutes = (rawOffsetsSeconds[index] - weightedOffsetAverage) / 60;
@@ -62,24 +70,26 @@ function generateSplits(
     let effort = "Easy — stay relaxed";
     let notes = "";
 
-    if (segment.mile <= 3) {
+    const progress = segment.mile / raceDistanceMiles;
+
+    if (progress <= 0.12) {
       effort = "Easy — resist the urge to go fast";
       notes = segment.mile === 1 ? "Start slower than goal pace" : "";
-    } else if (segment.mile <= 10) {
+    } else if (progress <= 0.4) {
       effort = "Comfortable — find your rhythm";
-    } else if (segment.mile <= 13) {
+    } else if (progress <= 0.5) {
       effort = "Steady — you're in the groove";
-    } else if (segment.mile <= 20) {
+    } else if (progress <= 0.76) {
       effort = "Hard — focus on form and breathing";
-      if (pacingStrategy === "negative" && segment.mile > 13) {
+      if (pacingStrategy === "negative" && progress > 0.5) {
         notes = "This is where the race begins — hold your form";
       }
-    } else if (segment.mile <= 23) {
+    } else if (progress <= 0.88) {
       effort = "Very hard — dig deep, stay positive";
-      notes = "Mental toughness zone — break it into 3-mile chunks";
+      notes = "Mental toughness zone — break it into small chunks";
     } else {
       effort = "All out — empty the tank";
-      notes = "Final 3 miles — leave it all on the course";
+      notes = "Final stretch — leave it all on the course";
     }
 
     splits.push({
@@ -228,16 +238,20 @@ export function generateRaceDayPlan(
   goalTime: number,
   raceDate: string,
   expectedTempF: number,
-  pacingStrategy: "even" | "negative" | "positive" | "progressive" = "even"
+  pacingStrategy: "even" | "negative" | "positive" | "progressive" = "even",
+  raceDistanceMiles = 26.2,
+  raceDistanceLabel = "Marathon"
 ): RaceDayPlan {
-  const goalPace = goalTime / 26.2;
-  const splits = generateSplits(goalPace, pacingStrategy);
+  const goalPace = goalTime / raceDistanceMiles;
+  const splits = generateSplits(goalPace, raceDistanceMiles, pacingStrategy);
   const nutritionPlan = generateNutritionPlan(goalTime);
   const weatherAdjustments = generateWeatherAdjustments(goalPace, expectedTempF);
   const preRaceRoutine = generatePreRaceRoutine();
 
   return {
     raceDate,
+    raceDistanceMiles,
+    raceDistanceLabel,
     goalTime,
     goalPace: Math.round(goalPace * 100) / 100,
     splits,

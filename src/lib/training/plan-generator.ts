@@ -585,6 +585,7 @@ export function generatePlan(profile: RunnerProfile): MarathonPlan {
   const runsPerWeek = profile.runsPerWeekOverride
     ? Math.max(3, Math.min(10, profile.runsPerWeekOverride))
     : profile.trainingDaysPerWeek;
+  const planStart = dayjs(profile.raceDate).subtract(totalWeeks, "week");
 
   // Generate weeks
   const weeks: WeeklyPlan[] = [];
@@ -612,11 +613,11 @@ export function generatePlan(profile: RunnerProfile): MarathonPlan {
     );
 
     // Calculate dates
-    const startDate = dayjs().add(week - 1, "week").toISOString();
-    const endDate = dayjs().add(week, "week").subtract(1, "day").toISOString();
+    const startDate = planStart.add(week - 1, "week").toISOString();
+    const endDate = planStart.add(week, "week").subtract(1, "day").toISOString();
 
     // Fill in dates for each day
-    const weekStart = dayjs().add(week - 1, "week");
+    const weekStart = planStart.add(week - 1, "week");
     const startDayOfWeek = weekStart.isoWeekday();
 
     days.forEach((day) => {
@@ -681,7 +682,6 @@ export function generatePlan(profile: RunnerProfile): MarathonPlan {
   }
 
   // Set phase dates
-  const planStart = dayjs();
   phases.forEach((phase) => {
     phase.startDate = planStart.add(phase.weekRange[0] - 1, "week").toISOString();
     phase.endDate = planStart.add(phase.weekRange[1], "week").subtract(1, "day").toISOString();

@@ -34,6 +34,14 @@ describe("generateRaceDayPlan", () => {
     expect(plan.splits[plan.splits.length - 1].mile).toBe(26.2);
   });
 
+  it("supports shorter race distances", () => {
+    const plan = generateRaceDayPlan(60, "2026-09-01", 50, "even", 6.2, "10K");
+
+    expect(plan.raceDistanceMiles).toBe(6.2);
+    expect(plan.raceDistanceLabel).toBe("10K");
+    expect(plan.splits[plan.splits.length - 1].mile).toBe(6.2);
+  });
+
   it("final cumulative time lands on the goal time", () => {
     const plan = generateRaceDayPlan(270, "2026-09-01", 50, "even");
     expect(plan.splits[plan.splits.length - 1].targetTime).toBeCloseTo(270, 1);

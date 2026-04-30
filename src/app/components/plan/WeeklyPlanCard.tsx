@@ -442,6 +442,23 @@ export default function WeeklyPlanCard({
     { label: "MP", value: week.intensityDistribution.marathon, className: "bg-blue-50 text-blue-700" },
     { label: "VO2", value: week.intensityDistribution.vo2, className: "bg-red-50 text-red-700" },
   ].filter((item) => item.value > 0);
+  const weekLogs = dailyLogs.filter((log) => log.weekNumber === week.weekNumber);
+  const actualMileage =
+    weekLogs.length > 0
+      ? Math.round(weekLogs.reduce((sum, log) => sum + log.actualMileage, 0) * 10) / 10
+      : null;
+  const variancePct =
+    actualMileage !== null && adjustedMileage > 0
+      ? Math.round(((actualMileage - adjustedMileage) / adjustedMileage) * 100)
+      : null;
+  const varianceClass =
+    variancePct === null
+      ? ""
+      : Math.abs(variancePct) <= 5
+      ? "bg-green-50 text-green-700"
+      : variancePct < 0
+      ? "bg-amber-50 text-amber-700"
+      : "bg-blue-50 text-blue-700";
 
   return (
     <div className="overflow-hidden rounded-xl border border-gray-200 bg-white shadow-sm">
@@ -478,6 +495,11 @@ export default function WeeklyPlanCard({
                 {item.label} {formatMiles(item.value)} mi
               </span>
             ))}
+            {actualMileage !== null && variancePct !== null && (
+              <span className={`rounded px-2 py-1 ${varianceClass}`}>
+                Actual {formatMiles(actualMileage)} mi ({variancePct > 0 ? "+" : ""}{variancePct}%)
+              </span>
+            )}
           </div>
         </div>
         <span className={`text-gray-400 transition-transform ${isExpanded ? "rotate-180" : ""}`}>▼</span>

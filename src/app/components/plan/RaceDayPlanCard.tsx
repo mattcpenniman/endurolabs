@@ -33,7 +33,7 @@ export default function RaceDayPlanCard({ plan }: RaceDayPlanCardProps) {
       <div className="mb-6">
         <h3 className="text-xl font-bold text-gray-900">🏁 Race Day Plan</h3>
         <p className="mt-1 text-sm text-gray-500">
-          {plan.raceDate} · Goal: {goalFormatted} · Pace: {formatPace(plan.goalPace)}/mi
+          {plan.raceDistanceLabel} · {plan.raceDate} · Goal: {goalFormatted} · Pace: {formatPace(plan.goalPace)}/mi
         </p>
         <p className="text-xs text-gray-400 capitalize">{plan.pacingStrategy} pacing strategy</p>
       </div>

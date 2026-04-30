@@ -6,11 +6,12 @@ import React from "react";
 // the training plan with down-week annotations.
 // ============================================================
 
-import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, ReferenceLine } from "recharts";
-import { MarathonPlan } from "@/lib/training/models";
+import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, ReferenceLine, Legend } from "recharts";
+import { DailyLog, MarathonPlan } from "@/lib/training/models";
 
 interface MileageTrendChartProps {
   plan: MarathonPlan;
+  dailyLogs?: DailyLog[];
 }
 
 function formatWeekEndDate(date: string): string {
@@ -20,14 +21,23 @@ function formatWeekEndDate(date: string): string {
   }).format(new Date(date));
 }
 
-export default function MileageTrendChart({ plan }: MileageTrendChartProps) {
-  const data = plan.weeks.map((week) => ({
-    week: week.weekNumber,
-    weekLabel: `W${week.weekNumber} · ${formatWeekEndDate(week.endDate)}`,
-    weekEndDate: formatWeekEndDate(week.endDate),
-    mileage: week.totalMileage,
-    isDownWeek: week.isDownWeek,
-  }));
+export default function MileageTrendChart({ plan, dailyLogs = [] }: MileageTrendChartProps) {
+  const data = plan.weeks.map((week) => {
+    const weekLogs = dailyLogs.filter((log) => log.weekNumber === week.weekNumber);
+    const actualMileage =
+      weekLogs.length > 0
+        ? Math.round(weekLogs.reduce((sum, log) => sum + log.actualMileage, 0) * 10) / 10
+        : undefined;
+
+    return {
+      week: week.weekNumber,
+      weekLabel: `W${week.weekNumber} · ${formatWeekEndDate(week.endDate)}`,
+      weekEndDate: formatWeekEndDate(week.endDate),
+      mileage: week.totalMileage,
+      actualMileage,
+      isDownWeek: week.isDownWeek,
+    };
+  });
 
   return (
     <div className="rounded-xl border border-gray-200 bg-white p-6 shadow-sm">
@@ -49,12 +59,16 @@ export default function MileageTrendChart({ plan }: MileageTrendChartProps) {
             />
             <Tooltip
               contentStyle={{ borderRadius: "8px", border: "1px solid #e5e7eb", fontSize: 13 }}
-              formatter={(value: number) => [`${value} mi`, "Mileage"]}
+              formatter={(value: number, name: string) => [
+                `${value} mi`,
+                name === "actualMileage" ? "Actual" : "Planned",
+              ]}
               labelFormatter={(_, payload) => {
                 const point = payload?.[0]?.payload as { week: number; weekEndDate: string } | undefined;
                 return point ? `Week ${point.week} ending ${point.weekEndDate}` : "";
               }}
             />
+            <Legend verticalAlign="top" height={28} />
             <ReferenceLine
               y={plan.peakWeeklyMileage}
               stroke="#3da16a"
@@ -64,9 +78,20 @@ export default function MileageTrendChart({ plan }: MileageTrendChartProps) {
             <Line
               type="monotone"
               dataKey="mileage"
+              name="Planned"
               stroke="#3da16a"
               strokeWidth={2}
               dot={{ fill: "#3da16a", stroke: "#fff", strokeWidth: 2, r: 3 }}
+            />
+            <Line
+              type="monotone"
+              dataKey="actualMileage"
+              name="Actual"
+              stroke="#2563eb"
+              strokeWidth={2}
+              strokeDasharray="5 3"
+              connectNulls={false}
+              dot={{ fill: "#2563eb", stroke: "#fff", strokeWidth: 2, r: 3 }}
             />
           </LineChart>
         </ResponsiveContainer>
