@@ -67,6 +67,7 @@ export interface RunnerProfile {
   peakMileageOverride?: number | null;    // miles — caps peak weekly mileage
   weeksOverride?: number | null;          // total weeks — overrides auto-calc from race date
   runsPerWeekOverride?: number | null;    // runs per week (3–10) — >trainingDays creates double-days
+  preferredDoubleUpDays?: string[];       // days that should receive secondary runs first
 }
 
 // ─── Pace Zones ────────────────────────────────────────────

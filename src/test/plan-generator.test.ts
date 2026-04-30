@@ -223,6 +223,27 @@ describe("generatePlan", () => {
     }
   });
 
+  it("places secondary runs on preferred double-up days first", () => {
+    const plan = generatePlan(
+      makeProfile({
+        trainingDaysPerWeek: 5,
+        runsPerWeekOverride: 7,
+        preferredDoubleUpDays: ["Thursday", "Saturday"],
+        weeksOverride: 18,
+        peakMileageOverride: 55,
+      })
+    );
+
+    for (const week of plan.weeks) {
+      const doubleUpDays = week.days
+        .filter((day) => !!day.secondaryWorkout)
+        .map((day) => day.dayOfWeek);
+
+      expect(doubleUpDays).toEqual(expect.arrayContaining(["Thursday", "Saturday"]));
+      expect(doubleUpDays.length).toBe(2);
+    }
+  });
+
   it("varies quality workout formats across the plan", () => {
     const plan = generatePlan(makeProfile({ weeksOverride: 18, peakMileageOverride: 55 }));
     const titles = plan.weeks.flatMap((week) =>

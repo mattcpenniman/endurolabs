@@ -238,6 +238,35 @@ export default function PlanPage(): React.ReactNode {
     }
   };
 
+  const handleAdjustDoubleUpDays = async (selectedDays: string[]) => {
+    if (!plan) return;
+    const nextRunsPerWeek = plan.runnerProfile.trainingDaysPerWeek + selectedDays.length;
+    setIsLoading(true);
+    try {
+      const profile = {
+        ...plan.runnerProfile,
+        raceName: planName.trim() || undefined,
+        preferredDoubleUpDays: selectedDays,
+        runsPerWeekOverride: nextRunsPerWeek,
+      };
+      const response = await fetch("/api/plan/generate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(profile),
+      });
+      if (!response.ok) throw new Error("Failed to regenerate plan");
+      const regenerated = await response.json();
+      regenerated.id = plan.id;
+      setRunsPerWeek(nextRunsPerWeek);
+      const savedPlan = await persistPlan(regenerated, planName);
+      setPlan(savedPlan ?? regenerated);
+    } catch {
+      // Silently fail
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
   const handleAdjustWeeks = async (newWeeks: number) => {
     if (!plan) return;
     setIsLoading(true);
@@ -274,7 +303,10 @@ export default function PlanPage(): React.ReactNode {
         ...plan.runnerProfile,
         raceName: planName.trim() || undefined,
         preferredRestDay: newRestDay,
+        preferredDoubleUpDays: (plan.runnerProfile.preferredDoubleUpDays ?? []).filter((day) => day !== newRestDay),
       };
+      const nextRunsPerWeek = profile.trainingDaysPerWeek + profile.preferredDoubleUpDays.length;
+      profile.runsPerWeekOverride = nextRunsPerWeek;
       const response = await fetch("/api/plan/generate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -283,6 +315,7 @@ export default function PlanPage(): React.ReactNode {
       if (!response.ok) throw new Error("Failed to regenerate plan");
       const regenerated = await response.json();
       regenerated.id = plan.id;
+      setRunsPerWeek(nextRunsPerWeek);
       const savedPlan = await persistPlan(regenerated, planName);
       setPlan(savedPlan ?? regenerated);
     } catch {
@@ -434,7 +467,17 @@ export default function PlanPage(): React.ReactNode {
       ? Math.max(3, Math.min(10, plan.runnerProfile.runsPerWeekOverride))
       : trainingDayCount);
   const doubleUpDays = Math.max(0, currentRunCount - trainingDayCount);
-  const maxDoubleUpDays = Math.max(0, 10 - trainingDayCount);
+  const eligibleDoubleUpDays = plan.weeks[0]?.days
+    .filter((day) => !day.isRestDay && !!day.workout)
+    .map((day) => day.dayOfWeek) ?? [];
+  const inferredDoubleUpDays = plan.weeks[0]?.days
+    .filter((day) => !!day.secondaryWorkout)
+    .map((day) => day.dayOfWeek) ?? [];
+  const preferredDoubleUpDays = plan.runnerProfile.preferredDoubleUpDays ?? [];
+  const selectedDoubleUpDays =
+    (preferredDoubleUpDays.length === doubleUpDays ? preferredDoubleUpDays : inferredDoubleUpDays)
+      .filter((day) => eligibleDoubleUpDays.includes(day));
+  const maxDoubleUpDays = Math.min(eligibleDoubleUpDays.length, Math.max(0, 10 - trainingDayCount));
   void dailyLogRefresh;
 
   return (
@@ -730,25 +773,46 @@ export default function PlanPage(): React.ReactNode {
               </div>
 
               <div className="rounded-lg border border-gray-200 bg-white p-5">
-                <label htmlFor="double-up-days" className="block text-sm font-semibold text-gray-900">
+                <p className="block text-sm font-semibold text-gray-900">
                   Double-up days
-                </label>
-                <p className="mt-1 text-sm text-gray-500">
-                  {trainingDayCount} training days, {currentRunCount} total runs per week.
                 </p>
-                <select
-                  id="double-up-days"
-                  value={doubleUpDays}
-                  onChange={(e) => handleAdjustRunsPerWeek(trainingDayCount + Number(e.target.value))}
-                  disabled={isLoading}
-                  className="mt-4 w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-700 focus:border-enduro-500 focus:outline-none focus:ring-2 focus:ring-enduro-500/20 disabled:opacity-60"
-                >
-                  {Array.from({ length: maxDoubleUpDays + 1 }, (_, count) => (
-                    <option key={count} value={count}>
-                      {count === 0 ? "No double-up days" : `${count} double-up ${count === 1 ? "day" : "days"}`}
-                    </option>
-                  ))}
-                </select>
+                <p className="mt-1 text-sm text-gray-500">
+                  {trainingDayCount} training days, {currentRunCount} total runs per week. Select days for secondary easy runs.
+                </p>
+                <div className="mt-4 grid grid-cols-2 gap-2">
+                  {eligibleDoubleUpDays.map((day) => {
+                    const isSelected = selectedDoubleUpDays.includes(day);
+                    const wouldExceedLimit = !isSelected && selectedDoubleUpDays.length >= maxDoubleUpDays;
+
+                    return (
+                      <label
+                        key={day}
+                        className={`flex items-center gap-2 rounded-lg border px-3 py-2 text-sm ${
+                          isSelected
+                            ? "border-enduro-300 bg-enduro-50 text-enduro-800"
+                            : "border-gray-200 bg-white text-gray-700"
+                        } ${isLoading || wouldExceedLimit ? "opacity-60" : ""}`}
+                      >
+                        <input
+                          type="checkbox"
+                          checked={isSelected}
+                          disabled={isLoading || wouldExceedLimit}
+                          onChange={(e) => {
+                            const nextDays = e.target.checked
+                              ? [...selectedDoubleUpDays, day]
+                              : selectedDoubleUpDays.filter((selectedDay) => selectedDay !== day);
+                            handleAdjustDoubleUpDays(nextDays);
+                          }}
+                          className="h-4 w-4 rounded border-gray-300 text-enduro-600 focus:ring-enduro-500"
+                        />
+                        {day}
+                      </label>
+                    );
+                  })}
+                </div>
+                <p className="mt-3 text-xs text-gray-500">
+                  {selectedDoubleUpDays.length === 0 ? "No double-up days selected." : `${selectedDoubleUpDays.length} double-up ${selectedDoubleUpDays.length === 1 ? "day" : "days"} selected.`}
+                </p>
               </div>
             </div>
           </div>

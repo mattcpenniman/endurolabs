@@ -269,7 +269,8 @@ function assignWorkoutsForWeek(
   comfortLevel: "beginner" | "intermediate" | "advanced",
   _strengthAvailability: "none" | "light" | "regular",
   isDownWeek: boolean,
-  runsPerWeek: number
+  runsPerWeek: number,
+  preferredDoubleUpDays: string[]
 ): DailyPlan[] {
   const days: DailyPlan[] = [];
   const allDays = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
@@ -425,13 +426,20 @@ function assignWorkoutsForWeek(
   if (doubleDayCount > 0) {
     let secondaryMileageRemaining = Math.max(0, weeklyMileage - assignedMileage);
     const candidateDays = days.filter((d) => !d.isRestDay && d.workout);
+    const preferredOrder = new Map(preferredDoubleUpDays.map((day, index) => [day, index]));
+    const orderedCandidateDays = [
+      ...candidateDays
+        .filter((day) => preferredOrder.has(day.dayOfWeek))
+        .sort((a, b) => (preferredOrder.get(a.dayOfWeek) ?? 0) - (preferredOrder.get(b.dayOfWeek) ?? 0)),
+      ...candidateDays.filter((day) => !preferredOrder.has(day.dayOfWeek)),
+    ];
     const doubleDayTargets = distributeVariedMileage(
       secondaryMileageRemaining,
-      Math.min(doubleDayCount, candidateDays.length),
+      Math.min(doubleDayCount, orderedCandidateDays.length),
       week + 2
     );
 
-    for (let i = 0; i < Math.min(doubleDayCount, candidateDays.length); i++) {
+    for (let i = 0; i < Math.min(doubleDayCount, orderedCandidateDays.length); i++) {
       const doubleDayMiles = Math.max(
         1,
         doubleDayTargets[i] ?? roundMiles(secondaryMileageRemaining)
@@ -443,8 +451,8 @@ function assignWorkoutsForWeek(
         paceZones,
         powerZones
       );
-      candidateDays[i].secondaryWorkout = secondary;
-      candidateDays[i].plannedMileage += doubleDayMiles;
+      orderedCandidateDays[i].secondaryWorkout = secondary;
+      orderedCandidateDays[i].plannedMileage += doubleDayMiles;
       secondaryMileageRemaining -= doubleDayMiles;
       assignedMileage += doubleDayMiles;
     }
@@ -599,7 +607,8 @@ export function generatePlan(profile: RunnerProfile): MarathonPlan {
       profile.comfortLevelWithWorkouts,
       profile.strengthTrainingAvailability,
       isDownWeek,
-      runsPerWeek
+      runsPerWeek,
+      profile.preferredDoubleUpDays ?? []
     );
 
     // Calculate dates
