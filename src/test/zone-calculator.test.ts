@@ -63,7 +63,13 @@ describe("calculatePaceZones", () => {
   });
 
   it("orders training paces around marathon pace correctly", () => {
-    const zones = calculatePaceZones(makeProfile({ goalMarathonTime: 240 }));
+    const zones = calculatePaceZones(
+      makeProfile({
+        currentMarathonPR: 240,
+        currentHalfMarathonPR: null,
+        goalMarathonTime: 240,
+      })
+    );
 
     expect(zones.recovery).toBeGreaterThan(zones.easy.min);
     expect(zones.easy.min).toBeGreaterThan(zones.easy.max);
@@ -90,6 +96,20 @@ describe("calculatePaceZones", () => {
     expect(fastZones.marathon).toBe(slowZones.marathon);
     expect(fastZones.threshold).toBeLessThan(slowZones.threshold);
     expect(fastZones.vo2).toBeLessThan(slowZones.vo2);
+  });
+
+  it("keeps threshold pace tied to current fitness when the goal pace is aggressive", () => {
+    const zones = calculatePaceZones(
+      makeProfile({
+        currentMarathonPR: 270,
+        currentHalfMarathonPR: null,
+        goalMarathonTime: 210,
+      })
+    );
+
+    expect(zones.marathon).toBeCloseTo(210 / 26.2, 2);
+    expect(zones.threshold).toBeGreaterThan(zones.marathon);
+    expect(zones.threshold).toBeLessThan(zones.easy.max);
   });
 
   it("handles missing PR data by falling back to goal time", () => {

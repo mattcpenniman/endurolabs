@@ -33,7 +33,7 @@ dayjs.extend(isoWeek);
 const MIN_WEEKS = 14;
 const MAX_WEEKS = 28;
 
-// Day-of-week index mapping (0=Sunday)
+// Day-of-week index mapping (0=Sunday for JS date math)
 const DAY_INDEX: Record<string, number> = {
   Sunday: 0,
   Monday: 1,
@@ -42,6 +42,16 @@ const DAY_INDEX: Record<string, number> = {
   Thursday: 4,
   Friday: 5,
   Saturday: 6,
+};
+
+const DISPLAY_DAY_ORDER: Record<string, number> = {
+  Monday: 0,
+  Tuesday: 1,
+  Wednesday: 2,
+  Thursday: 3,
+  Friday: 4,
+  Saturday: 5,
+  Sunday: 6,
 };
 
 // ─── Week Count Calculation ─────────────────────────────────
@@ -206,13 +216,53 @@ function longRunDistance(
   }
 }
 
+function nearestVO2RepDistance(vo2Pace: number, targetRepMinutes: number): number {
+  const options = [0.25, 0.33, 0.5, 0.75, 1];
+  return options.reduce((best, option) => {
+    const bestDiff = Math.abs(best * vo2Pace - targetRepMinutes);
+    const optionDiff = Math.abs(option * vo2Pace - targetRepMinutes);
+    return optionDiff < bestDiff ? option : best;
+  }, options[0]);
+}
+
+function roundMiles(distance: number): number {
+  return Math.round(distance * 10) / 10;
+}
+
+function distributeVariedMileage(totalMileage: number, dayCount: number, week: number): number[] {
+  if (dayCount <= 0) return [];
+  if (dayCount === 1) return [roundMiles(totalMileage)];
+
+  const minimum = totalMileage >= dayCount ? 1 : 0;
+  const baseMileage = minimum * dayCount;
+  const variableMileage = Math.max(0, totalMileage - baseMileage);
+  const pattern = [1.25, 0.8, 1.1, 0.9, 1.35, 0.75, 1.05];
+  const weights = Array.from({ length: dayCount }, (_, index) => pattern[(week + index) % pattern.length]);
+  const weightTotal = weights.reduce((sum, weight) => sum + weight, 0);
+  const distances: number[] = [];
+  let assigned = 0;
+
+  for (let i = 0; i < dayCount; i++) {
+    if (i === dayCount - 1) {
+      distances.push(roundMiles(Math.max(0, totalMileage - assigned)));
+      break;
+    }
+
+    const distance = roundMiles(minimum + (variableMileage * weights[i]) / weightTotal);
+    distances.push(distance);
+    assigned += distance;
+  }
+
+  return distances;
+}
+
 // ─── Workout Assignment ────────────────────────────────────
 
 function assignWorkoutsForWeek(
   week: number,
   phase: TrainingPhase,
   weeklyMileage: number,
-  longRunMiles: number,
+  _longRunMiles: number,
   trainingDays: string[],
   longRunDay: string,
   paceZones: PaceZones,
@@ -223,7 +273,7 @@ function assignWorkoutsForWeek(
   runsPerWeek: number
 ): DailyPlan[] {
   const days: DailyPlan[] = [];
-  const allDays = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+  const allDays = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
   const targetRunCount = Math.max(1, Math.min(10, runsPerWeek));
   const primaryRunCount = Math.min(trainingDays.length, targetRunCount);
   const runDays = [
@@ -243,7 +293,7 @@ function assignWorkoutsForWeek(
   let assignedMileage = 0;
 
   // 1. Assign the long run
-  const adjustedLongRunMiles = Math.min(longRunMiles, Math.max(week === 1 ? longRunMiles : 8, weeklyMileage * 0.45));
+  const adjustedLongRunMiles = roundMiles(weeklyMileage * 0.25);
   const longRun = WorkoutLibrary.createLongRun(week, workoutIndex++, adjustedLongRunMiles, paceZones, powerZones);
   days.push({
     date: "", // Will be filled in later
@@ -260,15 +310,54 @@ function assignWorkoutsForWeek(
   let remainingMileage = Math.max(0, weeklyMileage - assignedMileage);
 
   if (!isDownWeek && week > 1 && runDays.length > 1) {
-    // Threshold runs in base, intervals in build/peak
     if (phase === "base" && canDoThreshold) {
       const thresholdMiles = Math.min(4, Math.max(1, remainingMileage * 0.2));
       const totalDist = Math.min(remainingMileage, thresholdMiles + 3); // warmup/cooldown
-      keyWorkout = WorkoutLibrary.createThresholdRun(week, workoutIndex++, totalDist, thresholdMiles, paceZones, powerZones);
+      if (week % 4 === 0 && totalDist >= 5) {
+        keyWorkout = WorkoutLibrary.createProgressionRun(week, workoutIndex++, totalDist, paceZones, powerZones);
+      } else if (week % 2 === 0) {
+        const reps = comfortLevel === "advanced" ? 4 : 3;
+        keyWorkout = WorkoutLibrary.createThresholdIntervals(
+          week,
+          workoutIndex++,
+          totalDist,
+          reps,
+          1,
+          60,
+          paceZones,
+          powerZones
+        );
+      } else {
+        keyWorkout = WorkoutLibrary.createThresholdRun(week, workoutIndex++, totalDist, thresholdMiles, paceZones, powerZones);
+      }
     } else if (phase !== "base" && canDoIntervals && !isDownWeek) {
-      const reps = phase === "peak_taper" ? 3 : comfortLevel === "advanced" ? 6 : 4;
-      const repDist = phase === "peak_taper" ? 0.5 : 0.75;
-      keyWorkout = WorkoutLibrary.createVO2Intervals(week, workoutIndex++, reps, repDist, 90, paceZones, powerZones);
+      const shouldRunVO2 =
+        phase === "peak_taper" ? week % 2 === 0 : week % 3 === 2;
+
+      if (shouldRunVO2) {
+        const targetRepMinutes = phase === "peak_taper" ? 3 : comfortLevel === "advanced" ? 4.5 : 4;
+        const reps = phase === "peak_taper" ? 3 : comfortLevel === "advanced" ? 5 : 4;
+        const repDist = nearestVO2RepDistance(paceZones.vo2, targetRepMinutes);
+        const restSeconds = Math.round(targetRepMinutes * 60);
+        keyWorkout = WorkoutLibrary.createVO2Intervals(week, workoutIndex++, reps, repDist, restSeconds, paceZones, powerZones);
+      } else if (phase === "marathon_build" && week % 3 === 1) {
+        const mpMiles = Math.min(8, Math.max(3, remainingMileage * 0.18));
+        const totalDist = Math.min(remainingMileage, mpMiles + 3);
+        keyWorkout = WorkoutLibrary.createMarathonPaceRun(week, workoutIndex++, mpMiles, totalDist, paceZones, powerZones);
+      } else {
+        const reps = comfortLevel === "advanced" ? 4 : 3;
+        const totalDist = Math.min(remainingMileage, reps + 3);
+        keyWorkout = WorkoutLibrary.createThresholdIntervals(
+          week,
+          workoutIndex++,
+          totalDist,
+          reps,
+          1,
+          75,
+          paceZones,
+          powerZones
+        );
+      }
     } else if (phase !== "base") {
       // Marathon pace work
       const mpMiles = Math.min(5, Math.max(2, remainingMileage * 0.15));
@@ -300,20 +389,15 @@ function assignWorkoutsForWeek(
   remainingMileage = Math.max(0, weeklyMileage - assignedMileage);
   const doubleDayReserve = doubleDayCount > 0 ? Math.min(4 * doubleDayCount, Math.max(0, remainingMileage - easyRunDays.length * 3)) : 0;
   const primaryEasyMileage = Math.max(0, remainingMileage - doubleDayReserve);
-  const baseEasyMileage = easyRunDays.length > 0 ? primaryEasyMileage / easyRunDays.length : 0;
+  const easyMileageTargets = distributeVariedMileage(primaryEasyMileage, easyRunDays.length, week);
   let easyDaysUsed = 0;
 
   for (const day of easyRunDays) {
     // Recovery day after hard workout
     const dayIdx = DAY_INDEX[day];
     const isAfterKeyWorkout = keyWorkoutDay && dayIdx === DAY_INDEX[keyWorkoutDay] + 1;
-    const remainingEasyDays = easyRunDays.length - easyDaysUsed;
-    const remainingPrimaryMileage = Math.max(0, weeklyMileage - assignedMileage - doubleDayReserve);
-    const targetMileage =
-      remainingEasyDays === 1
-        ? remainingPrimaryMileage
-        : Math.round(baseEasyMileage);
-    const runMileage = Math.max(1, Math.round(targetMileage * 10) / 10);
+    const targetMileage = easyMileageTargets[easyDaysUsed] ?? 0;
+    const runMileage = Math.max(targetMileage > 0 ? 1 : 0, targetMileage);
 
     if (isAfterKeyWorkout) {
       const recovery = WorkoutLibrary.createRecoveryRun(week, workoutIndex++, runMileage, paceZones, powerZones);
@@ -342,12 +426,16 @@ function assignWorkoutsForWeek(
   if (doubleDayCount > 0) {
     let secondaryMileageRemaining = Math.max(0, weeklyMileage - assignedMileage);
     const candidateDays = days.filter((d) => !d.isRestDay && d.workout);
+    const doubleDayTargets = distributeVariedMileage(
+      secondaryMileageRemaining,
+      Math.min(doubleDayCount, candidateDays.length),
+      week + 2
+    );
 
     for (let i = 0; i < Math.min(doubleDayCount, candidateDays.length); i++) {
-      const remainingDoubleDays = Math.min(doubleDayCount, candidateDays.length) - i;
       const doubleDayMiles = Math.max(
         1,
-        Math.round((secondaryMileageRemaining / remainingDoubleDays) * 10) / 10
+        doubleDayTargets[i] ?? roundMiles(secondaryMileageRemaining)
       );
       const secondary = WorkoutLibrary.createEasyRun(
         week,
@@ -395,7 +483,7 @@ function assignWorkoutsForWeek(
     }
   }
 
-  return days;
+  return days.sort((a, b) => DISPLAY_DAY_ORDER[a.dayOfWeek] - DISPLAY_DAY_ORDER[b.dayOfWeek]);
 }
 
 // ─── Adjustment Rules ────────────────────────────────────
@@ -497,7 +585,7 @@ export function generatePlan(profile: RunnerProfile): MarathonPlan {
   for (let week = 1; week <= totalWeeks; week++) {
     const phase = getPhaseForWeek(week, phases);
     const weeklyMileage = mileageProgression(week, totalWeeks, profile.currentWeeklyMileage, peakMileage, phase);
-    const longRunMiles = longRunDistance(week, totalWeeks, phase, profile.longestRecentLongRun);
+    const longRunMiles = roundMiles(weeklyMileage * 0.25);
     const isDownWeek = phase === "marathon_build" && (week - phases[0].weekRange[1]) % 3 === 0;
 
     const days = assignWorkoutsForWeek(

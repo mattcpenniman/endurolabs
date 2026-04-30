@@ -32,6 +32,53 @@ function estimateVDOTFromTime(distanceMiles: number, timeMinutes: number): numbe
   return vdot;
 }
 
+function oxygenCostForVelocity(velocityMetersPerMinute: number): number {
+  return (
+    -4.6 +
+    0.182258 * velocityMetersPerMinute +
+    0.000104 * velocityMetersPerMinute ** 2
+  );
+}
+
+function paceFromRaceDuration(vdot: number, durationMinutes: number): number {
+  let lowVelocity = 80;
+  let highVelocity = 420;
+
+  for (let i = 0; i < 40; i++) {
+    const velocity = (lowVelocity + highVelocity) / 2;
+    const distanceMiles = (velocity * durationMinutes) / 1609.344;
+    const estimate = estimateVDOTFromTime(distanceMiles, durationMinutes);
+
+    if (estimate > vdot) {
+      highVelocity = velocity;
+    } else {
+      lowVelocity = velocity;
+    }
+  }
+
+  const velocity = (lowVelocity + highVelocity) / 2;
+  return 1609.344 / velocity;
+}
+
+function paceFromVO2Fraction(vdot: number, fraction: number): number {
+  const targetOxygenCost = vdot * fraction;
+  let lowVelocity = 80;
+  let highVelocity = 420;
+
+  for (let i = 0; i < 40; i++) {
+    const velocity = (lowVelocity + highVelocity) / 2;
+
+    if (oxygenCostForVelocity(velocity) > targetOxygenCost) {
+      highVelocity = velocity;
+    } else {
+      lowVelocity = velocity;
+    }
+  }
+
+  const velocity = (lowVelocity + highVelocity) / 2;
+  return 1609.344 / velocity;
+}
+
 // ─── Pace Factors ───────────────────────────────────────────
 // Multiplier from VDOT to get pace (min/mile) for each zone.
 // Derived from Daniels' Running Formula tables.
@@ -47,13 +94,14 @@ function getRecoveryPaceFactor(vdot: number): number {
 }
 
 function getThresholdPaceFactor(vdot: number): number {
-  // Threshold is faster than marathon pace, roughly 1-hour race effort.
-  return vdot > 55 ? 0.9 : vdot > 45 ? 0.91 : vdot > 35 ? 0.93 : 0.95;
+  // Fallback only. Threshold should be closer to current one-hour race effort
+  // than to an aggressive goal marathon pace.
+  return vdot > 55 ? 0.93 : vdot > 45 ? 0.94 : vdot > 35 ? 0.96 : 0.98;
 }
 
 function getVO2PaceFactor(vdot: number): number {
-  // VO2 max intervals approximate 3K-5K effort and must be faster than threshold.
-  return vdot > 55 ? 0.8 : vdot > 45 ? 0.82 : vdot > 35 ? 0.84 : 0.86;
+  // Fallback only. VO2 max intervals approximate Daniels I pace.
+  return vdot > 55 ? 0.86 : vdot > 45 ? 0.87 : vdot > 35 ? 0.89 : 0.91;
 }
 
 // ─── Core Zone Calculation ──────────────────────────────────
@@ -80,8 +128,14 @@ export function calculatePaceZones(profile: RunnerProfile): PaceZones {
   const recoveryPace = marathonPace * getRecoveryPaceFactor(vdot);
   const thresholdPace = profile.averageThresholdPace
     ? profile.averageThresholdPace
-    : marathonPace * getThresholdPaceFactor(vdot);
-  const vo2Pace = marathonPace * getVO2PaceFactor(vdot);
+    : Math.max(
+        paceFromRaceDuration(vdot, 60),
+        marathonPace * getThresholdPaceFactor(vdot)
+      );
+  const vo2Pace = Math.max(
+    paceFromVO2Fraction(vdot, 0.95),
+    marathonPace * getVO2PaceFactor(vdot)
+  );
 
   // Easy pace range (low end for recovery miles, high end for normal easy)
   const easyMin = profile.averageEasyPace

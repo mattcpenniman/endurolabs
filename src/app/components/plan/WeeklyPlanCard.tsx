@@ -9,7 +9,7 @@
 // ============================================================
 
 import React from "react";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { DailyLog, WeeklyPlan, DailyPlan, Workout, WorkoutType } from "@/lib/training/models";
 import { addDailyLog } from "@/lib/training/progress-tracker";
 
@@ -55,6 +55,16 @@ const workoutColor: Record<string, string> = {
   strength: "text-pink-600",
   cross_training: "text-teal-600",
   rest: "text-gray-400",
+};
+
+const dayDisplayOrder: Record<string, number> = {
+  Monday: 0,
+  Tuesday: 1,
+  Wednesday: 2,
+  Thursday: 3,
+  Friday: 4,
+  Saturday: 5,
+  Sunday: 6,
 };
 
 function formatShortDate(date: string): string {
@@ -288,6 +298,10 @@ export default function WeeklyPlanCard({
   // Track swapped workouts by day-of-week key
   const [swappedWorkouts, setSwappedWorkouts] = useState<Record<string, Workout | null>>({});
   const [drafts, setDrafts] = useState<Record<string, DayLogDraft>>({});
+  const orderedDays = useMemo(
+    () => [...week.days].sort((a, b) => dayDisplayOrder[a.dayOfWeek] - dayDisplayOrder[b.dayOfWeek]),
+    [week.days]
+  );
 
   // Listen for swap events from child renders
   useEffect(() => {
@@ -369,7 +383,7 @@ export default function WeeklyPlanCard({
   useEffect(() => {
     setDrafts((prev) => {
       const next = { ...prev };
-      week.days.forEach((day) => {
+      orderedDays.forEach((day) => {
         const log = dailyLogs.find(
           (entry) => entry.weekNumber === week.weekNumber && entry.dayOfWeek === day.dayOfWeek
         );
@@ -385,7 +399,7 @@ export default function WeeklyPlanCard({
       });
       return next;
     });
-  }, [dailyLogs, week]);
+  }, [dailyLogs, orderedDays]);
 
   const updateDraft = (dayOfWeek: string, patch: Partial<DayLogDraft>) => {
     setDrafts((prev) => {
@@ -411,7 +425,11 @@ export default function WeeklyPlanCard({
   // Recalculate weekly mileage with swaps applied
   const adjustedMileage = week.days.reduce((sum, day) => {
     const workout = swappedWorkouts[day.dayOfWeek] ?? day.workout;
-    return sum + (workout?.weeklyMileageContribution ?? 0);
+    const secondaryMileage =
+      swappedWorkouts[day.dayOfWeek] === null
+        ? 0
+        : day.secondaryWorkout?.weeklyMileageContribution ?? 0;
+    return sum + (workout?.weeklyMileageContribution ?? 0) + secondaryMileage;
   }, 0);
 
   return (
@@ -449,7 +467,7 @@ export default function WeeklyPlanCard({
 
           {/* Days — apply swaps */}
           <div className="divide-y divide-gray-50">
-            {week.days.map((day) => {
+            {orderedDays.map((day) => {
               const swapped = swappedWorkouts[day.dayOfWeek];
               const effectiveWorkout = swapped !== undefined ? swapped : day.workout;
               const isSwapped = swapped !== undefined;

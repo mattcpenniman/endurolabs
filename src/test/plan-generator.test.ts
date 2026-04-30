@@ -90,6 +90,15 @@ describe("generatePlan", () => {
     }
   });
 
+  it("orders each week Monday through Sunday", () => {
+    const plan = generatePlan(makeProfile());
+    const expectedOrder = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
+
+    for (const week of plan.weeks) {
+      expect(week.days.map((day) => day.dayOfWeek)).toEqual(expectedOrder);
+    }
+  });
+
   it("peak mileage does not exceed peak historical mileage by more than 30%", () => {
     const profile = makeProfile({ peakHistoricalWeeklyMileage: 40 });
     const plan = generatePlan(profile);
@@ -105,6 +114,18 @@ describe("generatePlan", () => {
           expect(day.workout.totalDistance).toBeLessThanOrEqual(26.2);
         }
       }
+    }
+  });
+
+  it("sets long runs to 25% of weekly mileage", () => {
+    const plan = generatePlan(makeProfile({ weeksOverride: 18, peakMileageOverride: 55 }));
+
+    for (const week of plan.weeks) {
+      const longRun = week.days.find((day) => day.workout?.type === "long")?.workout;
+
+      expect(longRun).toBeDefined();
+      expect(longRun?.totalDistance).toBe(Math.round(week.totalMileage * 0.25 * 10) / 10);
+      expect(week.longRunDistance).toBe(longRun?.totalDistance);
     }
   });
 
@@ -161,6 +182,61 @@ describe("generatePlan", () => {
 
     for (const week of plan.weeks) {
       expect(scheduledRunCount(week)).toBe(7);
+    }
+  });
+
+  it("varies quality workout formats across the plan", () => {
+    const plan = generatePlan(makeProfile({ weeksOverride: 18, peakMileageOverride: 55 }));
+    const titles = plan.weeks.flatMap((week) =>
+      week.days.flatMap((day) => (day.workout ? [day.workout.title] : []))
+    );
+
+    expect(titles.some((title) => title.includes("Cruise Intervals"))).toBe(true);
+    expect(titles.some((title) => title.includes("VO2 Intervals"))).toBe(true);
+    expect(titles.some((title) => title.includes("Marathon Pace"))).toBe(true);
+    expect(titles.some((title) => title.includes("Progression Run"))).toBe(true);
+  });
+
+  it("varies run distances from day to day within each week", () => {
+    const plan = generatePlan(makeProfile({ weeksOverride: 18, peakMileageOverride: 55 }));
+    const weeksWithSeveralEasyRuns = plan.weeks.filter((week) => {
+      const easyDistances = week.days
+        .filter((day) => day.workout?.type === "easy" || day.workout?.type === "recovery")
+        .map((day) => day.workout?.totalDistance ?? 0);
+
+      return easyDistances.length >= 3 && new Set(easyDistances).size >= 2;
+    });
+
+    expect(weeksWithSeveralEasyRuns.length).toBeGreaterThan(plan.weeks.length / 2);
+  });
+
+  it("keeps VO2 reps in a Daniels-style interval duration range", () => {
+    const plan = generatePlan(makeProfile({ weeksOverride: 18, peakMileageOverride: 55 }));
+    const vo2Segments = plan.weeks.flatMap((week) =>
+      week.days.flatMap((day) =>
+        day.workout?.segments.filter((segment) => segment.type === "vo2" && segment.distance && segment.pace) ?? []
+      )
+    );
+
+    expect(vo2Segments.length).toBeGreaterThan(0);
+    for (const segment of vo2Segments) {
+      const duration = (segment.distance ?? 0) * (segment.pace ?? 0);
+      expect(duration).toBeGreaterThanOrEqual(2.5);
+      expect(duration).toBeLessThanOrEqual(5.25);
+    }
+  });
+
+  it("gives VO2 workouts explicit warm-up, recovery, and cool-down segments", () => {
+    const plan = generatePlan(makeProfile({ weeksOverride: 18, peakMileageOverride: 55 }));
+    const vo2Workouts = plan.weeks.flatMap((week) =>
+      week.days.flatMap((day) => (day.workout?.type === "vo2" ? [day.workout] : []))
+    );
+
+    expect(vo2Workouts.length).toBeGreaterThan(0);
+    for (const workout of vo2Workouts) {
+      expect(workout.segments[0].description).toContain("Warm-up");
+      expect(workout.segments.some((segment) => segment.description.includes("Recoveries"))).toBe(true);
+      expect(workout.segments.at(-1)?.description).toContain("Cool-down");
     }
   });
 });

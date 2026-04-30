@@ -52,7 +52,7 @@ export default function PlanPage(): React.ReactNode {
   const [runsPerWeek, setRunsPerWeek] = useState<number | null>(null);
   const [weeksOverride, setWeeksOverride] = useState<number | null>(null);
   const [planName, setPlanName] = useState("");
-  const [activePlanTab, setActivePlanTab] = useState<"training" | "race">("training");
+  const [activePlanTab, setActivePlanTab] = useState<"overview" | "schedule" | "race">("overview");
   const [dailyLogRefresh, setDailyLogRefresh] = useState(0);
 
   // Load saved plans on mount
@@ -507,13 +507,14 @@ export default function PlanPage(): React.ReactNode {
 
         <div className="mb-6 flex rounded-lg bg-gray-100 p-1">
           {[
-            { id: "training", label: "Training Plan" },
+            { id: "overview", label: "Plan Overview" },
+            { id: "schedule", label: "Weekly Schedule" },
             { id: "race", label: "Race Day" },
           ].map((tab) => (
             <button
               key={tab.id}
               type="button"
-              onClick={() => setActivePlanTab(tab.id as "training" | "race")}
+              onClick={() => setActivePlanTab(tab.id as "overview" | "schedule" | "race")}
               className={`flex-1 rounded-md px-4 py-2 text-sm font-medium transition-colors ${
                 activePlanTab === tab.id
                   ? "bg-white text-enduro-700 shadow-sm"
@@ -525,7 +526,7 @@ export default function PlanPage(): React.ReactNode {
           ))}
         </div>
 
-        {activePlanTab === "training" ? (
+        {activePlanTab === "overview" ? (
           <>
             {/* Overview + Zones */}
             <div className="mb-8 grid gap-6 lg:grid-cols-3">
@@ -545,6 +546,9 @@ export default function PlanPage(): React.ReactNode {
             <div className="mb-8">
               <IntensityDistributionChart plan={plan} />
             </div>
+          </>
+        ) : activePlanTab === "schedule" ? (
+          <>
 
             {/* Weekly plan */}
             <div className="mb-8">
