@@ -11,7 +11,7 @@
 import React from "react";
 import { useState, useEffect, useMemo } from "react";
 import { DailyLog, WeeklyPlan, DailyPlan, Workout, WorkoutType } from "@/lib/training/models";
-import { addDailyLog } from "@/lib/training/progress-tracker";
+import { addDailyLog, removeDailyLog } from "@/lib/training/progress-tracker";
 
 interface WeeklyPlanCardProps {
   planId: string;
@@ -93,6 +93,7 @@ function renderDay(
   log: DailyLog | undefined,
   draft: DayLogDraft,
   onDraftChange: (dayOfWeek: string, patch: Partial<DayLogDraft>) => void,
+  onDraftReset: (dayOfWeek: string) => void,
   onSaved: () => void
 ) {
   const currentWorkout = day.workout;
@@ -114,6 +115,12 @@ function renderDay(
     onSaved();
   };
 
+  const handleRemoveLog = () => {
+    removeDailyLog(planId, weekNumber, day.dayOfWeek);
+    onDraftReset(day.dayOfWeek);
+    onSaved();
+  };
+
   if (day.isRestDay || !currentWorkout) {
     return (
       <div key={day.dayOfWeek} className="grid gap-3 py-3 lg:grid-cols-[6rem_1fr]">
@@ -130,6 +137,7 @@ function renderDay(
             plannedMileage={0}
             onDraftChange={onDraftChange}
             onSave={handleSaveLog}
+            onRemove={handleRemoveLog}
           />
         </div>
       </div>
@@ -205,6 +213,7 @@ function renderDay(
           plannedMileage={plannedMileage}
           onDraftChange={onDraftChange}
           onSave={handleSaveLog}
+          onRemove={handleRemoveLog}
         />
       </div>
     </div>
@@ -218,6 +227,7 @@ function DailyLogControls({
   plannedMileage,
   onDraftChange,
   onSave,
+  onRemove,
 }: {
   day: DailyPlan;
   draft: DayLogDraft;
@@ -225,6 +235,7 @@ function DailyLogControls({
   plannedMileage: number;
   onDraftChange: (dayOfWeek: string, patch: Partial<DayLogDraft>) => void;
   onSave: () => void;
+  onRemove: () => void;
 }) {
   return (
     <div className="grid gap-2 border-t border-gray-100 pt-3 sm:grid-cols-[8rem_8rem_1fr_auto] sm:items-end">
@@ -283,6 +294,15 @@ function DailyLogControls({
         >
           {log ? "Update" : "Log"}
         </button>
+        {log && (
+          <button
+            type="button"
+            onClick={onRemove}
+            className="rounded border border-red-200 bg-white px-3 py-1.5 text-xs font-medium text-red-600 hover:bg-red-50"
+          >
+            Remove
+          </button>
+        )}
       </div>
       <p className="text-xs text-gray-400 sm:col-span-4">
         Planned {plannedMileage} mi{log ? ` · Logged ${log.actualMileage} mi` : ""}
@@ -426,6 +446,23 @@ export default function WeeklyPlanCard({
     });
   };
 
+  const resetDraft = (dayOfWeek: string) => {
+    const day = orderedDays.find((entry) => entry.dayOfWeek === dayOfWeek);
+    const plannedMileage =
+      (day?.workout?.weeklyMileageContribution ?? 0) +
+      (day?.secondaryWorkout?.weeklyMileageContribution ?? 0);
+
+    setDrafts((prev) => ({
+      ...prev,
+      [dayOfWeek]: {
+        actualMileage: plannedMileage,
+        completed: false,
+        feelRating: 5,
+        notes: "",
+      },
+    }));
+  };
+
   // Recalculate weekly mileage with swaps applied
   const adjustedMileage = week.days.reduce((sum, day) => {
     const workout = swappedWorkouts[day.dayOfWeek] ?? day.workout;
@@ -546,6 +583,7 @@ export default function WeeklyPlanCard({
                 log,
                 draft,
                 updateDraft,
+                resetDraft,
                 onDailyLogSaved
               );
             })}

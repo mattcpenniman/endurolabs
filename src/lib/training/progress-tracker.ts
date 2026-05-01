@@ -76,6 +76,18 @@ export function addDailyLog(planId: string, log: DailyLog): DailyLog[] {
   return logs;
 }
 
+export function removeDailyLog(
+  planId: string,
+  weekNumber: number,
+  dayOfWeek: string
+): DailyLog[] {
+  const logs = loadDailyLogs(planId).filter(
+    (log) => !(log.weekNumber === weekNumber && log.dayOfWeek === dayOfWeek)
+  );
+  saveDailyLogs(planId, logs);
+  return logs;
+}
+
 export function dailyLogsToWeeklyLogs(plan: MarathonPlan, dailyLogs: DailyLog[]): WeeklyLog[] {
   return plan.weeks
     .map((week) => {

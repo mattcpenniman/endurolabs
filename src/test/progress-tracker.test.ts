@@ -3,7 +3,13 @@
 // ============================================================
 
 import { describe, it, expect } from "vitest";
-import { analyzeProgress, dailyLogsToWeeklyLogs, getMileageTrend } from "@/lib/training/progress-tracker";
+import {
+  addDailyLog,
+  analyzeProgress,
+  dailyLogsToWeeklyLogs,
+  getMileageTrend,
+  removeDailyLog,
+} from "@/lib/training/progress-tracker";
 import { DailyLog, MarathonPlan, WeeklyLog } from "@/lib/training/models";
 
 function makePlan(): MarathonPlan {
@@ -288,6 +294,37 @@ describe("dailyLogsToWeeklyLogs", () => {
     expect(weeklyLogs[0].adherence).toBe(50);
     expect(weeklyLogs[0].notes).toContain("smooth");
     expect(weeklyLogs[0].notes).toContain("cut short");
+  });
+});
+
+describe("removeDailyLog", () => {
+  it("removes a matching daily log and keeps other logs", () => {
+    localStorage.clear();
+    addDailyLog("test-plan", {
+      weekNumber: 1,
+      date: "2026-05-05",
+      dayOfWeek: "Tuesday",
+      actualMileage: 4,
+      completed: true,
+      feelRating: 7,
+      notes: "smooth",
+      loggedAt: "2026-05-05T12:00:00.000Z",
+    });
+    addDailyLog("test-plan", {
+      weekNumber: 1,
+      date: "2026-05-06",
+      dayOfWeek: "Wednesday",
+      actualMileage: 5,
+      completed: true,
+      feelRating: 6,
+      notes: "steady",
+      loggedAt: "2026-05-06T12:00:00.000Z",
+    });
+
+    const logs = removeDailyLog("test-plan", 1, "Tuesday");
+
+    expect(logs).toHaveLength(1);
+    expect(logs[0].dayOfWeek).toBe("Wednesday");
   });
 });
 
