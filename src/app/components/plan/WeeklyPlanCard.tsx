@@ -159,7 +159,7 @@ function renderDay(
       date: day.date,
       dayOfWeek: day.dayOfWeek,
       actualMileage: draft.actualMileage,
-      completed: draft.completed,
+      completed: true,
       feelRating: draft.feelRating,
       notes: draft.notes,
       loggedAt: new Date().toISOString(),
@@ -298,6 +298,8 @@ function DailyLogControls({
   onSave: () => void;
   onRemove: () => void;
 }) {
+  const logButtonLabel = log ? (log.completed ? "Update" : "Mark done") : "Log";
+
   return (
     <div className="grid gap-2 border-t border-gray-100 pt-3 sm:grid-cols-[8rem_8rem_1fr_auto] sm:items-end">
       <label className="block">
@@ -339,21 +341,12 @@ function DailyLogControls({
         />
       </label>
       <div className="flex items-center gap-2">
-        <label className="flex items-center gap-1 text-xs text-gray-600">
-          <input
-            type="checkbox"
-            checked={draft.completed}
-            onChange={(e) => onDraftChange(day.dayOfWeek, { completed: e.target.checked })}
-            className="rounded border-gray-300 text-enduro-600 focus:ring-enduro-500"
-          />
-          Done
-        </label>
         <button
           type="button"
           onClick={onSave}
           className="rounded bg-enduro-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-enduro-700"
         >
-          {log ? "Update" : "Log"}
+          {logButtonLabel}
         </button>
         {log && (
           <button
