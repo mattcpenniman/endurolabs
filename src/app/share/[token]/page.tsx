@@ -33,6 +33,35 @@ function segmentDistanceLabel(segment: Workout["segments"][number]): string {
   return `${formatMiles(segment.distance)} mi`;
 }
 
+function WorkoutBlock({ workout, label }: { workout: Workout; label?: string }): React.ReactNode {
+  return (
+    <div className={label ? "mt-3 border-t border-gray-100 pt-3" : undefined}>
+      {label && (
+        <p className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-gray-500">{label}</p>
+      )}
+      <p className="text-sm font-semibold text-gray-900">
+        {workout.title}
+      </p>
+      <p className="text-xs text-gray-500">
+        {formatMiles(workout.totalDistance)} mi · {Math.floor(workout.estimatedDuration / 60)}h {workout.estimatedDuration % 60}min
+      </p>
+      {workout.segments.length > 1 && (
+        <div className="mt-2 grid gap-1 rounded-lg bg-gray-50 p-3 text-xs text-gray-600">
+          {workout.segments.map((segment, index) => (
+            <div key={`${workout.id}-${index}`} className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
+              <span>
+                {segment.description}
+                {segment.pace && <span className="ml-2 text-gray-400">@ {formatPace(segment.pace)}/mi</span>}
+              </span>
+              <span className="font-semibold text-gray-700">{segmentDistanceLabel(segment)}</span>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default async function SharedPlanPage({
   params,
 }: {
@@ -131,26 +160,13 @@ export default async function SharedPlanPage({
                         <p className="text-xs font-medium text-gray-500">{day.dayOfWeek.slice(0, 3)}</p>
                         <p className="text-xs text-gray-400">{formatShortDate(day.date)}</p>
                       </div>
-                      {day.workout ? (
+                      {day.workout || day.secondaryWorkout ? (
                         <div>
-                          <p className="text-sm font-semibold text-gray-900">
-                            {day.workout.title}
-                          </p>
-                          <p className="text-xs text-gray-500">
-                            {formatMiles(day.workout.totalDistance)} mi · {Math.floor(day.workout.estimatedDuration / 60)}h {day.workout.estimatedDuration % 60}min
-                          </p>
-                          {day.workout.segments.length > 1 && (
-                            <div className="mt-2 grid gap-1 rounded-lg bg-gray-50 p-3 text-xs text-gray-600">
-                              {day.workout.segments.map((segment, index) => (
-                                <div key={`${day.workout?.id}-${index}`} className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
-                                  <span>
-                                    {segment.description}
-                                    {segment.pace && <span className="ml-2 text-gray-400">@ {formatPace(segment.pace)}/mi</span>}
-                                  </span>
-                                  <span className="font-semibold text-gray-700">{segmentDistanceLabel(segment)}</span>
-                                </div>
-                              ))}
-                            </div>
+                          {day.workout && (
+                            <WorkoutBlock workout={day.workout} label={day.secondaryWorkout ? "Primary" : undefined} />
+                          )}
+                          {day.secondaryWorkout && (
+                            <WorkoutBlock workout={day.secondaryWorkout} label="Secondary" />
                           )}
                         </div>
                       ) : (
