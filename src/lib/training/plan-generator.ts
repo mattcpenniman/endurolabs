@@ -54,16 +54,18 @@ const DISPLAY_DAY_ORDER: Record<string, number> = {
   Sunday: 6,
 };
 
-const MILEAGE_PROGRESS_LEVELS = [
-  0, 0, 0,
-  0.25, 0.25, 0.25,
-  0.5, 0.5, 0.25,
-  0.75, 0.75, 0.25,
-  1, 0.75, 0.5,
-  1, 0.75, 0.25,
-  1, 0.5, 0.25, 0.25,
-  0, 0,
+const BASE_BUILD_BLOCK_LEVELS = [
+  [0, 0, 0],
+  [0.25, 0.25, 0.25],
+  [0.5, 0.5, 0.25],
+  [0.75, 0.75, 0.25],
 ];
+const PEAK_BUILD_BLOCK_LEVELS = [
+  [1, 0.75, 0.5],
+  [1, 0.75, 0.25],
+  [1, 0.5, 0.25],
+];
+const TAPER_LEVELS = [0.25, 0, 0];
 
 // ─── Week Count Calculation ─────────────────────────────────
 
@@ -172,12 +174,23 @@ function mileageProgression(
     return Math.round(startMileage);
   }
 
-  const patternIndex = Math.round(
-    ((week - 1) / Math.max(1, totalWeeks - 1)) * (MILEAGE_PROGRESS_LEVELS.length - 1)
-  );
-  const progressionLevel = MILEAGE_PROGRESS_LEVELS[
-    Math.max(0, Math.min(MILEAGE_PROGRESS_LEVELS.length - 1, patternIndex))
+  const taperWeeks = Math.min(3, Math.max(0, totalWeeks - 1));
+  const availableBuildWeeks = Math.max(0, totalWeeks - taperWeeks);
+  const fullBuildBlocks = Math.floor(availableBuildWeeks / 3);
+  const partialBuildWeeks = availableBuildWeeks % 3;
+  const baseBlockCount = Math.min(BASE_BUILD_BLOCK_LEVELS.length, fullBuildBlocks);
+  const peakBlockCount = Math.max(0, fullBuildBlocks - baseBlockCount);
+  const selectedPeakBlocks = PEAK_BUILD_BLOCK_LEVELS.slice(0, peakBlockCount);
+  const finalBuildLevel = selectedPeakBlocks.length > 0
+    ? selectedPeakBlocks[selectedPeakBlocks.length - 1][0]
+    : BASE_BUILD_BLOCK_LEVELS[Math.max(0, baseBlockCount - 1)]?.[0] ?? 0;
+  const levels = [
+    ...BASE_BUILD_BLOCK_LEVELS.slice(0, baseBlockCount).flat(),
+    ...selectedPeakBlocks.flat(),
+    ...Array.from({ length: partialBuildWeeks }, () => finalBuildLevel),
+    ...TAPER_LEVELS.slice(-taperWeeks),
   ];
+  const progressionLevel = levels[Math.min(week - 1, levels.length - 1)] ?? 0;
 
   return Math.round(startMileage + (peakMileage - startMileage) * progressionLevel);
 }

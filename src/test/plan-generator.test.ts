@@ -255,8 +255,25 @@ describe("generatePlan", () => {
       45, 45, 35,
       50, 45, 40,
       50, 45, 35,
-      50, 40, 35, 35,
-      30, 30,
+      50, 40, 35,
+      35, 30, 30,
+    ]);
+  });
+
+  it("reduces the number of peak blocks when the plan is shorter", () => {
+    const plan = generatePlan(makeProfile({
+      currentWeeklyMileage: 30,
+      weeksOverride: 18,
+      peakMileageOverride: 50,
+    }));
+
+    expect(plan.weeks.map((week) => week.totalMileage)).toEqual([
+      30, 30, 30,
+      35, 35, 35,
+      40, 40, 35,
+      45, 45, 35,
+      50, 45, 40,
+      35, 30, 30,
     ]);
   });
 
