@@ -52,6 +52,7 @@ const RACE_DISTANCES: Array<{ key: RaceDistanceKey; label: string; miles: number
   { key: "10k", label: "10K", miles: 6.2 },
   { key: "5k", label: "5K", miles: 3.1 },
 ];
+type PacingStrategy = NonNullable<RunnerProfile["racePacingStrategy"]>;
 
 function clampMileage(value: number): number {
   if (!Number.isFinite(value)) return 5;
@@ -72,6 +73,43 @@ function recommendedStartMileage(plan: MarathonPlan, runsPerWeek: number): numbe
   return clampMileage(plan.peakWeeklyMileage - buildCapacity);
 }
 
+function formatRaceGoalInput(minutes: number): string {
+  const totalSeconds = Math.max(0, Math.round(minutes * 60));
+  const hours = Math.floor(totalSeconds / 3600);
+  const mins = Math.floor((totalSeconds % 3600) / 60);
+  const seconds = totalSeconds % 60;
+
+  if (hours > 0) {
+    return `${hours}:${String(mins).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
+  }
+
+  return `${mins}:${String(seconds).padStart(2, "0")}`;
+}
+
+function parseRaceGoalInput(value: string): number | null {
+  const parts = value
+    .trim()
+    .split(":")
+    .map((part) => Number.parseInt(part, 10));
+
+  if (parts.length < 2 || parts.length > 3 || parts.some((part) => !Number.isFinite(part) || part < 0)) {
+    return null;
+  }
+
+  const [first, second, third] = parts;
+
+  if (parts.length === 2) {
+    if (second === undefined || second >= 60) return null;
+    return first + second / 60;
+  }
+
+  if (second === undefined || third === undefined || second >= 60 || third >= 60) {
+    return null;
+  }
+
+  return first * 60 + second + third / 60;
+}
+
 export default function PlanPage(): React.ReactNode {
   const router = useRouter();
   const [plan, setPlan] = useState<MarathonPlan | null>(null);
@@ -79,7 +117,7 @@ export default function PlanPage(): React.ReactNode {
   const [isLoading, setIsLoading] = useState(false);
   const [expandedWeeks, setExpandedWeeks] = useState<Set<number>>(new Set());
   const [error, setError] = useState<string | null>(null);
-  const [pacingStrategy, setPacingStrategy] = useState<"even" | "negative" | "positive" | "progressive">("even");
+  const [pacingStrategy, setPacingStrategy] = useState<PacingStrategy>("even");
   const [expectedTempF, setExpectedTempF] = useState(50);
   const [savedPlans, setSavedPlans] = useState<SavedPlanRow[]>([]);
   const [isSaving, setIsSaving] = useState(false);
@@ -200,6 +238,8 @@ export default function PlanPage(): React.ReactNode {
           ? Math.max(14, Math.min(28, profile.weeksOverride))
           : generatedPlan.totalWeeks
       );
+      setPacingStrategy(savedPlan?.runnerProfile.racePacingStrategy ?? generatedPlan.runnerProfile.racePacingStrategy ?? "even");
+      setExpectedTempF(savedPlan?.runnerProfile.expectedRaceTempF ?? generatedPlan.runnerProfile.expectedRaceTempF ?? 50);
     } catch (err) {
       setError(err instanceof Error ? err.message : "An unexpected error occurred");
     } finally {
@@ -255,6 +295,8 @@ export default function PlanPage(): React.ReactNode {
           ? Math.max(14, Math.min(28, saved.runnerProfile.weeksOverride))
           : saved.planData.totalWeeks
       );
+      setPacingStrategy(saved.runnerProfile.racePacingStrategy ?? "even");
+      setExpectedTempF(saved.runnerProfile.expectedRaceTempF ?? 50);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to load plan");
     } finally {
@@ -439,6 +481,95 @@ export default function PlanPage(): React.ReactNode {
           ...plan.runnerProfile,
           raceName: planName.trim() || undefined,
           raceDistance: newRaceDistance,
+          racePacingStrategy: pacingStrategy,
+          expectedRaceTempF: expectedTempF,
+        },
+      };
+      const savedPlan = await persistPlan(updatedPlan, planName);
+      setPlan(savedPlan ?? updatedPlan);
+    } catch {
+      // Silently fail
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  const handleAdjustRaceGoalTime = async (newRaceGoalTime: number, raceDistanceMiles: number) => {
+    if (!plan || newRaceGoalTime <= 0) return;
+
+    const nextMarathonEquivalentGoal = (newRaceGoalTime / raceDistanceMiles) * 26.2;
+    if (Math.abs(nextMarathonEquivalentGoal - plan.runnerProfile.goalMarathonTime) < 0.01) return;
+
+    setIsLoading(true);
+    try {
+      const profile = {
+        ...plan.runnerProfile,
+        raceName: planName.trim() || undefined,
+        goalMarathonTime: nextMarathonEquivalentGoal,
+        racePacingStrategy: pacingStrategy,
+        expectedRaceTempF: expectedTempF,
+      };
+      const response = await fetch("/api/plan/generate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(profile),
+      });
+      if (!response.ok) throw new Error("Failed to regenerate plan");
+      const regenerated = await response.json();
+      regenerated.id = plan.id;
+      const savedPlan = await persistPlan(regenerated, planName);
+      setPlan(savedPlan ?? regenerated);
+    } catch {
+      // Silently fail
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleAdjustPacingStrategy = async (newPacingStrategy: PacingStrategy) => {
+    if (!plan || newPacingStrategy === (plan.runnerProfile.racePacingStrategy ?? "even")) {
+      setPacingStrategy(newPacingStrategy);
+      return;
+    }
+
+    setPacingStrategy(newPacingStrategy);
+    setIsSaving(true);
+    try {
+      const updatedPlan: MarathonPlan = {
+        ...plan,
+        runnerProfile: {
+          ...plan.runnerProfile,
+          raceName: planName.trim() || undefined,
+          racePacingStrategy: newPacingStrategy,
+          expectedRaceTempF: expectedTempF,
+        },
+      };
+      const savedPlan = await persistPlan(updatedPlan, planName);
+      setPlan(savedPlan ?? updatedPlan);
+    } catch {
+      // Silently fail
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  const handleAdjustExpectedTemp = async (newExpectedTempF: number) => {
+    if (!Number.isFinite(newExpectedTempF)) return;
+
+    const clampedTemp = Math.max(-10, Math.min(110, Math.round(newExpectedTempF)));
+    setExpectedTempF(clampedTemp);
+
+    if (!plan || clampedTemp === (plan.runnerProfile.expectedRaceTempF ?? 50)) return;
+
+    setIsSaving(true);
+    try {
+      const updatedPlan: MarathonPlan = {
+        ...plan,
+        runnerProfile: {
+          ...plan.runnerProfile,
+          raceName: planName.trim() || undefined,
+          racePacingStrategy: pacingStrategy,
+          expectedRaceTempF: clampedTemp,
         },
       };
       const savedPlan = await persistPlan(updatedPlan, planName);
@@ -649,6 +780,7 @@ export default function PlanPage(): React.ReactNode {
     RACE_DISTANCES[0];
   const raceGoalPace = plan.runnerProfile.goalMarathonTime / 26.2;
   const selectedRaceGoalTime = raceGoalPace * selectedRaceDistance.miles;
+  const selectedRaceGoalInput = formatRaceGoalInput(selectedRaceGoalTime);
   const phaseSections = plan.phases.map((phase) => ({
     phase,
     weeks: plan.weeks.filter(
@@ -932,6 +1064,29 @@ export default function PlanPage(): React.ReactNode {
                   ))}
                 </select>
                 <input
+                  key={`race-goal-${selectedRaceDistance.key}-${selectedRaceGoalInput}`}
+                  type="text"
+                  defaultValue={selectedRaceGoalInput}
+                  aria-label={`${selectedRaceDistance.label} goal time`}
+                  onBlur={(e) => {
+                    const parsedTime = parseRaceGoalInput(e.target.value);
+                    if (parsedTime === null) {
+                      e.target.value = selectedRaceGoalInput;
+                      return;
+                    }
+                    handleAdjustRaceGoalTime(parsedTime, selectedRaceDistance.miles);
+                  }}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") e.currentTarget.blur();
+                    if (e.key === "Escape") {
+                      e.currentTarget.value = selectedRaceGoalInput;
+                      e.currentTarget.blur();
+                    }
+                  }}
+                  disabled={isLoading}
+                  className="w-28 rounded-lg border border-gray-300 bg-white px-3 py-2 font-mono text-sm text-gray-700 focus:border-enduro-500 focus:outline-none focus:ring-2 focus:ring-enduro-500/20 disabled:opacity-60"
+                />
+                <input
                   type="date"
                   value={plan.runnerProfile.raceDate.slice(0, 10)}
                   onChange={(e) => handleAdjustRaceDate(e.target.value)}
@@ -940,7 +1095,8 @@ export default function PlanPage(): React.ReactNode {
                 />
                 <select
                   value={pacingStrategy}
-                  onChange={(e) => setPacingStrategy(e.target.value as typeof pacingStrategy)}
+                  onChange={(e) => handleAdjustPacingStrategy(e.target.value as PacingStrategy)}
+                  disabled={isSaving}
                   className="rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-700 focus:border-enduro-500 focus:outline-none focus:ring-2 focus:ring-enduro-500/20"
                 >
                   <option value="even">Even Pacing</option>
@@ -953,7 +1109,11 @@ export default function PlanPage(): React.ReactNode {
                   <input
                     type="number"
                     value={expectedTempF}
-                    onChange={(e) => setExpectedTempF(parseInt(e.target.value) || 50)}
+                    onChange={(e) => setExpectedTempF(parseInt(e.target.value, 10) || 50)}
+                    onBlur={(e) => handleAdjustExpectedTemp(parseInt(e.target.value, 10))}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") e.currentTarget.blur();
+                    }}
                     min="-10"
                     max="110"
                     className="w-16 rounded-lg border border-gray-300 px-2 py-2 text-center text-sm focus:border-enduro-500 focus:outline-none focus:ring-2 focus:ring-enduro-500/20"

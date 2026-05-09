@@ -47,6 +47,8 @@ export interface RunnerProfile {
   goalMarathonTime: number;               // minutes
   raceDate: string;                       // ISO date string
   raceDistance?: "marathon" | "half_marathon" | "10k" | "5k";
+  racePacingStrategy?: "even" | "negative" | "positive" | "progressive";
+  expectedRaceTempF?: number;
   raceName?: string;                      // optional label for the race
   trainingDaysPerWeek: number;
   preferredRestDay: string;               // "Monday", "Tuesday", etc.
