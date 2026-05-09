@@ -13,6 +13,7 @@ import {
   timestamp,
   varchar,
   text,
+  uniqueIndex,
 } from "drizzle-orm/pg-core";
 
 export const users = pgTable("users", {
@@ -44,8 +45,12 @@ export const plans = pgTable("plans", {
   weeksOverride: integer("weeks_override"),
   // Generated plan data
   planData: jsonb("plan_data").notNull(),
+  shareToken: text("share_token"),
+  sharedAt: timestamp("shared_at"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
   archivedAt: timestamp("archived_at"),
   raceName: varchar("race_name", { length: 255 }),
-});
+}, (table) => [
+  uniqueIndex("plans_share_token_unique").on(table.shareToken),
+]);

@@ -36,6 +36,8 @@ interface SavedPlanRow {
   raceName: string | null;
   createdAt: string;
   archivedAt: string | null;
+  shareToken: string | null;
+  sharedAt: string | null;
 }
 
 interface SavePlanResponse {
@@ -151,6 +153,8 @@ export default function PlanPage(): React.ReactNode {
   const [planName, setPlanName] = useState("");
   const [activePlanTab, setActivePlanTab] = useState<PlanTab>("overview");
   const [dailyLogRefresh, setDailyLogRefresh] = useState(0);
+  const [shareToken, setShareToken] = useState<string | null>(null);
+  const [shareStatus, setShareStatus] = useState<string | null>(null);
 
   useEffect(() => {
     let isMounted = true;
@@ -253,6 +257,7 @@ export default function PlanPage(): React.ReactNode {
       const savedPlan = await persistPlan(generatedPlan, initialPlanName);
 
       setPlan(savedPlan ?? generatedPlan);
+      setShareToken(null);
       setRunsPerWeek(
         profile.runsPerWeekOverride
           ? Math.max(3, Math.min(10, profile.runsPerWeekOverride))
@@ -310,6 +315,7 @@ export default function PlanPage(): React.ReactNode {
       const saved = await res.json();
       setPlan(saved.planData);
       setPlanName(saved.raceName ?? saved.runnerProfile.raceName ?? "");
+      setShareToken(saved.shareToken ?? null);
       setRunsPerWeek(
         saved.runnerProfile.runsPerWeekOverride
           ? Math.max(3, Math.min(10, saved.runnerProfile.runsPerWeekOverride))
@@ -799,6 +805,38 @@ export default function PlanPage(): React.ReactNode {
     }
   };
 
+  const handleUpdateShareAccess = async (enabled: boolean) => {
+    if (!plan) return;
+
+    setIsSaving(true);
+    setShareStatus(null);
+    try {
+      const response = await fetch(`/api/plan/${plan.id}/share`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ enabled }),
+      });
+      if (!response.ok) throw new Error(enabled ? "Failed to create share link" : "Failed to revoke share link");
+      const data = (await response.json()) as { shareToken: string | null; shareUrl: string | null };
+      setShareToken(data.shareToken);
+      await refreshSavedPlans();
+      setShareStatus(enabled ? "Share link enabled." : "Share link revoked.");
+    } catch (err) {
+      setShareStatus(err instanceof Error ? err.message : "Failed to update share access");
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  const handleCopyShareLink = async (shareUrl: string) => {
+    try {
+      await navigator.clipboard.writeText(shareUrl);
+      setShareStatus("Share link copied.");
+    } catch {
+      setShareStatus("Unable to copy automatically.");
+    }
+  };
+
   const toggleWeek = (weekNumber: number) => {
     setExpandedWeeks((prev) => {
       const next = new Set(prev);
@@ -1022,6 +1060,9 @@ export default function PlanPage(): React.ReactNode {
   const calculatedMaxLongRun = plan.weeks.length > 0
     ? Math.max(...plan.weeks.map((week) => week.longRunDistance))
     : 0;
+  const shareUrl = shareToken && typeof window !== "undefined"
+    ? `${window.location.origin}/share/${shareToken}`
+    : null;
   void dailyLogRefresh;
 
   return (
@@ -1562,6 +1603,72 @@ export default function PlanPage(): React.ReactNode {
                 <p className="mt-3 text-xs text-gray-500">
                   {selectedDoubleUpDays.length === 0 ? "No double-up days selected." : `${selectedDoubleUpDays.length} double-up ${selectedDoubleUpDays.length === 1 ? "day" : "days"} selected.`}
                 </p>
+              </div>
+
+              <div className="rounded-lg border border-gray-200 bg-white p-5 md:col-span-2">
+                <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+                  <div>
+                    <h3 className="text-sm font-semibold text-gray-900">Share access</h3>
+                    <p className="mt-1 text-sm text-gray-500">
+                      Create a random public URL for read-only access to this plan. Revoke access at any time.
+                    </p>
+                    {shareStatus && (
+                      <p className={`mt-2 text-xs ${shareStatus.includes("Failed") || shareStatus.includes("Unable") ? "text-red-600" : "text-enduro-700"}`}>
+                        {shareStatus}
+                      </p>
+                    )}
+                  </div>
+                  <div className="w-full space-y-3 lg:max-w-xl">
+                    {shareUrl ? (
+                      <>
+                        <label className="block">
+                          <span className="text-xs font-medium uppercase tracking-wide text-gray-500">Read-only share link</span>
+                          <input
+                            type="text"
+                            readOnly
+                            value={shareUrl}
+                            className="mt-1 w-full rounded-lg border border-gray-300 bg-gray-50 px-3 py-2 text-sm text-gray-700"
+                          />
+                        </label>
+                        <div className="flex flex-wrap gap-2">
+                          <button
+                            type="button"
+                            onClick={() => handleCopyShareLink(shareUrl)}
+                            disabled={isSaving}
+                            className="rounded-lg bg-enduro-600 px-4 py-2 text-sm font-medium text-white hover:bg-enduro-700 disabled:opacity-50"
+                          >
+                            Copy Link
+                          </button>
+                          <a
+                            href={shareUrl}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50"
+                          >
+                            Open Read-Only View
+                          </a>
+                          <button
+                            type="button"
+                            onClick={() => handleUpdateShareAccess(false)}
+                            disabled={isSaving}
+                            className="rounded-lg border border-red-200 bg-white px-4 py-2 text-sm font-medium text-red-600 hover:bg-red-50 disabled:opacity-50"
+                          >
+                            Revoke Access
+                          </button>
+                        </div>
+                      </>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={() => handleUpdateShareAccess(true)}
+                        disabled={isSaving}
+                        className="rounded-lg bg-enduro-600 px-4 py-2 text-sm font-medium text-white hover:bg-enduro-700 disabled:opacity-50"
+                      >
+                        Create Share Link
+                      </button>
+                    )}
+                  </div>
+                </div>
               </div>
             </div>
           </div>
