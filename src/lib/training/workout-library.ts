@@ -353,27 +353,47 @@ export function createLongRun(
   index: number,
   distance: number,
   paceZones: PaceZones,
-  powerZones?: PowerZones
+  powerZones?: PowerZones,
+  marathonFinishDistance = 0
 ): Workout {
+  const finishDistance = Math.min(distance, Math.max(0, marathonFinishDistance));
+  const easyDistance = Math.max(0, distance - finishDistance);
   const segments: WorkoutSegment[] = [
-    {
-      description: `Long run — ${distance} miles at easy/conversational pace`,
-      distance,
-      pace: (paceZones.easy.min + paceZones.easy.max) / 2,
-      power: powerZones ? (powerZones.easy.min + powerZones.easy.max) / 2 : undefined,
-      effort: paceZones.easyEffort,
-      type: "long",
-    },
+    ...(easyDistance > 0
+      ? [{
+          description: `Long run — ${easyDistance} miles at easy/conversational pace`,
+          distance: easyDistance,
+          pace: (paceZones.easy.min + paceZones.easy.max) / 2,
+          power: powerZones ? (powerZones.easy.min + powerZones.easy.max) / 2 : undefined,
+          effort: paceZones.easyEffort,
+          type: "long" as const,
+        }]
+      : []),
+    ...(finishDistance > 0
+      ? [{
+          description: `Fast finish — ${finishDistance} miles at marathon pace`,
+          distance: finishDistance,
+          pace: paceZones.marathon,
+          power: powerZones?.marathon,
+          effort: paceZones.marathonEffort,
+          type: "marathon_pace" as const,
+        }]
+      : []),
   ];
 
   return {
     id: makeId("long", week, index),
     type: "long",
-    title: `${distance} mi Long Run`,
-    description: `Slow, steady miles to build endurance. The last few miles will feel harder — that's the point.`,
+    title: finishDistance > 0 ? `${distance} mi Long Run w/ MP Finish` : `${distance} mi Long Run`,
+    description: finishDistance > 0
+      ? `Slow endurance run finishing with marathon-pace work.`
+      : `Slow, steady miles to build endurance. The last few miles will feel harder — that's the point.`,
     segments,
     totalDistance: distance,
-    estimatedDuration: Math.round(distance * ((paceZones.easy.min + paceZones.easy.max) / 2)),
+    estimatedDuration: Math.round(
+      easyDistance * ((paceZones.easy.min + paceZones.easy.max) / 2) +
+      finishDistance * paceZones.marathon
+    ),
     weeklyMileageContribution: distance,
     intensityCategory: "easy",
   };

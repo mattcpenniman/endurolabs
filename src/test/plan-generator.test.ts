@@ -29,6 +29,10 @@ function makeProfile(overrides: Partial<RunnerProfile> = {}): RunnerProfile {
   };
 }
 
+function roundQuarter(value: number): number {
+  return Math.round(value * 4) / 4;
+}
+
 function scheduledMileage(week: ReturnType<typeof generatePlan>["weeks"][number]): number {
   return Math.round(
     week.days.reduce(
@@ -440,5 +444,28 @@ describe("generatePlan", () => {
 
     expect(intervalWeek).toBeDefined();
     expect(intervalWeek?.intensityDistribution.threshold).toBe(3);
+  });
+
+  it("respects weekly intensity overrides for specific weeks", () => {
+    const plan = generatePlan(
+      makeProfile({
+        weeksOverride: 18,
+        peakMileageOverride: 50,
+        intensityTargetPercents: { marathon: 10, threshold: 5, vo2: 2 },
+        weeklyIntensityOverrides: {
+          10: { marathon: 20 },
+        },
+      })
+    );
+
+    const week10 = plan.weeks.find((w) => w.weekNumber === 10);
+    const week11 = plan.weeks.find((w) => w.weekNumber === 11);
+
+    expect(week10?.intensityTargetDistribution?.marathon).toBe(
+      roundQuarter(((week10?.totalMileage ?? 0) * 20) / 100)
+    );
+    expect(week11?.intensityTargetDistribution?.marathon).toBe(
+      roundQuarter(((week11?.totalMileage ?? 0) * 10) / 100)
+    );
   });
 });

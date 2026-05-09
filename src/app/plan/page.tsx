@@ -45,6 +45,7 @@ interface SavePlanResponse {
 
 type PlanTab = "overview" | "schedule" | "race" | "scorecard" | "settings";
 type RaceDistanceKey = NonNullable<RunnerProfile["raceDistance"]>;
+type IntensityTargetKey = keyof NonNullable<RunnerProfile["intensityTargetPercents"]>;
 
 const DAYS_OF_WEEK = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
 const RACE_DISTANCES: Array<{ key: RaceDistanceKey; label: string; miles: number }> = [
@@ -55,6 +56,16 @@ const RACE_DISTANCES: Array<{ key: RaceDistanceKey; label: string; miles: number
 ];
 type PacingStrategy = NonNullable<RunnerProfile["racePacingStrategy"]>;
 const MILEAGE_BUILD_STEPS = 4;
+const DEFAULT_INTENSITY_TARGET_PERCENTS: NonNullable<RunnerProfile["intensityTargetPercents"]> = {
+  marathon: 10,
+  threshold: 6,
+  vo2: 2,
+};
+const INTENSITY_TARGET_RANGES: Record<IntensityTargetKey, { min: number; max: number }> = {
+  marathon: { min: 8, max: 15 },
+  threshold: { min: 5, max: 8 },
+  vo2: { min: 1, max: 4 },
+};
 
 function clampMileage(value: number): number {
   if (!Number.isFinite(value)) return 5;
@@ -68,6 +79,22 @@ function recommendedStartMileage(plan: MarathonPlan, runsPerWeek: number): numbe
 
 function mileageStepPerBuild(startMileage: number, peakMileage: number): number {
   return Math.max(0, (peakMileage - startMileage) / MILEAGE_BUILD_STEPS);
+}
+
+function getCurrentIntensityTargetPercents(
+  profile: RunnerProfile
+): NonNullable<RunnerProfile["intensityTargetPercents"]> {
+  return {
+    marathon: profile.intensityTargetPercents?.marathon ?? DEFAULT_INTENSITY_TARGET_PERCENTS.marathon,
+    threshold: profile.intensityTargetPercents?.threshold ?? DEFAULT_INTENSITY_TARGET_PERCENTS.threshold,
+    vo2: profile.intensityTargetPercents?.vo2 ?? DEFAULT_INTENSITY_TARGET_PERCENTS.vo2,
+  };
+}
+
+function clampIntensityTarget(key: IntensityTargetKey, value: number): number {
+  const range = INTENSITY_TARGET_RANGES[key];
+  if (!Number.isFinite(value)) return DEFAULT_INTENSITY_TARGET_PERCENTS[key];
+  return Math.max(range.min, Math.min(range.max, Math.round(value * 2) / 2));
 }
 
 function formatRaceGoalInput(minutes: number): string {
@@ -469,6 +496,76 @@ export default function PlanPage(): React.ReactNode {
       // Silently fail
     } finally {
       setIsLoading(false);
+    }
+  };
+
+  const handleAdjustIntensityTarget = async (key: IntensityTargetKey, value: number, weekNumber?: number) => {
+    if (!plan) return;
+
+    // Use a wider clamp for weekly overrides to allow user flexibility
+    const nextValue = weekNumber === undefined 
+      ? clampIntensityTarget(key, value) 
+      : Math.max(0, Math.min(50, Math.round(value * 2) / 2));
+    
+    if (weekNumber === undefined) {
+      const currentTargets = getCurrentIntensityTargetPercents(plan.runnerProfile);
+      if (nextValue === currentTargets[key]) return;
+
+      setIsLoading(true);
+      try {
+        const profile = {
+          ...plan.runnerProfile,
+          raceName: planName.trim() || undefined,
+          intensityTargetPercents: {
+            ...currentTargets,
+            [key]: nextValue,
+          },
+        };
+        const response = await fetch("/api/plan/generate", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(profile),
+        });
+        if (!response.ok) throw new Error("Failed to regenerate plan");
+        const regenerated = await response.json();
+        regenerated.id = plan.id;
+        const savedPlan = await persistPlan(regenerated, planName);
+        setPlan(savedPlan ?? regenerated);
+      } catch {
+        // Silently fail
+      } finally {
+        setIsLoading(false);
+      }
+    } else {
+      // Per-week override
+      setIsLoading(true);
+      try {
+        const profile = {
+          ...plan.runnerProfile,
+          raceName: planName.trim() || undefined,
+          weeklyIntensityOverrides: {
+            ...(plan.runnerProfile.weeklyIntensityOverrides || {}),
+            [weekNumber]: {
+              ...(plan.runnerProfile.weeklyIntensityOverrides?.[weekNumber] || {}),
+              [key]: nextValue,
+            },
+          },
+        };
+        const response = await fetch("/api/plan/generate", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(profile),
+        });
+        if (!response.ok) throw new Error("Failed to regenerate plan");
+        const regenerated = await response.json();
+        regenerated.id = plan.id;
+        const savedPlan = await persistPlan(regenerated, planName);
+        setPlan(savedPlan ?? regenerated);
+      } catch {
+        // Silently fail
+      } finally {
+        setIsLoading(false);
+      }
     }
   };
 
@@ -918,6 +1015,7 @@ export default function PlanPage(): React.ReactNode {
   const actualMileageStep = mileageStepPerBuild(plan.runnerProfile.currentWeeklyMileage, plan.peakWeeklyMileage);
   const recommendedMileageStep = currentRunCount;
   const mileageStepDelta = actualMileageStep - recommendedMileageStep;
+  const currentIntensityTargetPercents = getCurrentIntensityTargetPercents(plan.runnerProfile);
   const calculatedMaxLongRun = plan.weeks.length > 0
     ? Math.max(...plan.weeks.map((week) => week.longRunDistance))
     : 0;
@@ -1143,6 +1241,8 @@ export default function PlanPage(): React.ReactNode {
                         onToggle={() => toggleWeek(week.weekNumber)}
                         dailyLogs={dailyLogs}
                         onDailyLogSaved={() => setDailyLogRefresh((value) => value + 1)}
+                        intensityTargetPercents={currentIntensityTargetPercents}
+                        onIntensityTargetChange={handleAdjustIntensityTarget}
                       />
                     ))}
                   </section>
@@ -1352,6 +1452,43 @@ export default function PlanPage(): React.ReactNode {
                     >
                       Use recommended start
                     </button>
+                  </div>
+                </div>
+              </div>
+
+              <div className="rounded-lg border border-gray-200 bg-white p-5 md:col-span-2">
+                <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+                  <div>
+                    <h3 className="text-sm font-semibold text-gray-900">Intensity targets</h3>
+                    <p className="mt-1 text-sm text-gray-500">
+                      Weekly workout construction targets these percentages where the phase allows it. Extra marathon-pace volume is added to the end of the long run.
+                    </p>
+                  </div>
+                  <div className="grid gap-3 sm:grid-cols-3 lg:min-w-[36rem]">
+                    {[
+                      { key: "marathon" as const, label: "Specific endurance", sublabel: "Marathon pace", range: "8-15%" },
+                      { key: "threshold" as const, label: "Threshold / LT", sublabel: "Sustained strength", range: "5-8%" },
+                      { key: "vo2" as const, label: "VO2max / Speed", sublabel: "Economy maintenance", range: "1-4%" },
+                    ].map((target) => (
+                      <label key={target.key} className="block rounded-lg border border-gray-100 bg-gray-50 p-3">
+                        <span className="text-xs font-semibold uppercase tracking-wide text-gray-500">{target.label}</span>
+                        <span className="mt-1 block text-xs text-gray-500">{target.sublabel} · {target.range}</span>
+                        <input
+                          key={`intensity-${target.key}-${currentIntensityTargetPercents[target.key]}`}
+                          type="number"
+                          min={INTENSITY_TARGET_RANGES[target.key].min}
+                          max={INTENSITY_TARGET_RANGES[target.key].max}
+                          step={0.5}
+                          defaultValue={currentIntensityTargetPercents[target.key]}
+                          onBlur={(e) => handleAdjustIntensityTarget(target.key, Number(e.target.value))}
+                          onKeyDown={(e) => {
+                            if (e.key === "Enter") e.currentTarget.blur();
+                          }}
+                          disabled={isLoading}
+                          className="mt-3 w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 focus:border-enduro-500 focus:outline-none focus:ring-2 focus:ring-enduro-500/20 disabled:opacity-60"
+                        />
+                      </label>
+                    ))}
                   </div>
                 </div>
               </div>

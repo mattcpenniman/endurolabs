@@ -66,6 +66,11 @@ const PEAK_BUILD_BLOCK_LEVELS = [
   [1, 0.5, 0.25],
 ];
 const TAPER_LEVELS = [0.25, 0, 0];
+const DEFAULT_INTENSITY_TARGET_PERCENTS = {
+  marathon: 10,
+  threshold: 6,
+  vo2: 2,
+};
 
 // ─── Week Count Calculation ─────────────────────────────────
 
@@ -275,6 +280,57 @@ function roundMiles(distance: number): number {
   return Math.round(distance * 4) / 4;
 }
 
+function workoutDistanceByType(workout: Workout | null | undefined, type: Workout["type"]): number {
+  if (!workout) return 0;
+  return workout.segments.reduce((sum, segment) => {
+    if (segment.type !== type) return sum;
+    return sum + (segment.distance ?? 0) * (segment.repetitions ?? 1);
+  }, 0);
+}
+
+function getIntensityTargetPercents(profile: RunnerProfile): NonNullable<RunnerProfile["intensityTargetPercents"]> {
+  return {
+    marathon: Math.max(0, Math.min(30, profile.intensityTargetPercents?.marathon ?? DEFAULT_INTENSITY_TARGET_PERCENTS.marathon)),
+    threshold: Math.max(0, Math.min(20, profile.intensityTargetPercents?.threshold ?? DEFAULT_INTENSITY_TARGET_PERCENTS.threshold)),
+    vo2: Math.max(0, Math.min(10, profile.intensityTargetPercents?.vo2 ?? DEFAULT_INTENSITY_TARGET_PERCENTS.vo2)),
+  };
+}
+
+function calculateIntensityTargets(
+  weeklyMileage: number,
+  phase: TrainingPhase,
+  week: number,
+  totalWeeks: number,
+  targetPercents: NonNullable<RunnerProfile["intensityTargetPercents"]>,
+  overrides?: RunnerProfile["weeklyIntensityOverrides"]
+): NonNullable<WeeklyPlan["intensityTargetDistribution"]> {
+  const weekOverrides = overrides?.[week];
+  const weeksBeforeRace = totalWeeks - week;
+  const allowsPaceSpecificWorkout = week > 3 && weeksBeforeRace > 2;
+  
+  const marathonPercent = weekOverrides?.marathon ?? targetPercents.marathon;
+  const thresholdPercent = weekOverrides?.threshold ?? targetPercents.threshold;
+  const vo2Percent = weekOverrides?.vo2 ?? targetPercents.vo2;
+
+  // Allow overrides even in base phase or early weeks if explicitly provided
+  const marathon = (weekOverrides?.marathon !== undefined || (allowsPaceSpecificWorkout && phase !== "base"))
+    ? roundMiles((weeklyMileage * marathonPercent) / 100)
+    : 0;
+  const threshold = (weekOverrides?.threshold !== undefined || allowsPaceSpecificWorkout)
+    ? roundMiles((weeklyMileage * thresholdPercent) / 100)
+    : 0;
+  const vo2 = (weekOverrides?.vo2 !== undefined || (allowsPaceSpecificWorkout && phase !== "base"))
+    ? roundMiles((weeklyMileage * vo2Percent) / 100)
+    : 0;
+
+  return {
+    marathon,
+    threshold,
+    vo2,
+    easy: Math.max(0, roundMiles(weeklyMileage - marathon - threshold - vo2)),
+  };
+}
+
 function distributeVariedMileage(totalMileage: number, dayCount: number, week: number): number[] {
   if (dayCount <= 0) return [];
   if (dayCount === 1) return [roundMiles(totalMileage)];
@@ -383,7 +439,9 @@ function assignWorkoutsForWeek(
   _strengthAvailability: "none" | "light" | "regular",
   isDownWeek: boolean,
   runsPerWeek: number,
-  preferredDoubleUpDays: string[]
+  preferredDoubleUpDays: string[],
+  intensityTargets: NonNullable<WeeklyPlan["intensityTargetDistribution"]>,
+  overrides?: RunnerProfile["weeklyIntensityOverrides"]
 ): DailyPlan[] {
   const days: DailyPlan[] = [];
   const allDays = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
@@ -405,16 +463,7 @@ function assignWorkoutsForWeek(
   let workoutIndex = 0;
   let assignedMileage = 0;
 
-  // 1. Assign the long run
   const adjustedLongRunMiles = longRunMiles;
-  const longRun = WorkoutLibrary.createLongRun(week, workoutIndex++, adjustedLongRunMiles, paceZones, powerZones);
-  days.push({
-    date: "", // Will be filled in later
-    dayOfWeek: longRunDay,
-    workout: longRun,
-    isRestDay: false,
-    plannedMileage: adjustedLongRunMiles,
-  });
   assignedMileage += adjustedLongRunMiles;
 
   // 2. Assign key workout (threshold or intervals)
@@ -424,19 +473,24 @@ function assignWorkoutsForWeek(
   const weeksBeforeRace = totalWeeks - week;
   const allowsPaceSpecificWorkout = week > 3 && weeksBeforeRace > 2;
 
-  if (!isDownWeek && allowsPaceSpecificWorkout && runDays.length > 1) {
-    if (phase === "base" && canDoThreshold) {
-      const thresholdMiles = Math.min(4, Math.max(1, remainingMileage * 0.2));
+  if (!isDownWeek && (allowsPaceSpecificWorkout || intensityTargets.marathon > 0 || intensityTargets.threshold > 0 || intensityTargets.vo2 > 0) && runDays.length > 1) {
+    if (phase === "base" && (canDoThreshold || intensityTargets.threshold > 0)) {
+      const thresholdMiles = intensityTargets.threshold > 0 
+        ? intensityTargets.threshold 
+        : Math.min(4, Math.max(1, remainingMileage * 0.2));
       const totalDist = Math.min(remainingMileage, thresholdMiles + 3); // warmup/cooldown
-      if (week % 4 === 0 && totalDist >= 5) {
+      
+      const hasThresholdOverride = overrides?.[week]?.threshold !== undefined;
+      
+      if (week % 4 === 0 && totalDist >= 5 && !hasThresholdOverride) {
         keyWorkout = WorkoutLibrary.createProgressionRun(week, workoutIndex++, totalDist, paceZones, powerZones);
-      } else if (week % 2 === 0) {
+      } else if (week % 2 === 0 || hasThresholdOverride) {
         const reps = comfortLevel === "advanced" ? 4 : 3;
         keyWorkout = WorkoutLibrary.createThresholdIntervals(
           week,
           workoutIndex++,
           totalDist,
-          reps,
+          hasThresholdOverride ? Math.max(1, Math.round(thresholdMiles)) : reps,
           1,
           60,
           paceZones,
@@ -445,41 +499,66 @@ function assignWorkoutsForWeek(
       } else {
         keyWorkout = WorkoutLibrary.createThresholdRun(week, workoutIndex++, totalDist, thresholdMiles, paceZones, powerZones);
       }
-    } else if (phase !== "base" && canDoIntervals && !isDownWeek) {
-      const shouldRunVO2 =
-        phase === "peak_taper" ? week % 2 === 0 : week % 3 === 2;
+    } else if (phase !== "base" && (canDoIntervals || intensityTargets.vo2 > 0 || intensityTargets.threshold > 0 || intensityTargets.marathon > 0) && !isDownWeek) {
+      const hasVO2Override = overrides?.[week]?.vo2 !== undefined;
+      const hasMarathonOverride = overrides?.[week]?.marathon !== undefined;
+      const hasThresholdOverride = overrides?.[week]?.threshold !== undefined;
+
+      const shouldRunVO2 = hasVO2Override || (phase === "peak_taper" ? week % 2 === 0 : week % 3 === 2);
+      const shouldRunMarathon = !shouldRunVO2 && (hasMarathonOverride || (phase === "marathon_build" && week % 3 === 1));
 
       if (shouldRunVO2) {
         const targetRepMinutes = phase === "peak_taper" ? 3 : comfortLevel === "advanced" ? 4.5 : 4;
-        const reps = phase === "peak_taper" ? 3 : comfortLevel === "advanced" ? 5 : 4;
         const repDist = nearestVO2RepDistance(paceZones.vo2, targetRepMinutes);
+        const reps = Math.max(1, Math.round((intensityTargets.vo2 || (comfortLevel === "advanced" ? 5 : 4)) / repDist));
         const restSeconds = Math.round(targetRepMinutes * 60);
         keyWorkout = WorkoutLibrary.createVO2Intervals(week, workoutIndex++, reps, repDist, restSeconds, paceZones, powerZones);
-      } else if (phase === "marathon_build" && week % 3 === 1) {
-        const mpMiles = Math.min(8, Math.max(3, remainingMileage * 0.18));
+      } else if (shouldRunMarathon) {
+        const mpMiles = Math.max(1, intensityTargets.marathon || remainingMileage * 0.18);
         const totalDist = Math.min(remainingMileage, mpMiles + 3);
         keyWorkout = WorkoutLibrary.createMarathonPaceRun(week, workoutIndex++, mpMiles, totalDist, paceZones, powerZones);
       } else {
         const reps = comfortLevel === "advanced" ? 4 : 3;
-        const totalDist = Math.min(remainingMileage, reps + 3);
+        const thresholdMiles = Math.max(1, intensityTargets.threshold || reps);
+        const totalDist = Math.min(remainingMileage, thresholdMiles + 3);
         keyWorkout = WorkoutLibrary.createThresholdIntervals(
           week,
           workoutIndex++,
           totalDist,
-          reps,
+          hasThresholdOverride ? Math.max(1, Math.round(thresholdMiles)) : reps,
           1,
           75,
           paceZones,
           powerZones
         );
       }
-    } else if (phase !== "base") {
-      // Marathon pace work
-      const mpMiles = Math.min(5, Math.max(2, remainingMileage * 0.15));
+    } else if (phase !== "base" && intensityTargets.marathon > 0) {
+      // Marathon pace work fallback
+      const mpMiles = Math.max(1, intensityTargets.marathon || remainingMileage * 0.15);
       const totalDist = Math.min(remainingMileage, mpMiles + 3);
       keyWorkout = WorkoutLibrary.createMarathonPaceRun(week, workoutIndex++, mpMiles, totalDist, paceZones, powerZones);
     }
   }
+
+  const keyMarathonMiles = workoutDistanceByType(keyWorkout, "marathon_pace");
+  const marathonFinishMiles = phase !== "base"
+    ? roundMiles(Math.max(0, Math.min(adjustedLongRunMiles * 0.4, intensityTargets.marathon - keyMarathonMiles)))
+    : 0;
+  const longRun = WorkoutLibrary.createLongRun(
+    week,
+    workoutIndex++,
+    adjustedLongRunMiles,
+    paceZones,
+    powerZones,
+    marathonFinishMiles
+  );
+  days.push({
+    date: "",
+    dayOfWeek: longRunDay,
+    workout: longRun,
+    isRestDay: false,
+    plannedMileage: adjustedLongRunMiles,
+  });
 
   // Assign key workout to a mid-week day (not the long run day)
   if (keyWorkout) {
@@ -722,6 +801,7 @@ export function generatePlan(profile: RunnerProfile): MarathonPlan {
     profile.availableLongRunDays
   );
   const longRunDay = profile.availableLongRunDays[0] ?? "Sunday";
+  const intensityTargetPercents = getIntensityTargetPercents(profile);
 
   // Runs per week: user override clamped 3–10, defaults to training days count
   const runsPerWeek = profile.runsPerWeekOverride
@@ -740,6 +820,14 @@ export function generatePlan(profile: RunnerProfile): MarathonPlan {
       ? Math.min(calculatedLongRunMiles, maxLongRunOverride)
       : calculatedLongRunMiles;
     const isDownWeek = phase === "marathon_build" && (week - phases[0].weekRange[1]) % 3 === 0;
+    const intensityTargetDistribution = calculateIntensityTargets(
+      weeklyMileage,
+      phase,
+      week,
+      totalWeeks,
+      intensityTargetPercents,
+      profile.weeklyIntensityOverrides
+    );
 
     const days = assignWorkoutsForWeek(
       week,
@@ -755,7 +843,9 @@ export function generatePlan(profile: RunnerProfile): MarathonPlan {
       profile.strengthTrainingAvailability,
       isDownWeek,
       runsPerWeek,
-      profile.preferredDoubleUpDays ?? []
+      profile.preferredDoubleUpDays ?? [],
+      intensityTargetDistribution,
+      profile.weeklyIntensityOverrides
     );
 
     // Calculate dates
@@ -787,6 +877,7 @@ export function generatePlan(profile: RunnerProfile): MarathonPlan {
       isDownWeek,
       longRunDistance: longRunMiles,
       intensityDistribution: intensityDist,
+      intensityTargetDistribution,
     });
   }
 

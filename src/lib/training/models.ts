@@ -70,6 +70,16 @@ export interface RunnerProfile {
   peakMileageOverride?: number | null;    // miles — caps peak weekly mileage
   weeksOverride?: number | null;          // total weeks — overrides auto-calc from race date
   maxLongRunOverride?: number | null;     // miles — caps the longest weekly long run
+  intensityTargetPercents?: {
+    marathon: number;                     // % of weekly mileage at marathon pace
+    threshold: number;                    // % of weekly mileage at threshold/LT
+    vo2: number;                          // % of weekly mileage at VO2/speed
+  };
+  weeklyIntensityOverrides?: Record<number, {
+    marathon?: number;
+    threshold?: number;
+    vo2?: number;
+  }>;
   runsPerWeekOverride?: number | null;    // runs per week (3–10) — >trainingDays creates double-days
   preferredDoubleUpDays?: string[];       // days that should receive secondary runs first
 }
@@ -157,6 +167,12 @@ export interface WeeklyPlan {
   isDownWeek: boolean;
   longRunDistance: number;
   intensityDistribution: {
+    easy: number;
+    threshold: number;
+    marathon: number;
+    vo2: number;
+  };
+  intensityTargetDistribution?: {
     easy: number;
     threshold: number;
     marathon: number;

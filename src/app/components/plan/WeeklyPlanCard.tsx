@@ -10,7 +10,7 @@
 
 import React from "react";
 import { useState, useEffect, useMemo } from "react";
-import { DailyLog, WeeklyPlan, DailyPlan, Workout, WorkoutType, formatPace } from "@/lib/training/models";
+import { DailyLog, WeeklyPlan, DailyPlan, Workout, WorkoutType, RunnerProfile, formatPace } from "@/lib/training/models";
 import { addDailyLog, removeDailyLog } from "@/lib/training/progress-tracker";
 
 interface WeeklyPlanCardProps {
@@ -20,7 +20,11 @@ interface WeeklyPlanCardProps {
   onToggle: () => void;
   dailyLogs: DailyLog[];
   onDailyLogSaved: () => void;
+  intensityTargetPercents: NonNullable<RunnerProfile["intensityTargetPercents"]>;
+  onIntensityTargetChange: (key: keyof NonNullable<RunnerProfile["intensityTargetPercents"]>, value: number, weekNumber?: number) => void;
 }
+
+type IntensityTargetKey = keyof NonNullable<RunnerProfile["intensityTargetPercents"]>;
 
 // Swap targets a runner can choose from
 const swapOptions: Array<{ type: WorkoutType; label: string; emoji: string }> = [
@@ -91,6 +95,10 @@ function formatShortDate(date: string): string {
 
 function formatMiles(distance: number): string {
   return Number.isInteger(distance) ? `${distance}` : `${distance.toFixed(2).replace(/0$/, "")}`;
+}
+
+function formatPercent(value: number): string {
+  return `${Math.round(value * 10) / 10}%`;
 }
 
 function segmentDistanceLabel(segment: Workout["segments"][number]): string {
@@ -372,6 +380,8 @@ export default function WeeklyPlanCard({
   onToggle,
   dailyLogs,
   onDailyLogSaved,
+  intensityTargetPercents,
+  onIntensityTargetChange,
 }: WeeklyPlanCardProps) {
   // Track swapped workouts by day-of-week key
   const [swappedWorkouts, setSwappedWorkouts] = useState<Record<string, Workout | null>>({});
@@ -532,6 +542,44 @@ export default function WeeklyPlanCard({
     { label: "MP", value: week.intensityDistribution.marathon, className: "bg-blue-50 text-blue-700" },
     { label: "VO2", value: week.intensityDistribution.vo2, className: "bg-red-50 text-red-700" },
   ].filter((item) => item.value > 0);
+  const intensityRows: Array<{
+    key: IntensityTargetKey;
+    label: string;
+    shortLabel: string;
+    actualMiles: number;
+    targetMiles: number;
+    targetPercent: number;
+    className: string;
+  }> = [
+    {
+      key: "marathon",
+      label: "Marathon pace",
+      shortLabel: "MP",
+      actualMiles: week.intensityDistribution.marathon,
+      targetMiles: week.intensityTargetDistribution?.marathon ?? 0,
+      targetPercent: intensityTargetPercents.marathon,
+      className: "bg-blue-50 text-blue-700",
+    },
+    {
+      key: "threshold",
+      label: "Threshold / LT",
+      shortLabel: "T",
+      actualMiles: week.intensityDistribution.threshold,
+      targetMiles: week.intensityTargetDistribution?.threshold ?? 0,
+      targetPercent: intensityTargetPercents.threshold,
+      className: "bg-amber-50 text-amber-700",
+    },
+    {
+      key: "vo2",
+      label: "VO2max / Speed",
+      shortLabel: "VO2",
+      actualMiles: week.intensityDistribution.vo2,
+      targetMiles: week.intensityTargetDistribution?.vo2 ?? 0,
+      targetPercent: intensityTargetPercents.vo2,
+      className: "bg-red-50 text-red-700",
+    },
+  ];
+  const activeIntensityRows = intensityRows.filter((row) => row.targetMiles > 0 || row.actualMiles > 0 || (isExpanded && (row.key === "marathon" || row.key === "threshold" || row.key === "vo2")));
   const weekLogs = dailyLogs.filter((log) => log.weekNumber === week.weekNumber);
   const actualMileage =
     weekLogs.length > 0
@@ -618,6 +666,18 @@ export default function WeeklyPlanCard({
             )}
           </div>
         </div>
+        {activeIntensityRows.length > 0 && (
+          <div className="hidden shrink-0 flex-col items-end gap-1 md:flex">
+            <span className="text-[11px] font-semibold uppercase tracking-wide text-gray-400">At target</span>
+            <div className="flex flex-wrap justify-end gap-1">
+              {activeIntensityRows.filter(r => r.targetMiles > 0 || r.actualMiles > 0).map((row) => (
+                <span key={row.key} className={`rounded px-2 py-1 text-xs ${row.className}`}>
+                  {row.shortLabel} {formatMiles(row.actualMiles)} / {formatMiles(row.targetMiles)} mi
+                </span>
+              ))}
+            </div>
+          </div>
+        )}
         <span className={`text-gray-400 transition-transform ${isExpanded ? "rotate-180" : ""}`}>▼</span>
       </button>
 
@@ -630,6 +690,36 @@ export default function WeeklyPlanCard({
               {phaseDetail.fullLabel}
             </span>
           </div>
+
+          {activeIntensityRows.length > 0 && (
+            <div className="my-3 grid gap-2 rounded-lg border border-gray-100 bg-gray-50 p-3 md:grid-cols-3">
+              {activeIntensityRows.map((row) => {
+                const actualPercent = week.totalMileage > 0 ? (row.actualMiles / week.totalMileage) * 100 : 0;
+
+                return (
+                  <label key={row.key} className="block rounded-lg bg-white p-3 shadow-sm">
+                    <span className="text-xs font-semibold text-gray-700">{row.label}</span>
+                    <span className="mt-1 block text-xs text-gray-500">
+                      Actual {formatPercent(actualPercent)} ({formatMiles(row.actualMiles)} mi) · Target {formatPercent(row.targetPercent)} ({formatMiles((week.totalMileage * row.targetPercent) / 100)} mi)
+                    </span>
+                    <input
+                      key={`${week.weekNumber}-${row.key}-${actualPercent}`}
+                      type="number"
+                      min={0}
+                      max={30}
+                      step={0.5}
+                      defaultValue={Math.round(actualPercent * 2) / 2}
+                      onBlur={(e) => onIntensityTargetChange(row.key, Number(e.target.value), week.weekNumber)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") e.currentTarget.blur();
+                      }}
+                      className="mt-2 w-full rounded border border-gray-300 px-2 py-1 text-sm focus:border-enduro-500 focus:outline-none focus:ring-1 focus:ring-enduro-500/20"
+                    />
+                  </label>
+                );
+              })}
+            </div>
+          )}
 
           {/* Days — apply swaps */}
           <div className="divide-y divide-gray-50">
@@ -670,11 +760,15 @@ export default function WeeklyPlanCard({
           </div>
 
           {/* Intensity breakdown */}
-          <div className="mt-3 flex gap-2 text-xs text-gray-500">
-            <span className="rounded bg-green-50 px-2 py-1">Easy: {formatMiles(week.intensityDistribution.easy)} mi</span>
-            <span className="rounded bg-amber-50 px-2 py-1">Threshold: {formatMiles(week.intensityDistribution.threshold)} mi</span>
-            <span className="rounded bg-blue-50 px-2 py-1">MP: {formatMiles(week.intensityDistribution.marathon)} mi</span>
-            <span className="rounded bg-red-50 px-2 py-1">VO2: {formatMiles(week.intensityDistribution.vo2)} mi</span>
+          <div className="mt-3 flex flex-wrap gap-2 text-xs text-gray-500">
+            <span className="rounded bg-green-50 px-2 py-1">
+              Easy: {formatMiles(week.intensityDistribution.easy)} mi
+            </span>
+            {intensityRows.map((row) => (
+              <span key={row.key} className={`rounded px-2 py-1 ${row.className}`}>
+                {row.shortLabel}: {formatMiles(row.actualMiles)} mi at target {formatMiles(row.targetMiles)} mi
+              </span>
+            ))}
           </div>
         </div>
       )}
