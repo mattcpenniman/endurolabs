@@ -24,6 +24,7 @@ import IntensityDistributionChart from "@/app/components/charts/IntensityDistrib
 import { generateRaceDayPlan } from "@/lib/training/race-day-plan";
 import { calculatePaceZones, calculatePowerZones } from "@/lib/training/zone-calculator";
 import { analyzeProgress, dailyLogsToWeeklyLogs, loadDailyLogs } from "@/lib/training/progress-tracker";
+import { adjustWeeklyIntensityPercent } from "@/lib/training/intensity-adjustments";
 
 // Shape of a saved plan row from the database
 interface SavedPlanRow {
@@ -537,34 +538,36 @@ export default function PlanPage(): React.ReactNode {
         setIsLoading(false);
       }
     } else {
-      // Per-week override
-      setIsLoading(true);
+      setIsSaving(true);
       try {
-        const profile = {
-          ...plan.runnerProfile,
-          raceName: planName.trim() || undefined,
-          weeklyIntensityOverrides: {
-            ...(plan.runnerProfile.weeklyIntensityOverrides || {}),
-            [weekNumber]: {
-              ...(plan.runnerProfile.weeklyIntensityOverrides?.[weekNumber] || {}),
-              [key]: nextValue,
+        const paceZones = calculatePaceZones(plan.runnerProfile);
+        const powerZones = calculatePowerZones(plan.runnerProfile, paceZones);
+        const updatedWeeks = plan.weeks.map((week) =>
+          week.weekNumber === weekNumber
+            ? adjustWeeklyIntensityPercent(week, key, nextValue, paceZones, powerZones)
+            : week
+        );
+        const updatedPlan: MarathonPlan = {
+          ...plan,
+          runnerProfile: {
+            ...plan.runnerProfile,
+            raceName: planName.trim() || undefined,
+            weeklyIntensityOverrides: {
+              ...(plan.runnerProfile.weeklyIntensityOverrides || {}),
+              [weekNumber]: {
+                ...(plan.runnerProfile.weeklyIntensityOverrides?.[weekNumber] || {}),
+                [key]: nextValue,
+              },
             },
           },
+          weeks: updatedWeeks,
         };
-        const response = await fetch("/api/plan/generate", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(profile),
-        });
-        if (!response.ok) throw new Error("Failed to regenerate plan");
-        const regenerated = await response.json();
-        regenerated.id = plan.id;
-        const savedPlan = await persistPlan(regenerated, planName);
-        setPlan(savedPlan ?? regenerated);
+        const savedPlan = await persistPlan(updatedPlan, planName);
+        setPlan(savedPlan ?? updatedPlan);
       } catch {
         // Silently fail
       } finally {
-        setIsLoading(false);
+        setIsSaving(false);
       }
     }
   };
