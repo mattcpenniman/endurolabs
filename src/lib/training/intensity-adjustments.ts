@@ -62,6 +62,40 @@ function workoutDistanceByType(workout: Workout | null | undefined, type: Workou
   }, 0));
 }
 
+function isCooldownSegment(segment: WorkoutSegment): boolean {
+  const lowerDescription = segment.description.toLowerCase();
+  return lowerDescription.includes("cool-down") || lowerDescription.includes("cooldown");
+}
+
+function insertBeforeCooldown(workout: Workout, segments: WorkoutSegment[]): void {
+  const cooldownIndex = workout.segments.findIndex(isCooldownSegment);
+  if (cooldownIndex === -1) {
+    workout.segments.push(...segments);
+    return;
+  }
+
+  workout.segments.splice(cooldownIndex, 0, ...segments);
+}
+
+function shouldRemoveRecoveryForReplacement(segment: WorkoutSegment, key: IntensityTargetKey): boolean {
+  if (segment.type !== "recovery") return false;
+
+  const lowerDescription = segment.description.toLowerCase();
+  if (key === "vo2") {
+    return (
+      lowerDescription.includes("vo2") ||
+      lowerDescription.includes("speed recoveries") ||
+      lowerDescription.startsWith("recoveries")
+    );
+  }
+
+  if (key === "threshold") {
+    return lowerDescription.includes("threshold") || lowerDescription.startsWith("recoveries");
+  }
+
+  return false;
+}
+
 function qualityRepPlan(key: IntensityTargetKey, targetDistance: number): { repDistance: number; repetitions: number; restSeconds: number } {
   const chooseExactReps = (desiredReps: number, minRepDistance: number, maxRepDistance: number): { repDistance: number; repetitions: number } => {
     const quarterMiles = Math.max(1, Math.round(targetDistance * 4));
@@ -111,6 +145,7 @@ function updateRepeatedQualitySegment(
   powerZones?: PowerZones
 ): void {
   const targetType = INTENSITY_TO_WORKOUT_TYPE[key];
+  const hadTargetSegment = workout.segments.some((segment) => segment.type === targetType);
   const plan = qualityRepPlan(key, Math.max(0.25, targetTotal));
   const exactRepDistance = plan.repDistance;
   const description =
@@ -122,11 +157,7 @@ function updateRepeatedQualitySegment(
 
   workout.segments = workout.segments.filter((segment) => {
     if (segment.type === targetType) return false;
-    const lowerDescription = segment.description.toLowerCase();
-    if (segment.type !== "recovery") return true;
-    if (key === "vo2" && lowerDescription.includes("vo2")) return false;
-    if (key === "threshold" && lowerDescription.includes("threshold")) return false;
-    return true;
+    return !hadTargetSegment || !shouldRemoveRecoveryForReplacement(segment, key);
   });
 
   const nextSegment: WorkoutSegment = {
@@ -148,7 +179,7 @@ function updateRepeatedQualitySegment(
     nextSegment.power = powerZones?.vo2;
   }
 
-  workout.segments.push(nextSegment);
+  const replacementSegments: WorkoutSegment[] = [nextSegment];
 
   const recoveryType: WorkoutType = "recovery";
   const recoveryDistance = plan.restSeconds > 0
@@ -159,7 +190,7 @@ function updateRepeatedQualitySegment(
       key === "vo2"
         ? `VO2 recoveries — ${Math.max(0, plan.repetitions - 1)}× ${Math.round(plan.restSeconds / 60)} min easy jog`
         : `Threshold recoveries — ${Math.max(0, plan.repetitions - 1)}× ${Math.round(plan.restSeconds / 60)} min easy jog`;
-    workout.segments.push({
+    replacementSegments.push({
       description: recoveryDescription,
       distance: recoveryDistance,
       pace: paceZones.recovery,
@@ -168,6 +199,8 @@ function updateRepeatedQualitySegment(
       type: recoveryType,
     });
   }
+
+  insertBeforeCooldown(workout, replacementSegments);
 }
 
 function formatMiles(distance: number): string {

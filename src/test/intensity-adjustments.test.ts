@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { adjustWeeklyIntensityPercent } from "@/lib/training/intensity-adjustments";
 import { generatePlan } from "@/lib/training/plan-generator";
-import { RunnerProfile } from "@/lib/training/models";
+import { RunnerProfile, WeeklyPlan } from "@/lib/training/models";
 import { calculatePaceZones, calculatePowerZones } from "@/lib/training/zone-calculator";
 
 function makeProfile(overrides: Partial<RunnerProfile> = {}): RunnerProfile {
@@ -88,5 +88,88 @@ describe("weekly intensity adjustments", () => {
     expect(qualityWorkout?.segments.some((segment) => segment.description.includes("Adjusted block"))).toBe(false);
     expect(thresholdSegment?.repetitions).toBeGreaterThan(1);
     expect(recoverySegment?.description).toContain(`${(thresholdSegment?.repetitions ?? 1) - 1}×`);
+  });
+
+  it("keeps adjusted quality reps and recoveries before the cool-down", () => {
+    const profile = makeProfile();
+    const paceZones = calculatePaceZones(profile);
+    const week: WeeklyPlan = {
+      weekNumber: 1,
+      startDate: "2026-01-05",
+      endDate: "2026-01-11",
+      phase: "marathon_build",
+      totalMileage: 7.75,
+      isDownWeek: false,
+      longRunDistance: 0,
+      intensityDistribution: { easy: 4.25, threshold: 3.5, marathon: 0, vo2: 0 },
+      days: [
+        {
+          date: "2026-01-06",
+          dayOfWeek: "Tuesday",
+          isRestDay: false,
+          plannedMileage: 7.75,
+          workout: {
+            id: "threshold-order-regression",
+            type: "threshold",
+            title: "3.5 mi Threshold Work",
+            description: "Threshold intervals.",
+            totalDistance: 7.75,
+            estimatedDuration: 45,
+            weeklyMileageContribution: 7.75,
+            intensityCategory: "hard",
+            segments: [
+              {
+                description: "Easy run — 3 miles at conversational pace",
+                distance: 3,
+                pace: paceZones.easy.min,
+                effort: paceZones.easyEffort,
+                type: "easy",
+              },
+              {
+                description: "Recoveries — 2× 1 min relaxed jog (0.25 mi total)",
+                distance: 0.25,
+                pace: paceZones.recovery,
+                effort: "Relaxed jog between threshold reps",
+                type: "recovery",
+              },
+              {
+                description: "Cool-down — 1 mi easy pace",
+                distance: 1,
+                pace: paceZones.easy.min,
+                effort: paceZones.easyEffort,
+                type: "easy",
+              },
+              {
+                description: "2× 1.75 mi at threshold pace",
+                distance: 1.75,
+                pace: paceZones.threshold,
+                effort: paceZones.thresholdEffort,
+                repetitions: 2,
+                restBetween: 60,
+                type: "threshold",
+              },
+            ],
+          },
+        },
+      ],
+    };
+
+    const adjusted = adjustWeeklyIntensityPercent(week, "threshold", 70, paceZones);
+    const workout = adjusted.days[0].workout!;
+    const thresholdIndex = workout.segments.findIndex((segment) => segment.type === "threshold");
+    const recoveryIndex = workout.segments.findIndex((segment) =>
+      segment.description.includes("Threshold recoveries")
+    );
+    const staleRecoveryIndex = workout.segments.findIndex((segment) =>
+      segment.description.startsWith("Recoveries —")
+    );
+    const cooldownIndex = workout.segments.findIndex((segment) =>
+      segment.description.toLowerCase().includes("cool-down")
+    );
+
+    expect(thresholdIndex).toBeGreaterThan(-1);
+    expect(recoveryIndex).toBeGreaterThan(thresholdIndex);
+    expect(staleRecoveryIndex).toBe(-1);
+    expect(cooldownIndex).toBeGreaterThan(recoveryIndex);
   });
 });
