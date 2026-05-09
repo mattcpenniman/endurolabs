@@ -145,7 +145,8 @@ function renderDay(
   draft: DayLogDraft,
   onDraftChange: (dayOfWeek: string, patch: Partial<DayLogDraft>) => void,
   onDraftReset: (dayOfWeek: string) => void,
-  onSaved: () => void
+  onSaved: () => void,
+  isToday: boolean
 ) {
   const currentWorkout = day.workout;
   const plannedMileage =
@@ -200,6 +201,11 @@ function renderDay(
   return (
     <div key={day.dayOfWeek} className="grid gap-3 py-3 lg:grid-cols-[6rem_1fr]">
       <div>
+        {isToday && (
+          <span className="mb-1 inline-block rounded-full bg-green-600 px-2 py-0.5 text-[10px] font-bold text-white">
+            Today
+          </span>
+        )}
         <p className="text-xs font-medium text-gray-500">{day.dayOfWeek.slice(0, 3)}</p>
         <p className="text-xs text-gray-400">{formatShortDate(day.date)}</p>
       </div>
@@ -551,8 +557,29 @@ export default function WeeklyPlanCard({
       ? "bg-amber-50 text-amber-700"
       : "bg-blue-50 text-blue-700";
 
+  // Highlight the current week and today's day
+  const today = new Date();
+  const todayStr = today.toISOString().slice(0, 10);
+  const weekEnd = orderedDays.length > 0
+    ? orderedDays[orderedDays.length - 1]
+      ? new Date(orderedDays[orderedDays.length - 1].date).toISOString().slice(0, 10)
+      : ""
+    : "";
+  const weekStart = week.startDate ? new Date(week.startDate).toISOString().slice(0, 10) : "";
+  const isCurrentWeek = todayStr >= weekStart && todayStr <= weekEnd;
+
+  const isToday = (dayOfWeek: string): boolean => {
+    const day = orderedDays.find((d) => d.dayOfWeek === dayOfWeek);
+    if (!day) return false;
+    return day.date ? new Date(day.date).toISOString().slice(0, 10) === todayStr : false;
+  };
+
   return (
-    <div className="overflow-hidden rounded-xl border border-gray-200 bg-white shadow-sm">
+    <div className={`overflow-hidden rounded-xl border shadow-sm ${
+      isCurrentWeek
+        ? "border-green-300 bg-green-50/30"
+        : "border-gray-200 bg-white"
+    }`}>
       {/* Header */}
       <button
         onClick={onToggle}
@@ -565,6 +592,11 @@ export default function WeeklyPlanCard({
             }`}>
               Week {week.weekNumber}
             </span>
+            {isCurrentWeek && (
+              <span className="rounded-full bg-green-600 px-2 py-1 text-xs font-bold text-white">
+                Current Week
+              </span>
+            )}
             <span className="text-sm font-medium text-gray-800">
               Starts {formatShortDate(week.startDate)}
             </span>
@@ -638,7 +670,8 @@ export default function WeeklyPlanCard({
                 draft,
                 updateDraft,
                 resetDraft,
-                onDailyLogSaved
+                onDailyLogSaved,
+                isToday(day.dayOfWeek)
               );
             })}
           </div>
