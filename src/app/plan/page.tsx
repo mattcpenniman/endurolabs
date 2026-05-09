@@ -154,6 +154,7 @@ export default function PlanPage(): React.ReactNode {
   const [activePlanTab, setActivePlanTab] = useState<PlanTab>("overview");
   const [dailyLogRefresh, setDailyLogRefresh] = useState(0);
   const [shareToken, setShareToken] = useState<string | null>(null);
+  const [shareLinkUrl, setShareLinkUrl] = useState<string | null>(null);
   const [shareStatus, setShareStatus] = useState<string | null>(null);
 
   useEffect(() => {
@@ -258,6 +259,7 @@ export default function PlanPage(): React.ReactNode {
 
       setPlan(savedPlan ?? generatedPlan);
       setShareToken(null);
+      setShareLinkUrl(null);
       setRunsPerWeek(
         profile.runsPerWeekOverride
           ? Math.max(3, Math.min(10, profile.runsPerWeekOverride))
@@ -316,6 +318,7 @@ export default function PlanPage(): React.ReactNode {
       setPlan(saved.planData);
       setPlanName(saved.raceName ?? saved.runnerProfile.raceName ?? "");
       setShareToken(saved.shareToken ?? null);
+      setShareLinkUrl(saved.shareUrl ?? null);
       setRunsPerWeek(
         saved.runnerProfile.runsPerWeekOverride
           ? Math.max(3, Math.min(10, saved.runnerProfile.runsPerWeekOverride))
@@ -819,6 +822,7 @@ export default function PlanPage(): React.ReactNode {
       if (!response.ok) throw new Error(enabled ? "Failed to create share link" : "Failed to revoke share link");
       const data = (await response.json()) as { shareToken: string | null; shareUrl: string | null };
       setShareToken(data.shareToken);
+      setShareLinkUrl(data.shareUrl);
       await refreshSavedPlans();
       setShareStatus(enabled ? "Share link enabled." : "Share link revoked.");
     } catch (err) {
@@ -1060,9 +1064,10 @@ export default function PlanPage(): React.ReactNode {
   const calculatedMaxLongRun = plan.weeks.length > 0
     ? Math.max(...plan.weeks.map((week) => week.longRunDistance))
     : 0;
-  const shareUrl = shareToken && typeof window !== "undefined"
-    ? `${window.location.origin}/share/${shareToken}`
-    : null;
+  const configuredAppUrl = process.env.NEXT_PUBLIC_APP_URL?.replace(/\/$/, "");
+  const shareUrl = shareLinkUrl ?? (shareToken
+    ? `${configuredAppUrl ?? (typeof window !== "undefined" ? window.location.origin : "")}/share/${shareToken}`
+    : null);
   void dailyLogRefresh;
 
   return (

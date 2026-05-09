@@ -87,43 +87,44 @@ export default async function SharedPlanPage({
 
           <div className="space-y-4">
             {plan.weeks.map((week) => (
-              <article key={week.weekNumber} className="rounded-xl border border-gray-200 bg-white p-4 shadow-sm">
-                <div className="flex flex-col gap-2 border-b border-gray-100 pb-3 sm:flex-row sm:items-start sm:justify-between">
+              <details key={week.weekNumber} className="group overflow-hidden rounded-xl border border-gray-200 bg-white shadow-sm">
+                <summary className="flex cursor-pointer list-none flex-col gap-2 p-4 hover:bg-gray-50 sm:flex-row sm:items-start sm:justify-between [&::-webkit-details-marker]:hidden">
                   <div>
                     <div className="flex flex-wrap items-center gap-2">
-                      <span className="rounded-full bg-gray-100 px-2 py-1 text-xs font-bold text-gray-700">
-                        Week {week.weekNumber}
-                      </span>
-                      {week.isDownWeek && (
-                        <span className="rounded-full bg-green-100 px-2 py-1 text-xs font-bold text-green-700">
-                          Recovery Week
+                        <span className="rounded-full bg-gray-100 px-2 py-1 text-xs font-bold text-gray-700">
+                          Week {week.weekNumber}
                         </span>
-                      )}
-                      <span className="text-sm font-medium text-gray-800">
-                        Starts {formatShortDate(week.startDate)}
-                      </span>
+                        {week.isDownWeek && (
+                          <span className="rounded-full bg-green-100 px-2 py-1 text-xs font-bold text-green-700">
+                            Recovery Week
+                          </span>
+                        )}
+                        <span className="text-sm font-medium text-gray-800">
+                          Starts {formatShortDate(week.startDate)}
+                        </span>
+                      </div>
+                      <p className="mt-2 text-sm text-gray-600">
+                        {formatMiles(week.totalMileage)} mi total · Long {formatMiles(week.longRunDistance)} mi
+                      </p>
                     </div>
-                    <p className="mt-2 text-sm text-gray-600">
-                      {formatMiles(week.totalMileage)} mi total · Long {formatMiles(week.longRunDistance)} mi
-                    </p>
-                  </div>
-                  <div className="flex flex-wrap gap-2 text-xs">
-                    <span className="rounded bg-green-50 px-2 py-1 text-green-700">
-                      Easy {formatMiles(week.intensityDistribution.easy)} mi
-                    </span>
-                    <span className="rounded bg-amber-50 px-2 py-1 text-amber-700">
-                      T {formatMiles(week.intensityDistribution.threshold)} mi
-                    </span>
-                    <span className="rounded bg-blue-50 px-2 py-1 text-blue-700">
-                      MP {formatMiles(week.intensityDistribution.marathon)} mi
-                    </span>
-                    <span className="rounded bg-red-50 px-2 py-1 text-red-700">
-                      VO2 {formatMiles(week.intensityDistribution.vo2)} mi
-                    </span>
-                  </div>
-                </div>
+                    <div className="flex flex-wrap items-center gap-2 text-xs">
+                      <span className="rounded bg-green-50 px-2 py-1 text-green-700">
+                        Easy {formatMiles(week.intensityDistribution.easy)} mi
+                      </span>
+                      <span className="rounded bg-amber-50 px-2 py-1 text-amber-700">
+                        T {formatMiles(week.intensityDistribution.threshold)} mi
+                      </span>
+                      <span className="rounded bg-blue-50 px-2 py-1 text-blue-700">
+                        MP {formatMiles(week.intensityDistribution.marathon)} mi
+                      </span>
+                      <span className="rounded bg-red-50 px-2 py-1 text-red-700">
+                        VO2 {formatMiles(week.intensityDistribution.vo2)} mi
+                      </span>
+                      <span className="ml-1 text-gray-400 transition-transform group-open:rotate-180">▼</span>
+                    </div>
+                </summary>
 
-                <div className="mt-3 divide-y divide-gray-50">
+                <div className="divide-y divide-gray-50 border-t border-gray-100 px-4 pb-4">
                   {week.days.map((day) => (
                     <div key={`${week.weekNumber}-${day.dayOfWeek}`} className="grid gap-3 py-3 md:grid-cols-[6rem_1fr]">
                       <div>
@@ -158,7 +159,7 @@ export default async function SharedPlanPage({
                     </div>
                   ))}
                 </div>
-              </article>
+              </details>
             ))}
           </div>
         </section>

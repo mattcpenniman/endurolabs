@@ -54,6 +54,12 @@ Create a login user inside the running Docker app container:
 docker compose exec app npm run user:create -- --email runner@example.com --password 'change-me-please' --name 'Runner Name'
 ```
 
+Set `APP_URL` in `.env` to control the domain used for generated read-only share links:
+
+```bash
+APP_URL=https://training.example.com
+```
+
 ### Prerequisites
 
 - Node.js 18+ (Node 20+ recommended)
@@ -110,6 +116,14 @@ PORT=8080 npm run dev
 
 # Option 3: Create a .env.local file
 # PORT=8080
+```
+
+### Change the share-link domain
+
+Share links use `APP_URL` from `.env` when creating/copying read-only plan URLs. Set it to the public domain where the app is reachable:
+
+```bash
+APP_URL=https://training.example.com
 ```
 
 ### Build for production

@@ -17,6 +17,9 @@ function createShareToken(): string {
 }
 
 function getOrigin(request: NextRequest): string {
+  const configuredUrl = process.env.APP_URL ?? process.env.NEXT_PUBLIC_APP_URL;
+  if (configuredUrl) return configuredUrl.replace(/\/$/, "");
+
   const forwardedProto = request.headers.get("x-forwarded-proto");
   const forwardedHost = request.headers.get("x-forwarded-host");
   if (forwardedProto && forwardedHost) return `${forwardedProto}://${forwardedHost}`;

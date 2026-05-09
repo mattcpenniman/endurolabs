@@ -12,8 +12,18 @@ import { calculatePaceZones, calculatePowerZones } from "@/lib/training/zone-cal
 import { MarathonPlan, RunnerProfile } from "@/lib/training/models";
 import { getCurrentUser } from "@/lib/auth";
 
+function getOrigin(request: NextRequest): string {
+  const configuredUrl = process.env.APP_URL ?? process.env.NEXT_PUBLIC_APP_URL;
+  if (configuredUrl) return configuredUrl.replace(/\/$/, "");
+
+  const forwardedProto = request.headers.get("x-forwarded-proto");
+  const forwardedHost = request.headers.get("x-forwarded-host");
+  if (forwardedProto && forwardedHost) return `${forwardedProto}://${forwardedHost}`;
+  return request.nextUrl.origin;
+}
+
 export async function GET(
-  _request: NextRequest,
+  request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
@@ -50,6 +60,7 @@ export async function GET(
         paceZones,
         powerZones: calculatePowerZones(runnerProfile, paceZones),
       },
+      shareUrl: plan.shareToken ? `${getOrigin(request)}/share/${plan.shareToken}` : null,
     });
   } catch (error) {
     console.error("Failed to fetch plan:", error);
