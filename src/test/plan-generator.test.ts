@@ -166,6 +166,42 @@ describe("generatePlan", () => {
     }
   });
 
+  it("caps long runs and redistributes weekly mileage to other days", () => {
+    const plan = generatePlan(makeProfile({
+      weeksOverride: 24,
+      peakMileageOverride: 80,
+      maxLongRunOverride: 16,
+    }));
+
+    for (const week of plan.weeks) {
+      expect(week.longRunDistance).toBeLessThanOrEqual(16);
+      expect(scheduledMileage(week)).toBeCloseTo(week.totalMileage, 1);
+    }
+  });
+
+  it("keeps relatively shorter easy runs around the long run", () => {
+    const plan = generatePlan(makeProfile({ weeksOverride: 18, peakMileageOverride: 55 }));
+    const buildWeek = plan.weeks.find((week) =>
+      week.days.some((day) => day.dayOfWeek === "Saturday" && day.workout?.type === "easy") &&
+      week.days.some((day) => day.dayOfWeek === "Wednesday" && day.workout?.type === "easy")
+    );
+    const saturday = buildWeek?.days.find((day) => day.dayOfWeek === "Saturday");
+    const wednesday = buildWeek?.days.find((day) => day.dayOfWeek === "Wednesday");
+    const otherEasyRuns = buildWeek?.days.filter(
+      (day) => !["Saturday", "Wednesday"].includes(day.dayOfWeek) && day.workout?.type === "easy"
+    ) ?? [];
+
+    expect(saturday?.workout?.totalDistance).toBeDefined();
+    expect(wednesday?.workout?.totalDistance).toBeDefined();
+    expect(otherEasyRuns.length).toBeGreaterThan(0);
+    expect(saturday?.workout?.totalDistance ?? 0).toBeLessThanOrEqual(
+      Math.min(...otherEasyRuns.map((day) => day.workout?.totalDistance ?? 0))
+    );
+    expect(wednesday?.workout?.totalDistance ?? 0).toBeLessThanOrEqual(
+      Math.min(...otherEasyRuns.map((day) => day.workout?.totalDistance ?? 0))
+    );
+  });
+
   it("rounds scheduled run distances to the nearest quarter mile", () => {
     const plan = generatePlan(makeProfile({ weeksOverride: 18, peakMileageOverride: 55 }));
 

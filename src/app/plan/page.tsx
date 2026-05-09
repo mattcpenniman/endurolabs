@@ -442,6 +442,36 @@ export default function PlanPage(): React.ReactNode {
     }
   };
 
+  const handleAdjustMaxLongRun = async (newMaxLongRun: number) => {
+    if (!plan || !Number.isFinite(newMaxLongRun)) return;
+
+    const maxLongRunOverride = Math.max(4, Math.min(30, Math.round(newMaxLongRun * 2) / 2));
+    if (maxLongRunOverride === (plan.runnerProfile.maxLongRunOverride ?? null)) return;
+
+    setIsLoading(true);
+    try {
+      const profile = {
+        ...plan.runnerProfile,
+        raceName: planName.trim() || undefined,
+        maxLongRunOverride,
+      };
+      const response = await fetch("/api/plan/generate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(profile),
+      });
+      if (!response.ok) throw new Error("Failed to regenerate plan");
+      const regenerated = await response.json();
+      regenerated.id = plan.id;
+      const savedPlan = await persistPlan(regenerated, planName);
+      setPlan(savedPlan ?? regenerated);
+    } catch {
+      // Silently fail
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
   const handleAdjustRaceDate = async (newRaceDate: string) => {
     if (!plan || !newRaceDate || newRaceDate === plan.runnerProfile.raceDate) return;
     setIsLoading(true);
@@ -888,6 +918,9 @@ export default function PlanPage(): React.ReactNode {
   const actualMileageStep = mileageStepPerBuild(plan.runnerProfile.currentWeeklyMileage, plan.peakWeeklyMileage);
   const recommendedMileageStep = currentRunCount;
   const mileageStepDelta = actualMileageStep - recommendedMileageStep;
+  const calculatedMaxLongRun = plan.weeks.length > 0
+    ? Math.max(...plan.weeks.map((week) => week.longRunDistance))
+    : 0;
   void dailyLogRefresh;
 
   return (
@@ -1261,7 +1294,7 @@ export default function PlanPage(): React.ReactNode {
                       Recommended start for this peak: {recommendedStart} mi/week.
                     </p>
                   </div>
-                  <div className="grid gap-3 sm:grid-cols-3 lg:min-w-[34rem]">
+                  <div className="grid gap-3 sm:grid-cols-4 lg:min-w-[42rem]">
                     <label className="block">
                       <span className="text-xs font-medium uppercase tracking-wide text-gray-500">Start</span>
                       <input
@@ -1287,6 +1320,23 @@ export default function PlanPage(): React.ReactNode {
                         max={120}
                         defaultValue={plan.peakWeeklyMileage}
                         onBlur={(e) => handleAdjustPeakMileage(Number(e.target.value))}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter") e.currentTarget.blur();
+                        }}
+                        disabled={isLoading}
+                        className="mt-1 w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 focus:border-enduro-500 focus:outline-none focus:ring-2 focus:ring-enduro-500/20 disabled:opacity-60"
+                      />
+                    </label>
+                    <label className="block">
+                      <span className="text-xs font-medium uppercase tracking-wide text-gray-500">Max long run</span>
+                      <input
+                        key={`max-long-${calculatedMaxLongRun}`}
+                        type="number"
+                        min={4}
+                        max={30}
+                        step={0.5}
+                        defaultValue={calculatedMaxLongRun}
+                        onBlur={(e) => handleAdjustMaxLongRun(Number(e.target.value))}
                         onKeyDown={(e) => {
                           if (e.key === "Enter") e.currentTarget.blur();
                         }}
