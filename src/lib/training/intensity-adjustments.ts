@@ -46,12 +46,133 @@ function forEachWorkout(week: WeeklyPlan, callback: (workout: Workout) => void):
 }
 
 function getSegmentDescription(type: WorkoutType, distance: number, workoutType: WorkoutType): string {
-  if (type === "marathon_pace") return `Adjusted block — ${distance} miles at marathon pace`;
-  if (type === "threshold") return `Adjusted block — ${distance} miles at threshold pace`;
-  if (type === "vo2") return `Adjusted block — ${distance} miles at VO2 pace`;
+  if (type === "marathon_pace") return `Marathon-pace block — ${distance} miles at goal pace`;
+  if (type === "threshold") return `Threshold rep — ${distance} miles at threshold pace`;
+  if (type === "vo2") return `VO2 rep — ${distance} miles at VO2 pace`;
   if (workoutType === "long") return `Long run — ${distance} miles at easy/conversational pace`;
   if (type === "recovery") return `Recovery jog — ${distance} miles, very relaxed effort`;
   return `Easy run — ${distance} miles at conversational pace`;
+}
+
+function workoutDistanceByType(workout: Workout | null | undefined, type: WorkoutType): number {
+  if (!workout) return 0;
+  return roundMiles(workout.segments.reduce((sum, segment) => {
+    if (segment.type !== type) return sum;
+    return sum + segmentDistance(segment);
+  }, 0));
+}
+
+function qualityRepPlan(key: IntensityTargetKey, targetDistance: number): { repDistance: number; repetitions: number; restSeconds: number } {
+  const chooseExactReps = (desiredReps: number, minRepDistance: number, maxRepDistance: number): { repDistance: number; repetitions: number } => {
+    const quarterMiles = Math.max(1, Math.round(targetDistance * 4));
+    const candidates = Array.from({ length: Math.min(12, quarterMiles) }, (_, index) => index + 1)
+      .filter((repetitions) => quarterMiles % repetitions === 0)
+      .map((repetitions) => ({ repetitions, repDistance: quarterMiles / repetitions / 4 }))
+      .filter((candidate) => candidate.repDistance >= minRepDistance && candidate.repDistance <= maxRepDistance)
+      .sort((a, b) => Math.abs(a.repetitions - desiredReps) - Math.abs(b.repetitions - desiredReps));
+
+    return candidates[0] ?? { repetitions: 1, repDistance: quarterMiles / 4 };
+  };
+
+  if (key === "threshold") {
+    const repDistance = targetDistance >= 6 ? 2 : targetDistance >= 3 ? 1 : 0.5;
+    const desiredReps = Math.max(1, Math.round(targetDistance / repDistance));
+    const exact = chooseExactReps(desiredReps, 0.5, 4);
+    return {
+      ...exact,
+      restSeconds: exact.repDistance >= 2 ? 120 : 60,
+    };
+  }
+
+  if (key === "vo2") {
+    const repDistance = targetDistance >= 2 ? 0.62 : 0.25;
+    const desiredReps = Math.max(1, Math.round(targetDistance / repDistance));
+    const exact = chooseExactReps(desiredReps, 0.25, 1);
+    return {
+      ...exact,
+      restSeconds: exact.repDistance >= 0.5 ? 120 : 180,
+    };
+  }
+
+  const repDistance = targetDistance >= 8 ? 4 : targetDistance >= 4 ? 2 : 1;
+  const desiredReps = Math.max(1, Math.round(targetDistance / repDistance));
+  const exact = chooseExactReps(desiredReps, 0.5, 6);
+  return {
+    ...exact,
+    restSeconds: 0,
+  };
+}
+
+function updateRepeatedQualitySegment(
+  workout: Workout,
+  key: IntensityTargetKey,
+  targetTotal: number,
+  paceZones: PaceZones,
+  powerZones?: PowerZones
+): void {
+  const targetType = INTENSITY_TO_WORKOUT_TYPE[key];
+  const plan = qualityRepPlan(key, Math.max(0.25, targetTotal));
+  const exactRepDistance = plan.repDistance;
+  const description =
+    key === "marathon"
+      ? `${plan.repetitions}× ${formatMiles(exactRepDistance)} at marathon pace`
+      : key === "threshold"
+        ? `${plan.repetitions}× ${formatMiles(exactRepDistance)} at threshold pace`
+        : `${plan.repetitions}× ${formatMiles(exactRepDistance)} at VO2 pace`;
+
+  workout.segments = workout.segments.filter((segment) => {
+    if (segment.type === targetType) return false;
+    const lowerDescription = segment.description.toLowerCase();
+    if (segment.type !== "recovery") return true;
+    if (key === "vo2" && lowerDescription.includes("vo2")) return false;
+    if (key === "threshold" && lowerDescription.includes("threshold")) return false;
+    return true;
+  });
+
+  const nextSegment: WorkoutSegment = {
+    ...getZoneSegment(key, exactRepDistance, paceZones, powerZones),
+    description,
+    distance: exactRepDistance,
+    repetitions: plan.repetitions,
+    restBetween: plan.restSeconds > 0 ? plan.restSeconds : undefined,
+  };
+
+  if (key === "marathon") {
+    nextSegment.pace = paceZones.marathon;
+    nextSegment.power = powerZones?.marathon;
+  } else if (key === "threshold") {
+    nextSegment.pace = paceZones.threshold;
+    nextSegment.power = powerZones?.threshold;
+  } else {
+    nextSegment.pace = paceZones.vo2;
+    nextSegment.power = powerZones?.vo2;
+  }
+
+  workout.segments.push(nextSegment);
+
+  const recoveryType: WorkoutType = "recovery";
+  const recoveryDistance = plan.restSeconds > 0
+    ? roundMiles(((plan.repetitions - 1) * plan.restSeconds) / 60 / paceZones.recovery)
+    : 0;
+  if (recoveryDistance > 0) {
+    const recoveryDescription =
+      key === "vo2"
+        ? `VO2 recoveries — ${Math.max(0, plan.repetitions - 1)}× ${Math.round(plan.restSeconds / 60)} min easy jog`
+        : `Threshold recoveries — ${Math.max(0, plan.repetitions - 1)}× ${Math.round(plan.restSeconds / 60)} min easy jog`;
+    workout.segments.push({
+      description: recoveryDescription,
+      distance: recoveryDistance,
+      pace: paceZones.recovery,
+      power: powerZones?.easy.min,
+      effort: "Easy jog recovery between quality reps",
+      type: recoveryType,
+    });
+  }
+}
+
+function formatMiles(distance: number): string {
+  const roundedDistance = roundMiles(distance);
+  return Number.isInteger(roundedDistance) ? `${roundedDistance} mi` : `${roundedDistance} mi`;
 }
 
 function getZoneSegment(
@@ -116,8 +237,14 @@ function addSegmentDistance(
 
   const existing = workout.segments.find((segment) => segment.type === segmentType && !segment.repetitions);
   if (existing) {
-    existing.distance = roundMiles((existing.distance ?? 0) + roundedDistance);
-    existing.description = getSegmentDescription(segmentType, existing.distance, workout.type);
+    if (segmentType === "marathon_pace" || segmentType === "threshold" || segmentType === "vo2") {
+      const key = segmentType === "marathon_pace" ? "marathon" : segmentType;
+      const currentTotal = workoutDistanceByType(workout, segmentType);
+      updateRepeatedQualitySegment(workout, key, roundMiles(currentTotal + roundedDistance), paceZones, powerZones);
+    } else {
+      existing.distance = roundMiles((existing.distance ?? 0) + roundedDistance);
+      existing.description = getSegmentDescription(segmentType, existing.distance, workout.type);
+    }
     return;
   }
 
@@ -127,11 +254,11 @@ function addSegmentDistance(
   }
 
   if (segmentType === "marathon_pace") {
-    workout.segments.push(getZoneSegment("marathon", roundedDistance, paceZones, powerZones));
+    updateRepeatedQualitySegment(workout, "marathon", roundedDistance, paceZones, powerZones);
   } else if (segmentType === "threshold") {
-    workout.segments.push(getZoneSegment("threshold", roundedDistance, paceZones, powerZones));
+    updateRepeatedQualitySegment(workout, "threshold", roundedDistance, paceZones, powerZones);
   } else if (segmentType === "vo2") {
-    workout.segments.push(getZoneSegment("vo2", roundedDistance, paceZones, powerZones));
+    updateRepeatedQualitySegment(workout, "vo2", roundedDistance, paceZones, powerZones);
   }
 }
 
@@ -281,14 +408,6 @@ function updateWorkoutMetadata(workout: Workout, paceZones: PaceZones): void {
       }
     });
   }
-}
-
-function workoutDistanceByType(workout: Workout | null | undefined, type: WorkoutType): number {
-  if (!workout) return 0;
-  return roundMiles(workout.segments.reduce((sum, segment) => {
-    if (segment.type !== type) return sum;
-    return sum + segmentDistance(segment);
-  }, 0));
 }
 
 export function calculateWeekIntensityDistribution(week: WeeklyPlan): WeeklyPlan["intensityDistribution"] {

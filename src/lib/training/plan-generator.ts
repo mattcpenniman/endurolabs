@@ -512,25 +512,36 @@ function assignWorkoutsForWeek(
         const repDist = nearestVO2RepDistance(paceZones.vo2, targetRepMinutes);
         const reps = Math.max(1, Math.round((intensityTargets.vo2 || (comfortLevel === "advanced" ? 5 : 4)) / repDist));
         const restSeconds = Math.round(targetRepMinutes * 60);
-        keyWorkout = WorkoutLibrary.createVO2Intervals(week, workoutIndex++, reps, repDist, restSeconds, paceZones, powerZones);
+        keyWorkout = hasVO2Override || (intensityTargets.vo2 >= 2)
+          ? WorkoutLibrary.createMixedVO2SpeedWorkout(week, workoutIndex++, intensityTargets.vo2 || reps * repDist, paceZones, powerZones)
+          : WorkoutLibrary.createVO2Intervals(week, workoutIndex++, reps, repDist, restSeconds, paceZones, powerZones);
       } else if (shouldRunMarathon) {
         const mpMiles = Math.max(1, intensityTargets.marathon || remainingMileage * 0.18);
-        const totalDist = Math.min(remainingMileage, mpMiles + 3);
-        keyWorkout = WorkoutLibrary.createMarathonPaceRun(week, workoutIndex++, mpMiles, totalDist, paceZones, powerZones);
+        const thresholdInsertMiles = Math.max(0.5, Math.min(2, intensityTargets.threshold || mpMiles * 0.15));
+        keyWorkout = WorkoutLibrary.createMarathonThresholdAlternation(
+          week,
+          workoutIndex++,
+          mpMiles,
+          thresholdInsertMiles,
+          paceZones,
+          powerZones
+        );
       } else {
         const reps = comfortLevel === "advanced" ? 4 : 3;
         const thresholdMiles = Math.max(1, intensityTargets.threshold || reps);
         const totalDist = Math.min(remainingMileage, thresholdMiles + 3);
-        keyWorkout = WorkoutLibrary.createThresholdIntervals(
-          week,
-          workoutIndex++,
-          totalDist,
-          hasThresholdOverride ? Math.max(1, Math.round(thresholdMiles)) : reps,
-          1,
-          75,
-          paceZones,
-          powerZones
-        );
+        keyWorkout = thresholdMiles >= 4 || hasThresholdOverride
+          ? WorkoutLibrary.createThresholdLadder(week, workoutIndex++, totalDist, thresholdMiles, paceZones, powerZones)
+          : WorkoutLibrary.createThresholdIntervals(
+              week,
+              workoutIndex++,
+              totalDist,
+              reps,
+              1,
+              75,
+              paceZones,
+              powerZones
+            );
       }
     } else if (phase !== "base" && intensityTargets.marathon > 0) {
       // Marathon pace work fallback

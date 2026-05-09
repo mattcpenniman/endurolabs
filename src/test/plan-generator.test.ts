@@ -385,9 +385,9 @@ describe("generatePlan", () => {
       week.days.flatMap((day) => (day.workout ? [day.workout.title] : []))
     );
 
-    expect(titles.some((title) => title.includes("Cruise Intervals"))).toBe(true);
-    expect(titles.some((title) => title.includes("VO2 Intervals"))).toBe(true);
-    expect(titles.some((title) => title.includes("Marathon Pace"))).toBe(true);
+    expect(titles.some((title) => title.includes("Cruise Intervals") || title.includes("Threshold Ladder"))).toBe(true);
+    expect(titles.some((title) => title.includes("VO2 Intervals") || title.includes("VO2 + Speed Mix"))).toBe(true);
+    expect(titles.some((title) => title.includes("Marathon Pace") || title.includes("M +"))).toBe(true);
     expect(titles.some((title) => title.includes("Progression Run"))).toBe(true);
   });
 

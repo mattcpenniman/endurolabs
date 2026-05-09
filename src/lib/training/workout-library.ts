@@ -28,6 +28,29 @@ function formatMiles(distance: number): string {
   return `${roundMiles(distance)} mi`;
 }
 
+function easyPace(paceZones: PaceZones): number {
+  return (paceZones.easy.min + paceZones.easy.max) / 2;
+}
+
+function recoveryDistanceForRest(restSeconds: number, repetitions: number, paceZones: PaceZones): number {
+  return roundMiles((Math.max(0, repetitions - 1) * restSeconds) / 60 / paceZones.recovery);
+}
+
+function totalSegmentDistance(segments: WorkoutSegment[]): number {
+  return roundMiles(segments.reduce((sum, segment) => {
+    return sum + (segment.distance ?? 0) * (segment.repetitions ?? 1);
+  }, 0));
+}
+
+function estimatedSegmentDuration(segments: WorkoutSegment[]): number {
+  return Math.round(segments.reduce((sum, segment) => {
+    if (segment.distance && segment.pace) {
+      return sum + segment.distance * (segment.repetitions ?? 1) * segment.pace;
+    }
+    return sum + (segment.duration ?? 0);
+  }, 0));
+}
+
 // ─── Easy Run ───────────────────────────────────────────────
 
 export function createEasyRun(
@@ -219,6 +242,95 @@ export function createThresholdIntervals(
   };
 }
 
+export function createThresholdLadder(
+  week: number,
+  index: number,
+  totalDistance: number,
+  thresholdDistance: number,
+  paceZones: PaceZones,
+  powerZones?: PowerZones
+): Workout {
+  const actualTotalDistance = roundMiles(totalDistance);
+  let remainingThreshold = roundMiles(thresholdDistance);
+  const reps: number[] = [];
+  const repPattern = remainingThreshold >= 8 ? [4, 3, 2, 1] : remainingThreshold >= 6 ? [3, 2, 1] : [2, 1, 1];
+
+  for (const rep of repPattern) {
+    if (remainingThreshold <= 0) break;
+    const nextRep = roundMiles(Math.min(rep, remainingThreshold));
+    if (nextRep > 0) {
+      reps.push(nextRep);
+      remainingThreshold = roundMiles(remainingThreshold - nextRep);
+    }
+  }
+
+  while (remainingThreshold > 0) {
+    const nextRep = roundMiles(Math.min(reps.at(-1) ?? 1, remainingThreshold));
+    reps.push(nextRep);
+    remainingThreshold = roundMiles(remainingThreshold - nextRep);
+  }
+
+  const thresholdMiles = roundMiles(reps.reduce((sum, rep) => sum + rep, 0));
+  const recoverySegments = Math.max(0, reps.length - 1);
+  const recoveryDistance = roundMiles(recoverySegments * 2 / paceZones.recovery);
+  const easyDistance = Math.max(1.5, roundMiles(actualTotalDistance - thresholdMiles - recoveryDistance));
+  const warmupDistance = roundMiles(easyDistance * 0.55);
+  const cooldownDistance = roundMiles(easyDistance - warmupDistance);
+  const segments: WorkoutSegment[] = [
+    {
+      description: `Warm-up — ${formatMiles(warmupDistance)} easy pace`,
+      distance: warmupDistance,
+      pace: easyPace(paceZones),
+      effort: paceZones.easyEffort,
+      type: "easy",
+    },
+  ];
+
+  reps.forEach((rep, repIndex) => {
+    segments.push({
+      description: `Threshold rep ${repIndex + 1} — ${formatMiles(rep)} at threshold pace`,
+      distance: rep,
+      pace: paceZones.threshold,
+      power: powerZones?.threshold,
+      effort: paceZones.thresholdEffort,
+      type: "threshold",
+    });
+    if (repIndex < reps.length - 1) {
+      segments.push({
+        description: "Float recovery — 2 min easy jog",
+        duration: 2,
+        distance: roundMiles(2 / paceZones.recovery),
+        pace: paceZones.recovery,
+        power: powerZones?.easy.min,
+        effort: "Relaxed jog between threshold reps",
+        type: "recovery",
+      });
+    }
+  });
+
+  segments.push({
+    description: `Cool-down — ${formatMiles(cooldownDistance)} easy pace`,
+    distance: cooldownDistance,
+    pace: easyPace(paceZones),
+    effort: paceZones.easyEffort,
+    type: "easy",
+  });
+
+  const actualDistance = totalSegmentDistance(segments);
+
+  return {
+    id: makeId("threshold", week, index),
+    type: "threshold",
+    title: `${thresholdMiles} mi Threshold Ladder`,
+    description: "Broken threshold work with short float recoveries. Longer reps come first, then the pace stays controlled as reps shorten.",
+    segments,
+    totalDistance: actualDistance,
+    estimatedDuration: estimatedSegmentDuration(segments),
+    weeklyMileageContribution: actualDistance,
+    intensityCategory: "hard",
+  };
+}
+
 // ─── VO2 Intervals ──────────────────────────────────────────
 
 export function createVO2Intervals(
@@ -289,6 +401,97 @@ export function createVO2Intervals(
   };
 }
 
+export function createMixedVO2SpeedWorkout(
+  week: number,
+  index: number,
+  vo2Distance: number,
+  paceZones: PaceZones,
+  powerZones?: PowerZones
+): Workout {
+  const targetFastDistance = roundMiles(Math.max(1, vo2Distance));
+  const oneKDistance = 0.62;
+  const speedDistance = 0.25;
+  const oneKReps = Math.max(2, Math.floor((targetFastDistance * 0.7) / oneKDistance));
+  const oneKFastDistance = roundMiles(oneKReps * oneKDistance);
+  const remainingFastDistance = Math.max(0, roundMiles(targetFastDistance - oneKFastDistance));
+  const speedReps = Math.max(remainingFastDistance > 0 ? 2 : 0, Math.round(remainingFastDistance / speedDistance));
+  const actualFastDistance = roundMiles(oneKFastDistance + speedReps * speedDistance);
+  const oneKRecovery = recoveryDistanceForRest(120, oneKReps, paceZones);
+  const speedRecovery = speedReps > 0 ? recoveryDistanceForRest(180, speedReps, paceZones) : 0;
+  const warmupDistance = 1.5;
+  const cooldownDistance = 1.5;
+  const segments: WorkoutSegment[] = [
+    {
+      description: `Warm-up — ${formatMiles(warmupDistance)} easy pace`,
+      distance: warmupDistance,
+      pace: easyPace(paceZones),
+      effort: paceZones.easyEffort,
+      type: "easy",
+    },
+    {
+      description: `${oneKReps}× ${formatMiles(oneKDistance)} at VO2 pace`,
+      distance: oneKDistance,
+      pace: paceZones.vo2,
+      power: powerZones?.vo2,
+      effort: paceZones.vo2Effort,
+      restBetween: 120,
+      repetitions: oneKReps,
+      type: "vo2",
+    },
+    {
+      description: `Recoveries — ${Math.max(0, oneKReps - 1)}× 2 min easy jog (${formatMiles(oneKRecovery)} total)`,
+      distance: oneKRecovery,
+      pace: paceZones.recovery,
+      power: powerZones?.easy.min,
+      effort: "Easy jog until breathing settles",
+      type: "recovery",
+    },
+    ...(speedReps > 0
+      ? [
+          {
+            description: `${speedReps}× ${formatMiles(speedDistance)} fast but relaxed`,
+            distance: speedDistance,
+            pace: paceZones.vo2,
+            power: powerZones?.vo2,
+            effort: "Fast, smooth mechanics with full control",
+            restBetween: 180,
+            repetitions: speedReps,
+            type: "vo2" as const,
+          },
+          {
+            description: `Speed recoveries — ${Math.max(0, speedReps - 1)}× 3 min easy jog (${formatMiles(speedRecovery)} total)`,
+            distance: speedRecovery,
+            pace: paceZones.recovery,
+            power: powerZones?.easy.min,
+            effort: "Full easy jog recovery before the fast reps",
+            type: "recovery" as const,
+          },
+        ]
+      : []),
+    {
+      description: `Cool-down — ${formatMiles(cooldownDistance)} easy pace`,
+      distance: cooldownDistance,
+      pace: easyPace(paceZones),
+      effort: paceZones.easyEffort,
+      type: "easy",
+    },
+  ];
+
+  const totalDistance = totalSegmentDistance(segments);
+
+  return {
+    id: makeId("vo2", week, index),
+    type: "vo2",
+    title: `${actualFastDistance} mi VO2 + Speed Mix`,
+    description: "Longer VO2 reps first, then short fast reps while mechanics are still controlled.",
+    segments,
+    totalDistance,
+    estimatedDuration: estimatedSegmentDuration(segments),
+    weeklyMileageContribution: totalDistance,
+    intensityCategory: "hard",
+  };
+}
+
 // ─── Marathon Pace Run ──────────────────────────────────────
 
 export function createMarathonPaceRun(
@@ -343,6 +546,89 @@ export function createMarathonPaceRun(
     ),
     weeklyMileageContribution: actualTotalDistance,
     intensityCategory: "moderate",
+  };
+}
+
+export function createMarathonThresholdAlternation(
+  week: number,
+  index: number,
+  marathonDistance: number,
+  thresholdDistance: number,
+  paceZones: PaceZones,
+  powerZones?: PowerZones
+): Workout {
+  const marathonMiles = roundMiles(Math.max(1, marathonDistance));
+  const thresholdMiles = roundMiles(Math.max(0.5, thresholdDistance));
+  const firstMarathon = roundMiles(Math.max(1, marathonMiles * 0.6));
+  const secondMarathon = roundMiles(Math.max(0, marathonMiles - firstMarathon));
+  const firstThreshold = roundMiles(Math.max(0.5, thresholdMiles * 0.5));
+  const secondThreshold = roundMiles(Math.max(0, thresholdMiles - firstThreshold));
+  const warmupDistance = 2;
+  const cooldownDistance = 2;
+  const segments: WorkoutSegment[] = [
+    {
+      description: `Warm-up — ${formatMiles(warmupDistance)} easy pace`,
+      distance: warmupDistance,
+      pace: easyPace(paceZones),
+      effort: paceZones.easyEffort,
+      type: "easy",
+    },
+    {
+      description: `Marathon block 1 — ${formatMiles(firstMarathon)} at goal marathon pace`,
+      distance: firstMarathon,
+      pace: paceZones.marathon,
+      power: powerZones?.marathon,
+      effort: paceZones.marathonEffort,
+      type: "marathon_pace",
+    },
+    {
+      description: `Threshold insert 1 — ${formatMiles(firstThreshold)} at threshold pace`,
+      distance: firstThreshold,
+      pace: paceZones.threshold,
+      power: powerZones?.threshold,
+      effort: paceZones.thresholdEffort,
+      type: "threshold",
+    },
+    ...(secondMarathon > 0
+      ? [{
+          description: `Marathon block 2 — ${formatMiles(secondMarathon)} at goal marathon pace`,
+          distance: secondMarathon,
+          pace: paceZones.marathon,
+          power: powerZones?.marathon,
+          effort: paceZones.marathonEffort,
+          type: "marathon_pace" as const,
+        }]
+      : []),
+    ...(secondThreshold > 0
+      ? [{
+          description: `Threshold insert 2 — ${formatMiles(secondThreshold)} at threshold pace`,
+          distance: secondThreshold,
+          pace: paceZones.threshold,
+          power: powerZones?.threshold,
+          effort: paceZones.thresholdEffort,
+          type: "threshold" as const,
+        }]
+      : []),
+    {
+      description: `Cool-down — ${formatMiles(cooldownDistance)} easy pace`,
+      distance: cooldownDistance,
+      pace: easyPace(paceZones),
+      effort: paceZones.easyEffort,
+      type: "easy",
+    },
+  ];
+  const totalDistance = totalSegmentDistance(segments);
+
+  return {
+    id: makeId("marathon_pace", week, index),
+    type: "marathon_pace",
+    title: `${marathonMiles} mi M + ${thresholdMiles} mi T Alternation`,
+    description: "Marathon-pace work with threshold inserts to practice clearing fatigue while returning to goal pace.",
+    segments,
+    totalDistance,
+    estimatedDuration: estimatedSegmentDuration(segments),
+    weeklyMileageContribution: totalDistance,
+    intensityCategory: "hard",
   };
 }
 
@@ -528,8 +814,11 @@ export const WorkoutLibrary = {
   createRecoveryRun,
   createThresholdRun,
   createThresholdIntervals,
+  createThresholdLadder,
   createVO2Intervals,
+  createMixedVO2SpeedWorkout,
   createMarathonPaceRun,
+  createMarathonThresholdAlternation,
   createLongRun,
   createProgressionRun,
   createStrengthSession,
