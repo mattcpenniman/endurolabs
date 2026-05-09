@@ -10,7 +10,7 @@
 
 import React from "react";
 import { useState, useEffect, useMemo } from "react";
-import { DailyLog, WeeklyPlan, DailyPlan, Workout, WorkoutType } from "@/lib/training/models";
+import { DailyLog, WeeklyPlan, DailyPlan, Workout, WorkoutType, formatPace } from "@/lib/training/models";
 import { addDailyLog, removeDailyLog } from "@/lib/training/progress-tracker";
 
 interface WeeklyPlanCardProps {
@@ -67,6 +67,21 @@ const dayDisplayOrder: Record<string, number> = {
   Sunday: 6,
 };
 
+const phaseDetails: Record<WeeklyPlan["phase"], { shortLabel: string; fullLabel: string }> = {
+  base: {
+    shortLabel: "Phase 1",
+    fullLabel: "Phase 1: Aerobic + Threshold Base",
+  },
+  marathon_build: {
+    shortLabel: "Phase 2",
+    fullLabel: "Phase 2: Marathon-Specific Build",
+  },
+  peak_taper: {
+    shortLabel: "Phase 3",
+    fullLabel: "Phase 3: Peak + Taper",
+  },
+};
+
 function formatShortDate(date: string): string {
   return new Intl.DateTimeFormat("en-US", {
     month: "short",
@@ -76,6 +91,42 @@ function formatShortDate(date: string): string {
 
 function formatMiles(distance: number): string {
   return Number.isInteger(distance) ? `${distance}` : `${distance.toFixed(2).replace(/0$/, "")}`;
+}
+
+function segmentDistanceLabel(segment: Workout["segments"][number]): string {
+  if (!segment.distance) {
+    return segment.duration ? `${segment.duration} min` : "";
+  }
+  if (segment.repetitions && segment.repetitions > 1) {
+    return `${segment.repetitions} x ${formatMiles(segment.distance)} mi = ${formatMiles(segment.distance * segment.repetitions)} mi`;
+  }
+  return `${formatMiles(segment.distance)} mi`;
+}
+
+function renderWorkoutSegments(workout: Workout) {
+  if (workout.segments.length <= 1) return null;
+
+  return (
+    <div className="mt-3 space-y-1 rounded-lg bg-gray-50 p-3">
+      <p className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-gray-500">Workout breakdown</p>
+      {workout.segments.map((segment, index) => {
+        const distanceLabel = segmentDistanceLabel(segment);
+        return (
+          <div key={`${workout.id}-segment-${index}`} className="grid gap-1 text-xs text-gray-600 sm:grid-cols-[1fr_auto]">
+            <div>
+              <span className={`font-medium ${workoutColor[segment.type] ?? "text-gray-700"}`}>
+                {segment.description}
+              </span>
+              {segment.pace && (
+                <span className="ml-2 text-gray-400">@ {formatPace(segment.pace)}/mi</span>
+              )}
+            </div>
+            {distanceLabel && <span className="font-semibold text-gray-700">{distanceLabel}</span>}
+          </div>
+        );
+      })}
+    </div>
+  );
 }
 
 interface DayLogDraft {
@@ -191,20 +242,24 @@ function renderDay(
             ))}
           </select>
         </div>
+        {renderWorkoutSegments(currentWorkout)}
         {/* Secondary workout (double-day) */}
         {hasSecondary && day.secondaryWorkout && (
-          <div className="flex items-center gap-2 pl-7">
-            <span className="text-base">🏃</span>
-            <div className="flex-1">
-              <p className={`text-sm font-medium ${workoutColor[day.secondaryWorkout.type] ?? "text-gray-700"}`}>
-                {day.secondaryWorkout.title}
-              </p>
-              <p className="text-xs text-gray-500">
-                {day.secondaryWorkout.totalDistance > 0 ? `${day.secondaryWorkout.totalDistance} mi · ` : ""}
-                {Math.floor(day.secondaryWorkout.estimatedDuration / 60)}h {day.secondaryWorkout.estimatedDuration % 60}min
-              </p>
+          <>
+            <div className="flex items-center gap-2 pl-7">
+              <span className="text-base">🏃</span>
+              <div className="flex-1">
+                <p className={`text-sm font-medium ${workoutColor[day.secondaryWorkout.type] ?? "text-gray-700"}`}>
+                  {day.secondaryWorkout.title}
+                </p>
+                <p className="text-xs text-gray-500">
+                  {day.secondaryWorkout.totalDistance > 0 ? `${day.secondaryWorkout.totalDistance} mi · ` : ""}
+                  {Math.floor(day.secondaryWorkout.estimatedDuration / 60)}h {day.secondaryWorkout.estimatedDuration % 60}min
+                </p>
+              </div>
             </div>
-          </div>
+            {renderWorkoutSegments(day.secondaryWorkout)}
+          </>
         )}
         <DailyLogControls
           day={day}
@@ -472,8 +527,7 @@ export default function WeeklyPlanCard({
         : day.secondaryWorkout?.weeklyMileageContribution ?? 0;
     return sum + (workout?.weeklyMileageContribution ?? 0) + secondaryMileage;
   }, 0);
-  const phaseLabel =
-    week.phase === "base" ? "Base" : week.phase === "marathon_build" ? "Marathon" : "Taper";
+  const phaseDetail = phaseDetails[week.phase];
   const qualityTotals = [
     { label: "T", value: week.intensityDistribution.threshold, className: "bg-amber-50 text-amber-700" },
     { label: "MP", value: week.intensityDistribution.marathon, className: "bg-blue-50 text-blue-700" },
@@ -514,7 +568,7 @@ export default function WeeklyPlanCard({
             <span className="text-sm font-medium text-gray-800">
               Starts {formatShortDate(week.startDate)}
             </span>
-            <span className="text-xs font-medium text-enduro-700">{phaseLabel}</span>
+            <span className="text-xs font-semibold text-enduro-700">{phaseDetail.shortLabel}</span>
             {week.isDownWeek && (
               <span className="text-xs text-green-600">Recovery Week</span>
             )}
@@ -548,7 +602,7 @@ export default function WeeklyPlanCard({
           {/* Phase badge */}
           <div className="mt-3 mb-2">
             <span className="rounded-full bg-enduro-100 px-2 py-1 text-xs font-medium text-enduro-700">
-              {week.phase === "base" ? "Base Building" : week.phase === "marathon_build" ? "Marathon Specific" : "Peak & Taper"}
+              {phaseDetail.fullLabel}
             </span>
           </div>
 

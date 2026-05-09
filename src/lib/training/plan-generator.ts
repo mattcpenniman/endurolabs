@@ -67,29 +67,42 @@ function calculateWeeks(raceDate: string, weeksOverride?: number | null): number
 // ─── Phase Division ─────────────────────────────────────────
 
 function dividePhases(totalWeeks: number): PhaseInfo[] {
-  // Base: ~30%, Marathon build: ~50%, Peak/taper: ~20%
-  const baseWeeks = Math.max(3, Math.round(totalWeeks * 0.3));
-  const taperWeeks = Math.max(2, Math.round(totalWeeks * 0.2));
+  // Daniels-style marathon block: 6-8 weeks of aerobic/LT base,
+  // marathon-specific build, then a 3-4 week peak/taper.
+  const taperWeeks = Math.max(3, Math.min(4, Math.round(totalWeeks * 0.2)));
+  const baseWeeks = Math.max(5, Math.min(8, Math.round((totalWeeks - taperWeeks) * 0.45)));
   const buildWeeks = totalWeeks - baseWeeks - taperWeeks;
 
   return [
     {
-      name: "Base Building",
-      description: "Establish aerobic foundation, build mileage gradually, introduce key workout types",
+      phaseNumber: 1,
+      name: "Phase 1: Aerobic + Threshold Base",
+      description: "Build from roughly 50 to 65 miles per week while raising lactate threshold, the main bottleneck for marathon durability.",
+      focus: "Raise LT and reinforce aerobic durability",
+      targetMileage: "~50 -> 65 mpw",
+      longRunRange: "14-18 miles, mostly easy",
       weekRange: [1, baseWeeks],
       startDate: "",
       endDate: "",
     },
     {
-      name: "Marathon Specific",
-      description: "Increase long run distance, add marathon-pace work, peak volume",
+      phaseNumber: 2,
+      name: "Phase 2: Marathon-Specific Build",
+      description: "Move from 65 miles per week toward peak volume, introduce marathon-pace long runs, and extend fatigue resistance.",
+      focus: "Marathon pace and fatigue resistance",
+      targetMileage: "65 -> 80-90 mpw peak",
+      longRunRange: "Long runs with marathon-pace work",
       weekRange: [baseWeeks + 1, baseWeeks + buildWeeks],
       startDate: "",
       endDate: "",
     },
     {
-      name: "Peak & Taper",
-      description: "Final quality sessions, then reduce volume while maintaining intensity",
+      phaseNumber: 3,
+      name: "Phase 3: Peak + Taper",
+      description: "Reach the most specific long runs, then reduce volume while keeping enough intensity to stay sharp.",
+      focus: "Highest specificity, then freshen up",
+      targetMileage: "Peak, then reduce volume",
+      longRunRange: "20-22 mile peak long runs",
       weekRange: [baseWeeks + buildWeeks + 1, totalWeeks],
       startDate: "",
       endDate: "",
@@ -162,17 +175,11 @@ function mileageProgression(
     }
     return Math.round(target);
   } else {
-    // Peak then taper
-    const taperWeeks = Math.round(totalWeeks * 0.2);
-    const taperWeek = week - baseWeeks - buildWeeks;
-
-    if (taperWeek <= 1) {
-      return peakMileage; // Peak week
-    }
-
-    // Taper: reduce by ~30%, ~50%, ~70%
-    const reduction = taperWeek / (taperWeeks + 1);
-    return Math.round(peakMileage * (1 - reduction * 0.7));
+    // Peak, then final three weeks before race at roughly 70%, 60%, 60%.
+    const weeksBeforeRace = totalWeeks - week;
+    if (weeksBeforeRace === 2) return Math.round(peakMileage * 0.7);
+    if (weeksBeforeRace === 1 || weeksBeforeRace === 0) return Math.round(peakMileage * 0.6);
+    return peakMileage;
   }
 }
 
@@ -259,6 +266,7 @@ function distributeVariedMileage(totalMileage: number, dayCount: number, week: n
 
 function assignWorkoutsForWeek(
   week: number,
+  totalWeeks: number,
   phase: TrainingPhase,
   weeklyMileage: number,
   _longRunMiles: number,
@@ -308,8 +316,10 @@ function assignWorkoutsForWeek(
   let keyWorkout: Workout | null = null;
   let keyWorkoutDay: string | null = null;
   let remainingMileage = Math.max(0, weeklyMileage - assignedMileage);
+  const weeksBeforeRace = totalWeeks - week;
+  const allowsPaceSpecificWorkout = week > 3 && weeksBeforeRace > 2;
 
-  if (!isDownWeek && week > 1 && runDays.length > 1) {
+  if (!isDownWeek && allowsPaceSpecificWorkout && runDays.length > 1) {
     if (phase === "base" && canDoThreshold) {
       const thresholdMiles = Math.min(4, Math.max(1, remainingMileage * 0.2));
       const totalDist = Math.min(remainingMileage, thresholdMiles + 3); // warmup/cooldown
@@ -561,6 +571,33 @@ function getPhaseForWeek(week: number, phases: PhaseInfo[]): TrainingPhase {
   return "peak_taper";
 }
 
+function addWorkoutIntensity(
+  intensityDist: WeeklyPlan["intensityDistribution"],
+  workout: Workout | null | undefined
+): void {
+  if (!workout) return;
+
+  workout.segments.forEach((segment) => {
+    const distance = (segment.distance ?? 0) * (segment.repetitions ?? 1);
+    switch (segment.type) {
+      case "easy":
+      case "long":
+      case "recovery":
+        intensityDist.easy += distance;
+        break;
+      case "threshold":
+        intensityDist.threshold += distance;
+        break;
+      case "marathon_pace":
+        intensityDist.marathon += distance;
+        break;
+      case "vo2":
+        intensityDist.vo2 += distance;
+        break;
+    }
+  });
+}
+
 // ─── Main Plan Generation ──────────────────────────────────
 
 export function generatePlan(profile: RunnerProfile): MarathonPlan {
@@ -585,7 +622,7 @@ export function generatePlan(profile: RunnerProfile): MarathonPlan {
   const runsPerWeek = profile.runsPerWeekOverride
     ? Math.max(3, Math.min(10, profile.runsPerWeekOverride))
     : profile.trainingDaysPerWeek;
-  const planStart = dayjs(profile.raceDate).subtract(totalWeeks, "week");
+  const planStart = dayjs(profile.raceDate).subtract(totalWeeks, "week").startOf("isoWeek");
 
   // Generate weeks
   const weeks: WeeklyPlan[] = [];
@@ -598,6 +635,7 @@ export function generatePlan(profile: RunnerProfile): MarathonPlan {
 
     const days = assignWorkoutsForWeek(
       week,
+      totalWeeks,
       phase,
       weeklyMileage,
       longRunMiles,
@@ -618,54 +656,17 @@ export function generatePlan(profile: RunnerProfile): MarathonPlan {
 
     // Fill in dates for each day
     const weekStart = planStart.add(week - 1, "week");
-    const startDayOfWeek = weekStart.isoWeekday();
 
     days.forEach((day) => {
-      const dayIdx = DAY_INDEX[day.dayOfWeek];
-      const offset = ((dayIdx - startDayOfWeek + 7) % 7);
+      const offset = DISPLAY_DAY_ORDER[day.dayOfWeek];
       day.date = weekStart.add(offset, "day").toISOString();
     });
 
     // Calculate intensity distribution
     const intensityDist = { easy: 0, threshold: 0, marathon: 0, vo2: 0 };
     days.forEach((d) => {
-      if (d.workout) {
-        switch (d.workout.type) {
-          case "easy":
-          case "long":
-          case "recovery":
-            intensityDist.easy += d.workout.totalDistance;
-            break;
-          case "threshold":
-            intensityDist.threshold += d.workout.totalDistance;
-            break;
-          case "marathon_pace":
-            intensityDist.marathon += d.workout.totalDistance;
-            break;
-          case "vo2":
-            intensityDist.vo2 += d.workout.totalDistance;
-            break;
-        }
-      }
-      // Count secondary (double-day) workouts too
-      if (d.secondaryWorkout) {
-        switch (d.secondaryWorkout.type) {
-          case "easy":
-          case "long":
-          case "recovery":
-            intensityDist.easy += d.secondaryWorkout.totalDistance;
-            break;
-          case "threshold":
-            intensityDist.threshold += d.secondaryWorkout.totalDistance;
-            break;
-          case "marathon_pace":
-            intensityDist.marathon += d.secondaryWorkout.totalDistance;
-            break;
-          case "vo2":
-            intensityDist.vo2 += d.secondaryWorkout.totalDistance;
-            break;
-        }
-      }
+      addWorkoutIntensity(intensityDist, d.workout);
+      addWorkoutIntensity(intensityDist, d.secondaryWorkout);
     });
 
     weeks.push({

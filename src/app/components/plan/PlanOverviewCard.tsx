@@ -53,11 +53,18 @@ export default function PlanOverviewCard({ plan }: PlanOverviewCardProps) {
       {/* Phase breakdown */}
       <div className="mt-4 border-t border-gray-100 pt-4">
         <p className="text-xs font-medium uppercase tracking-wide text-gray-500">Training Phases</p>
-        <div className="mt-2 flex gap-2">
+        <div className="mt-2 grid gap-3 md:grid-cols-3">
           {plan.phases.map((phase) => (
-            <div key={phase.name} className="flex-1 rounded-lg bg-gray-50 p-2">
-              <p className="text-xs font-semibold text-gray-700">{phase.name}</p>
-              <p className="text-[10px] text-gray-500">Weeks {phase.weekRange[0]}&ndash;{phase.weekRange[1]}</p>
+            <div key={phase.name} className="rounded-lg bg-gray-50 p-3">
+              <p className="text-xs font-semibold text-gray-800">{phase.name}</p>
+              <p className="mt-1 text-[10px] font-medium uppercase tracking-wide text-gray-500">
+                Weeks {phase.weekRange[0]}&ndash;{phase.weekRange[1]}
+              </p>
+              <p className="mt-2 text-xs text-gray-600">{phase.focus ?? phase.description}</p>
+              <div className="mt-2 space-y-1 text-[11px] text-gray-500">
+                {phase.targetMileage && <p>Mileage: {phase.targetMileage}</p>}
+                {phase.longRunRange && <p>Long runs: {phase.longRunRange}</p>}
+              </div>
             </div>
           ))}
         </div>

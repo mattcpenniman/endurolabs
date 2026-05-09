@@ -166,8 +166,12 @@ export interface WeeklyPlan {
 export type TrainingPhase = "base" | "marathon_build" | "peak_taper";
 
 export interface PhaseInfo {
+  phaseNumber?: number;
   name: string;
   description: string;
+  focus?: string;
+  targetMileage?: string;
+  longRunRange?: string;
   startDate: string;
   endDate: string;
   weekRange: [number, number];

@@ -55,6 +55,16 @@ function isQuarterMile(distance: number): boolean {
   return Number.isInteger(Math.round(distance * 100) / 25);
 }
 
+function hasPaceSpecificSegments(week: ReturnType<typeof generatePlan>["weeks"][number]): boolean {
+  return week.days.some((day) =>
+    [day.workout, day.secondaryWorkout].some((workout) =>
+      workout?.segments.some((segment) =>
+        segment.type === "threshold" || segment.type === "marathon_pace" || segment.type === "vo2"
+      )
+    )
+  );
+}
+
 describe("generatePlan", () => {
   it("returns a MarathonPlan with all required fields", () => {
     const plan = generatePlan(makeProfile());
@@ -77,14 +87,27 @@ describe("generatePlan", () => {
     expect(plan.weeks.length).toBe(plan.totalWeeks);
   });
 
-  it("starts the plan based on race date and plan length", () => {
+  it("starts the plan on the Monday of the calculated start week", () => {
     const plan = generatePlan(makeProfile({ raceDate: "2026-12-01", weeksOverride: 18 }));
-    const expectedStart = new Date("2026-12-01T00:00:00.000Z");
-    expectedStart.setUTCDate(expectedStart.getUTCDate() - 18 * 7);
 
-    expect(new Date(plan.weeks[0].startDate).toISOString().slice(0, 10)).toBe(
-      expectedStart.toISOString().slice(0, 10)
-    );
+    expect(new Date(plan.weeks[0].startDate).toISOString().slice(0, 10)).toBe("2026-07-27");
+    expect(plan.weeks[0].days.map((day) => new Date(day.date).toISOString().slice(0, 10))).toEqual([
+      "2026-07-27",
+      "2026-07-28",
+      "2026-07-29",
+      "2026-07-30",
+      "2026-07-31",
+      "2026-08-01",
+      "2026-08-02",
+    ]);
+  });
+
+  it("aligns a May 18, 2026 plan start to Monday", () => {
+    const plan = generatePlan(makeProfile({ raceDate: "2026-09-21", weeksOverride: 18 }));
+
+    expect(new Date(plan.weeks[0].startDate).toISOString().slice(0, 10)).toBe("2026-05-18");
+    expect(plan.weeks[0].days[0].dayOfWeek).toBe("Monday");
+    expect(new Date(plan.weeks[0].days[0].date).toISOString().slice(0, 10)).toBe("2026-05-18");
   });
 
   it("generates at least 14 weeks for a typical plan", () => {
@@ -218,6 +241,25 @@ describe("generatePlan", () => {
     expect(peakScheduledMileage).toBeCloseTo(55, 1);
   });
 
+  it("sets the final three weeks before race to roughly 70%, 60%, and 60% of peak", () => {
+    const plan = generatePlan(makeProfile({ weeksOverride: 18, peakMileageOverride: 80 }));
+    const finalThreeWeeks = plan.weeks.slice(-3).map((week) => week.totalMileage);
+
+    expect(finalThreeWeeks).toEqual([56, 48, 48]);
+  });
+
+  it("keeps the first three and final three weeks aerobic base only", () => {
+    const plan = generatePlan(makeProfile({ weeksOverride: 18, peakMileageOverride: 55 }));
+    const aerobicOnlyWeeks = [...plan.weeks.slice(0, 3), ...plan.weeks.slice(-3)];
+
+    for (const week of aerobicOnlyWeeks) {
+      expect(hasPaceSpecificSegments(week)).toBe(false);
+      expect(week.intensityDistribution.threshold).toBe(0);
+      expect(week.intensityDistribution.marathon).toBe(0);
+      expect(week.intensityDistribution.vo2).toBe(0);
+    }
+  });
+
   it("honors requested runs per week with double days", () => {
     const plan = generatePlan(
       makeProfile({
@@ -307,5 +349,17 @@ describe("generatePlan", () => {
       expect(workout.segments.some((segment) => segment.description.includes("Recoveries"))).toBe(true);
       expect(workout.segments.at(-1)?.description).toContain("Cool-down");
     }
+  });
+
+  it("calculates weekly quality totals from repeated work segments, not full workout distance", () => {
+    const plan = generatePlan(makeProfile({ weeksOverride: 18, peakMileageOverride: 55 }));
+    const intervalWeek = plan.weeks.find((week) =>
+      week.days.some((day) =>
+        day.workout?.segments.some((segment) => segment.type === "threshold" && segment.repetitions === 3 && segment.distance === 1)
+      )
+    );
+
+    expect(intervalWeek).toBeDefined();
+    expect(intervalWeek?.intensityDistribution.threshold).toBe(3);
   });
 });

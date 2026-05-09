@@ -52,6 +52,25 @@ const RACE_DISTANCES: Array<{ key: RaceDistanceKey; label: string; miles: number
   { key: "5k", label: "5K", miles: 3.1 },
 ];
 
+function clampMileage(value: number): number {
+  if (!Number.isFinite(value)) return 5;
+  return Math.max(5, Math.min(120, Math.round(value)));
+}
+
+function recommendedStartMileage(plan: MarathonPlan, runsPerWeek: number): number {
+  if (plan.weeks.length === 0) {
+    return clampMileage(plan.runnerProfile.currentWeeklyMileage);
+  }
+  const peakWeek = plan.weeks.reduce(
+    (best, week) => (week.totalMileage > best.totalMileage ? week : best),
+    plan.weeks[0]!
+  );
+  const weeksToPeak = Math.max(0, (peakWeek?.weekNumber ?? plan.totalWeeks) - 1);
+  const threeWeekBuilds = Math.floor(weeksToPeak / 3);
+  const buildCapacity = Math.max(0, runsPerWeek * threeWeekBuilds);
+  return clampMileage(plan.peakWeeklyMileage - buildCapacity);
+}
+
 export default function PlanPage(): React.ReactNode {
   const [plan, setPlan] = useState<MarathonPlan | null>(null);
   const [isLoading, setIsLoading] = useState(false);
@@ -303,6 +322,62 @@ export default function PlanPage(): React.ReactNode {
     }
   };
 
+  const handleAdjustPeakMileage = async (newPeakMileage: number) => {
+    if (!plan || newPeakMileage === plan.peakWeeklyMileage) return;
+    setIsLoading(true);
+    try {
+      const peakMileageOverride = clampMileage(newPeakMileage);
+      const profile = {
+        ...plan.runnerProfile,
+        raceName: planName.trim() || undefined,
+        peakHistoricalWeeklyMileage: Math.max(plan.runnerProfile.peakHistoricalWeeklyMileage, peakMileageOverride),
+        peakMileageOverride,
+      };
+      const response = await fetch("/api/plan/generate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(profile),
+      });
+      if (!response.ok) throw new Error("Failed to regenerate plan");
+      const regenerated = await response.json();
+      regenerated.id = plan.id;
+      const savedPlan = await persistPlan(regenerated, planName);
+      setPlan(savedPlan ?? regenerated);
+    } catch {
+      // Silently fail
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleAdjustStartMileage = async (newStartMileage: number) => {
+    if (!plan || newStartMileage === plan.runnerProfile.currentWeeklyMileage) return;
+    setIsLoading(true);
+    try {
+      const currentWeeklyMileage = clampMileage(newStartMileage);
+      const profile = {
+        ...plan.runnerProfile,
+        raceName: planName.trim() || undefined,
+        currentWeeklyMileage,
+        peakHistoricalWeeklyMileage: Math.max(plan.runnerProfile.peakHistoricalWeeklyMileage, currentWeeklyMileage),
+      };
+      const response = await fetch("/api/plan/generate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(profile),
+      });
+      if (!response.ok) throw new Error("Failed to regenerate plan");
+      const regenerated = await response.json();
+      regenerated.id = plan.id;
+      const savedPlan = await persistPlan(regenerated, planName);
+      setPlan(savedPlan ?? regenerated);
+    } catch {
+      // Silently fail
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
   const handleAdjustRaceDate = async (newRaceDate: string) => {
     if (!plan || !newRaceDate || newRaceDate === plan.runnerProfile.raceDate) return;
     setIsLoading(true);
@@ -538,6 +613,21 @@ export default function PlanPage(): React.ReactNode {
     RACE_DISTANCES[0];
   const raceGoalPace = plan.runnerProfile.goalMarathonTime / 26.2;
   const selectedRaceGoalTime = raceGoalPace * selectedRaceDistance.miles;
+  const phaseSections = plan.phases.map((phase) => ({
+    phase,
+    weeks: plan.weeks.filter(
+      (week) => week.weekNumber >= phase.weekRange[0] && week.weekNumber <= phase.weekRange[1]
+    ),
+  }));
+  const recommendedStart = recommendedStartMileage(plan, currentRunCount);
+  const peakWeekNumber = plan.weeks.length > 0
+    ? plan.weeks.reduce(
+        (best, week) => (week.totalMileage > best.totalMileage ? week : best),
+        plan.weeks[0]!
+      ).weekNumber
+    : plan.totalWeeks;
+  const weeksToPeak = Math.max(0, peakWeekNumber - 1);
+  const threeWeekBuilds = Math.floor(weeksToPeak / 3);
   void dailyLogRefresh;
 
   return (
@@ -727,17 +817,42 @@ export default function PlanPage(): React.ReactNode {
                   </ul>
                 </div>
               )}
-              <div className="space-y-3">
-                {plan.weeks.map((week) => (
-                  <WeeklyPlanCard
-                    key={week.weekNumber}
-                    planId={plan.id}
-                    week={week}
-                    isExpanded={expandedWeeks.has(week.weekNumber)}
-                    onToggle={() => toggleWeek(week.weekNumber)}
-                    dailyLogs={dailyLogs}
-                    onDailyLogSaved={() => setDailyLogRefresh((value) => value + 1)}
-                  />
+              <div className="space-y-6">
+                {phaseSections.map(({ phase, weeks }) => (
+                  <section key={phase.name} aria-labelledby={`phase-${phase.weekRange[0]}`} className="space-y-3">
+                    <div className="rounded-xl border border-enduro-100 bg-enduro-50 p-4">
+                      <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+                        <div>
+                          <p className="text-xs font-semibold uppercase tracking-wide text-enduro-700">
+                            Weeks {phase.weekRange[0]}&ndash;{phase.weekRange[1]}
+                          </p>
+                          <h3 id={`phase-${phase.weekRange[0]}`} className="mt-1 text-lg font-bold text-gray-900">
+                            {phase.name}
+                          </h3>
+                          <p className="mt-1 max-w-3xl text-sm text-gray-700">{phase.description}</p>
+                        </div>
+                        <div className="grid gap-2 text-xs text-gray-700 sm:grid-cols-2 md:min-w-72 md:grid-cols-1">
+                          {phase.targetMileage && (
+                            <span className="rounded-lg bg-white px-3 py-2 shadow-sm">Mileage: {phase.targetMileage}</span>
+                          )}
+                          {phase.longRunRange && (
+                            <span className="rounded-lg bg-white px-3 py-2 shadow-sm">Long runs: {phase.longRunRange}</span>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                    {weeks.map((week) => (
+                      <WeeklyPlanCard
+                        key={week.weekNumber}
+                        planId={plan.id}
+                        week={week}
+                        isExpanded={expandedWeeks.has(week.weekNumber)}
+                        onToggle={() => toggleWeek(week.weekNumber)}
+                        dailyLogs={dailyLogs}
+                        onDailyLogSaved={() => setDailyLogRefresh((value) => value + 1)}
+                      />
+                    ))}
+                  </section>
                 ))}
               </div>
             </div>
@@ -839,6 +954,62 @@ export default function PlanPage(): React.ReactNode {
             </div>
 
             <div className="grid gap-4 md:grid-cols-2">
+              <div className="rounded-lg border border-gray-200 bg-white p-5 md:col-span-2">
+                <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+                  <div>
+                    <h3 className="text-sm font-semibold text-gray-900">Mileage targets</h3>
+                    <p className="mt-1 text-sm text-gray-500">
+                      Start recommendation back-calculates from peak using +1 mile per run every three weeks.
+                    </p>
+                    <p className="mt-2 text-xs text-gray-500">
+                      Recommended start: {recommendedStart} mi/week from {plan.peakWeeklyMileage} peak mi/week, {currentRunCount} runs/week, and {threeWeekBuilds} three-week build {threeWeekBuilds === 1 ? "block" : "blocks"} before peak week {peakWeekNumber}.
+                    </p>
+                  </div>
+                  <div className="grid gap-3 sm:grid-cols-3 lg:min-w-[34rem]">
+                    <label className="block">
+                      <span className="text-xs font-medium uppercase tracking-wide text-gray-500">Start</span>
+                      <input
+                        key={`start-${plan.runnerProfile.currentWeeklyMileage}`}
+                        type="number"
+                        min={5}
+                        max={120}
+                        defaultValue={plan.runnerProfile.currentWeeklyMileage}
+                        onBlur={(e) => handleAdjustStartMileage(Number(e.target.value))}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter") e.currentTarget.blur();
+                        }}
+                        disabled={isLoading}
+                        className="mt-1 w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 focus:border-enduro-500 focus:outline-none focus:ring-2 focus:ring-enduro-500/20 disabled:opacity-60"
+                      />
+                    </label>
+                    <label className="block">
+                      <span className="text-xs font-medium uppercase tracking-wide text-gray-500">Peak</span>
+                      <input
+                        key={`peak-${plan.peakWeeklyMileage}`}
+                        type="number"
+                        min={10}
+                        max={120}
+                        defaultValue={plan.peakWeeklyMileage}
+                        onBlur={(e) => handleAdjustPeakMileage(Number(e.target.value))}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter") e.currentTarget.blur();
+                        }}
+                        disabled={isLoading}
+                        className="mt-1 w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 focus:border-enduro-500 focus:outline-none focus:ring-2 focus:ring-enduro-500/20 disabled:opacity-60"
+                      />
+                    </label>
+                    <button
+                      type="button"
+                      onClick={() => handleAdjustStartMileage(recommendedStart)}
+                      disabled={isLoading || recommendedStart === plan.runnerProfile.currentWeeklyMileage}
+                      className="self-end rounded-lg bg-enduro-600 px-4 py-2 text-sm font-medium text-white hover:bg-enduro-700 disabled:opacity-50"
+                    >
+                      Use recommended start
+                    </button>
+                  </div>
+                </div>
+              </div>
+
               <div className="rounded-lg border border-gray-200 bg-white p-5">
                 <label htmlFor="rest-day" className="block text-sm font-semibold text-gray-900">
                   Rest day
