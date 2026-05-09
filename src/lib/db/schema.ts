@@ -46,5 +46,6 @@ export const plans = pgTable("plans", {
   planData: jsonb("plan_data").notNull(),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
+  archivedAt: timestamp("archived_at"),
   raceName: varchar("race_name", { length: 255 }),
 });

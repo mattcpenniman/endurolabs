@@ -34,6 +34,7 @@ interface SavedPlanRow {
   weeksOverride: number | null;
   raceName: string | null;
   createdAt: string;
+  archivedAt: string | null;
 }
 
 interface SavePlanResponse {
@@ -635,6 +636,39 @@ export default function PlanPage(): React.ReactNode {
     }
   };
 
+  const handleCopyPlan = async (planId: string) => {
+    setIsSaving(true);
+    try {
+      const response = await fetch(`/api/plan/${planId}/copy`, { method: "POST" });
+      if (!response.ok) throw new Error("Failed to copy plan");
+      await refreshSavedPlans();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to copy plan");
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  const handleArchivePlan = async (planId: string, archived: boolean) => {
+    setIsSaving(true);
+    try {
+      const response = await fetch(`/api/plan/${planId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ archived }),
+      });
+      if (!response.ok) throw new Error(archived ? "Failed to archive plan" : "Failed to restore plan");
+      await refreshSavedPlans();
+      if (archived && plan?.id === planId) {
+        setPlan(null);
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to update plan");
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
   const toggleWeek = (weekNumber: number) => {
     setExpandedWeeks((prev) => {
       const next = new Set(prev);
@@ -658,6 +692,9 @@ export default function PlanPage(): React.ReactNode {
     );
   }
 
+  const activeSavedPlans = savedPlans.filter((savedPlan) => !savedPlan.archivedAt);
+  const archivedSavedPlans = savedPlans.filter((savedPlan) => savedPlan.archivedAt);
+
   if (!plan && !isLoading) {
     return (
       <div className="section-padding">
@@ -672,9 +709,9 @@ export default function PlanPage(): React.ReactNode {
           {/* Saved plans list */}
           {savedPlans.length > 0 && (
             <div className="mb-8">
-              <h2 className="text-xl font-semibold text-gray-800 mb-3">Saved Plans</h2>
+              <h2 className="text-xl font-semibold text-gray-800 mb-3">My Plans</h2>
               <div className="space-y-2">
-                {savedPlans.map((row) => {
+                {activeSavedPlans.map((row) => {
                   const goalMin = row.runnerProfile.goalMarathonTime;
                   const goalStr =
                     goalMin / 60 >= 1
@@ -684,7 +721,7 @@ export default function PlanPage(): React.ReactNode {
                   return (
                     <div
                       key={row.id}
-                      className="flex items-center justify-between rounded-lg border border-gray-200 bg-white p-4 hover:border-enduro-300"
+                      className="flex flex-col gap-3 rounded-lg border border-gray-200 bg-white p-4 hover:border-enduro-300 sm:flex-row sm:items-center sm:justify-between"
                     >
                       <div>
                         <p className="font-medium text-gray-900">
@@ -694,16 +731,80 @@ export default function PlanPage(): React.ReactNode {
                           {row.planData.totalWeeks} weeks · Peak {row.planData.peakWeeklyMileage} mi/week · Created {created}
                         </p>
                       </div>
-                      <button
-                        onClick={() => handleLoadPlan(row.id)}
-                        className="rounded-lg bg-enduro-600 px-4 py-2 text-sm font-medium text-white hover:bg-enduro-700"
-                      >
-                        Load
-                      </button>
+                      <div className="flex flex-wrap gap-2">
+                        <button
+                          onClick={() => handleLoadPlan(row.id)}
+                          className="rounded-lg bg-enduro-600 px-4 py-2 text-sm font-medium text-white hover:bg-enduro-700"
+                        >
+                          Load
+                        </button>
+                        <button
+                          onClick={() => handleCopyPlan(row.id)}
+                          disabled={isSaving}
+                          className="rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50"
+                        >
+                          Copy
+                        </button>
+                        <button
+                          onClick={() => handleArchivePlan(row.id, true)}
+                          disabled={isSaving}
+                          className="rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50"
+                        >
+                          Archive
+                        </button>
+                      </div>
                     </div>
                   );
                 })}
               </div>
+              {archivedSavedPlans.length > 0 && (
+                <details className="mt-4 rounded-lg border border-gray-200 bg-gray-50 p-4">
+                  <summary className="cursor-pointer text-sm font-semibold text-gray-700">
+                    Archived Plans ({archivedSavedPlans.length})
+                  </summary>
+                  <div className="mt-3 space-y-2">
+                    {archivedSavedPlans.map((row) => {
+                      const goalMin = row.runnerProfile.goalMarathonTime;
+                      const goalStr =
+                        goalMin / 60 >= 1
+                          ? `${Math.floor(goalMin / 60)}:${String(goalMin % 60).padStart(2, "0")}`
+                          : `${goalMin}:00`;
+                      const created = new Date(row.createdAt).toLocaleDateString();
+                      return (
+                        <div
+                          key={row.id}
+                          className="flex flex-col gap-3 rounded-lg border border-gray-200 bg-white p-4 sm:flex-row sm:items-center sm:justify-between"
+                        >
+                          <div>
+                            <p className="font-medium text-gray-900">
+                              {row.raceName || `Goal ${goalStr}`}
+                            </p>
+                            <p className="text-sm text-gray-500">
+                              {row.planData.totalWeeks} weeks · Peak {row.planData.peakWeeklyMileage} mi/week · Created {created}
+                            </p>
+                          </div>
+                          <div className="flex flex-wrap gap-2">
+                            <button
+                              onClick={() => handleCopyPlan(row.id)}
+                              disabled={isSaving}
+                              className="rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50"
+                            >
+                              Copy
+                            </button>
+                            <button
+                              onClick={() => handleArchivePlan(row.id, false)}
+                              disabled={isSaving}
+                              className="rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50"
+                            >
+                              Restore
+                            </button>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </details>
+              )}
             </div>
           )}
 

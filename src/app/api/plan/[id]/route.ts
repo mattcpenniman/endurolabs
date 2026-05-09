@@ -59,3 +59,35 @@ export async function GET(
     );
   }
 }
+
+export async function PATCH(
+  request: NextRequest,
+  { params }: { params: Promise<{ id: string }> }
+): Promise<NextResponse> {
+  try {
+    const user = await getCurrentUser();
+
+    if (!user) {
+      return NextResponse.json({ error: "Authentication required" }, { status: 401 });
+    }
+
+    const { id } = await params;
+    const body = (await request.json()) as { archived?: boolean };
+    const archivedAt = body.archived ? new Date() : null;
+
+    const [updatedPlan] = await db
+      .update(plans)
+      .set({ archivedAt, updatedAt: new Date() })
+      .where(and(eq(plans.id, id), eq(plans.userId, user.id)))
+      .returning({ id: plans.id });
+
+    if (!updatedPlan) {
+      return NextResponse.json({ error: "Plan not found" }, { status: 404 });
+    }
+
+    return NextResponse.json({ success: true, id, archivedAt });
+  } catch (error) {
+    console.error("Failed to update plan:", error);
+    return NextResponse.json({ error: "Failed to update plan" }, { status: 500 });
+  }
+}
