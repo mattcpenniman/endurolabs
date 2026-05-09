@@ -7,21 +7,28 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db/client";
 import { plans } from "@/lib/db/schema";
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { calculatePaceZones, calculatePowerZones } from "@/lib/training/zone-calculator";
 import { MarathonPlan, RunnerProfile } from "@/lib/training/models";
+import { getCurrentUser } from "@/lib/auth";
 
 export async function GET(
   _request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
+    const user = await getCurrentUser();
+
+    if (!user) {
+      return NextResponse.json({ error: "Authentication required" }, { status: 401 });
+    }
+
     const { id } = await params;
 
     const [plan] = await db
       .select()
       .from(plans)
-      .where(eq(plans.id, id));
+      .where(and(eq(plans.id, id), eq(plans.userId, user.id)));
 
     if (!plan) {
       return NextResponse.json(

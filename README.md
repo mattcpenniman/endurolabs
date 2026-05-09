@@ -2,7 +2,7 @@
 
 A science-backed marathon training planner that generates personalized, week-by-week training plans based on runner profiles, pace zones, and goal race times. Built around Daniels' Running Formula methodology with Apple Watch power data integration.
 
-Plans are persisted to PostgreSQL so you can load and revisit them across sessions.
+Plans are persisted to PostgreSQL per authenticated user, so each runner only sees their own saved plans.
 
 ## Features
 
@@ -14,7 +14,8 @@ Plans are persisted to PostgreSQL so you can load and revisit them across sessio
 - **Goal assessment** — Feasibility rating (Feasible / Plausible / Ambitious / Unrealistic) with risk warnings
 - **Adjustment guidelines** — Built-in rules for fatigue, illness, injury, and sleep
 - **User overrides** — Adjust peak weekly mileage and training week count to suit your schedule
-- **Plan persistence** — Save and reload plans across sessions via PostgreSQL
+- **Login-protected plans** — Saved plans are behind an HTTP-only session login and scoped per user
+- **Plan persistence** — Save and reload user-specific plans across sessions via PostgreSQL
 
 ## Tech Stack
 
@@ -47,6 +48,12 @@ Stop the stack with:
 docker compose down
 ```
 
+Create a login user inside the running Docker app container:
+
+```bash
+docker compose exec app npm run user:create -- --email runner@example.com --password 'change-me-please' --name 'Runner Name'
+```
+
 ### Prerequisites
 
 - Node.js 18+ (Node 20+ recommended)
@@ -65,6 +72,30 @@ npm run dev
 ```
 
 This starts the app on **`http://localhost:3000`**.
+
+### Create a user
+
+After the database schema has been pushed (`npm run db:push`, or automatically through Docker), create a login user from the backend.
+
+With Docker:
+
+```bash
+docker compose exec app npm run user:create -- --email runner@example.com --password 'change-me-please' --name 'Runner Name'
+```
+
+For a local Node process:
+
+```bash
+npm run user:create -- --email runner@example.com --password 'change-me-please' --name 'Runner Name'
+```
+
+The command uses `DATABASE_URL` when set. If it is not set, it defaults to:
+
+```bash
+postgresql://enduro:endurodev@localhost:5432/endurolab
+```
+
+Training plans under `/plan` require login. Newly generated and saved plans are tied to the signed-in user.
 
 ### Change the port
 
@@ -108,29 +139,53 @@ npm run test:watch
 ```
 src/
 ├── app/
-│   ├── api/plan/           # API routes (generate, export)
+│   ├── api/auth/           # Login, logout, and current user routes
+│   ├── api/plan/           # Authenticated API routes (generate, save, list, export)
 │   ├── components/
 │   │   ├── charts/         # MileageTrendChart, LongRunProgressionChart, IntensityDistributionChart
 │   │   ├── layout/         # Header, Footer
 │   │   ├── onboarding/     # OnboardingForm (4-step)
 │   │   └── plan/           # PlanOverviewCard, PaceZonesCard, WeeklyPlanCard
 │   ├── layout.tsx          # Root layout
+│   ├── login/page.tsx      # Login page
 │   ├── page.tsx            # Home page
 │   ├── plan/page.tsx       # Plan generation page
 │   └── globals.css         # Tailwind + design tokens
-├── lib/training/
-│   ├── models.ts           # TypeScript interfaces & time utilities
-│   ├── zone-calculator.ts  # VDTO pace/power zone math
-│   ├── workout-library.ts  # Workout template factory
-│   ├── plan-generator.ts   # Core plan assembly engine
-│   ├── goal-assessment.ts  # Feasibility engine
-│   └── calendar-export.ts  # ICS calendar generation
+├── lib/
+│   ├── auth.ts             # Password hashing, session cookies, authenticated user lookup
+│   ├── db/                 # Drizzle client and PostgreSQL schema
+│   └── training/
+│       ├── models.ts           # TypeScript interfaces & time utilities
+│       ├── zone-calculator.ts  # VDTO pace/power zone math
+│       ├── workout-library.ts  # Workout template factory
+│       ├── plan-generator.ts   # Core plan assembly engine
+│       ├── goal-assessment.ts  # Feasibility engine
+│       └── calendar-export.ts  # ICS calendar generation
+├── scripts/
+│   └── create-user.mjs     # Backend user creation tool
 └── test/
     ├── zone-calculator.test.ts
     ├── goal-assessment.test.ts
     ├── plan-generator.test.ts
     └── calendar-export.test.ts
 ```
+
+## Authentication
+
+EnduroLab uses first-party email/password authentication:
+
+- Passwords are stored as salted `scrypt` hashes.
+- Sessions are stored in PostgreSQL and referenced by an HTTP-only `endurlab_session` cookie.
+- `/api/plan/*` routes require an authenticated session.
+- Saved plans include a `user_id` and list/load/save operations are filtered to the signed-in user.
+
+The schema is managed through Drizzle:
+
+```bash
+npm run db:push
+```
+
+This creates or updates the `users`, `sessions`, and `plans` tables.
 
 ## How It Works
 

@@ -148,7 +148,7 @@ function selectTrainingDays(
   return trainingDays;
 }
 
-// ─── Mileage Progression Curve ──────────────────────────────
+// ─── Mileage Progression Curve (stepped: plateau → step → recovery → repeat) ──
 
 function mileageProgression(
   week: number,
@@ -158,32 +158,68 @@ function mileageProgression(
   phase: TrainingPhase
 ): number {
   const baseWeeks = Math.round(totalWeeks * 0.3);
-  const buildWeeks = Math.round(totalWeeks * 0.5);
+  const taperWeeks = Math.max(3, Math.min(4, Math.round(totalWeeks * 0.2)));
+  const buildPhaseWeeks = totalWeeks - baseWeeks - taperWeeks;
 
   if (phase === "base") {
-    // Gradual build from current to ~70% of peak
-    const target = startMileage + (peakMileage * 0.7 - startMileage) * (week / baseWeeks);
-    return Math.round(target);
+    // Progress from startMileage toward peakMileage using stepped plateaus.
+    // pctSteps represents how far along the build curve we are (0 = start, 1 = peak).
+    const pctSteps = [0.6, 0.6, 0.6, 0.7, 0.7, 0.7, 0.8, 0.8];
+    const idx = Math.min(week - 1, pctSteps.length - 1);
+    const pct = pctSteps[idx];
+    return Math.round(startMileage + (peakMileage - startMileage) * pct);
   } else if (phase === "marathon_build") {
-    // Build to peak, with recovery weeks
-    const buildWeek = week - baseWeeks;
-    const target = peakMileage * 0.7 + (peakMileage * 0.3) * (buildWeek / buildWeeks);
+    // Stepped peaks: 80% → 90% → 100%, each held 2-3 weeks, with 70% recovery between
+    // Build the sequence: [80, 80, 70, 90, 90, 70, 100, 100, 100] (trimmed to fit)
+    const fullSequence = [
+      { pct: 0.8, hold: 2 },
+      { pct: 0.7, hold: 1 },
+      { pct: 0.9, hold: 2 },
+      { pct: 0.7, hold: 1 },
+      { pct: 1.0, hold: 3 },
+    ];
 
-    // Every 3rd week is a recovery week (20% reduction)
-    if (buildWeek % 3 === 0 && buildWeek > 0 && buildWeek < buildWeeks) {
-      return Math.round(target * 0.8);
+    // Flatten to weeks — interpolate from start toward peak
+    let weeksList: number[] = [];
+    for (const { pct, hold } of fullSequence) {
+      for (let i = 0; i < hold; i++) {
+        weeksList.push(Math.round(startMileage + (peakMileage - startMileage) * pct));
+      }
     }
-    return Math.round(target);
+
+    // Trim or pad to fit buildPhaseWeeks
+    if (weeksList.length > buildPhaseWeeks) {
+      // Trim: remove last plateau weeks, keep peak
+      weeksList = weeksList.slice(0, buildPhaseWeeks);
+      // Ensure last week is at peak
+      if (weeksList[weeksList.length - 1] < peakMileage) {
+        weeksList[weeksList.length - 1] = peakMileage;
+      }
+    } else {
+      // Pad: repeat last value
+      while (weeksList.length < buildPhaseWeeks) {
+        weeksList.push(weeksList[weeksList.length - 1]);
+      }
+    }
+
+    const buildWeek = week - baseWeeks;
+    return weeksList[Math.min(buildWeek - 1, weeksList.length - 1)];
   } else {
-    // Peak, then final three weeks before race at roughly 70%, 60%, 60%.
-    const weeksBeforeRace = totalWeeks - week;
-    if (weeksBeforeRace === 2) return Math.round(peakMileage * 0.7);
-    if (weeksBeforeRace === 1 || weeksBeforeRace === 0) return Math.round(peakMileage * 0.6);
-    return peakMileage;
+    // Peak plateau (2 weeks) → taper: 70% → 60% → 60% → race
+    const taperStart = totalWeeks - taperWeeks;
+    const peakPlateauEnd = taperStart - 1;
+
+    if (week <= peakPlateauEnd) {
+      return peakMileage;
+    }
+    // Taper weeks — taper back toward startMileage
+    const taperWeek = week - taperStart;
+    if (taperWeek === 1) return Math.round(peakMileage - (peakMileage - startMileage) * 0.3);
+    return Math.round(peakMileage - (peakMileage - startMileage) * 0.4);
   }
 }
 
-// ─── Long Run Progression ───────────────────────────────────
+// ─── Long Run Progression (stepped: plateau → step → recovery → repeat) ──
 
 function longRunDistance(
   week: number,
@@ -192,26 +228,54 @@ function longRunDistance(
   currentLongRun: number
 ): number {
   const baseWeeks = Math.round(totalWeeks * 0.3);
-  const buildWeeks = Math.round(totalWeeks * 0.5);
-  const taperWeeks = Math.round(totalWeeks * 0.2);
+  const taperWeeks = Math.max(3, Math.min(4, Math.round(totalWeeks * 0.2)));
+  const buildPhaseWeeks = totalWeeks - baseWeeks - taperWeeks;
 
   if (phase === "base") {
-    // Build from current long run to 12-14 miles
-    const target = Math.min(14, currentLongRun + (14 - currentLongRun) * (week / baseWeeks));
+    // Step from current long run to 14 miles, plateau every 2 weeks
+    const steps = [0.6, 0.6, 0.75, 0.75, 0.85, 0.85, 1.0, 1.0];
+    const idx = Math.min(week - 1, steps.length - 1);
+    const target = Math.min(14, currentLongRun + (14 - currentLongRun) * steps[idx]);
     return Math.round(target * 2) / 2;
   } else if (phase === "marathon_build") {
-    // Build to 18-20 miles peak
-    const buildWeek = week - baseWeeks;
-    const target = 14 + 6 * (buildWeek / buildWeeks);
+    // Stepped peaks: 16 → 17 → 18 → 19 → 20 miles, each held 2-3 weeks, with recovery between
+    const fullSequence = [
+      { miles: 16, hold: 2 },
+      { miles: 14, hold: 1 },
+      { miles: 17, hold: 2 },
+      { miles: 14, hold: 1 },
+      { miles: 18, hold: 2 },
+      { miles: 14, hold: 1 },
+      { miles: 19, hold: 2 },
+      { miles: 14, hold: 1 },
+      { miles: 20, hold: 3 },
+    ];
 
-    // Recovery weeks: cut back
-    if (buildWeek % 3 === 0 && buildWeek > 0) {
-      return Math.round((target - 4) * 2) / 2;
+    // Flatten to weeks
+    let weeksList: number[] = [];
+    for (const { miles, hold } of fullSequence) {
+      for (let i = 0; i < hold; i++) weeksList.push(miles);
     }
-    return Math.min(20, Math.round(target * 2) / 2);
+
+    // Trim or pad to fit buildPhaseWeeks
+    if (weeksList.length > buildPhaseWeeks) {
+      weeksList = weeksList.slice(0, buildPhaseWeeks);
+      // Ensure last week hits 20
+      if (weeksList[weeksList.length - 1] < 20) {
+        weeksList[weeksList.length - 1] = 20;
+      }
+    } else {
+      while (weeksList.length < buildPhaseWeeks) {
+        weeksList.push(weeksList[weeksList.length - 1]);
+      }
+    }
+
+    const buildWeek = week - baseWeeks;
+    return weeksList[Math.min(buildWeek - 1, weeksList.length - 1)];
   } else {
     // Taper: 16 → 10 → 5 → race
-    const taperWeek = week - baseWeeks - buildWeeks;
+    const taperStart = totalWeeks - taperWeeks;
+    const taperWeek = week - taperStart;
     if (taperWeeks >= 3 && taperWeek === taperWeeks - 1) {
       return 5; // 2 weeks out
     }

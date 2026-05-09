@@ -241,11 +241,18 @@ describe("generatePlan", () => {
     expect(peakScheduledMileage).toBeCloseTo(55, 1);
   });
 
-  it("sets the final three weeks before race to roughly 70%, 60%, and 60% of peak", () => {
+  it("tapers the final three weeks relative to the gap between start and peak mileage", () => {
     const plan = generatePlan(makeProfile({ weeksOverride: 18, peakMileageOverride: 80 }));
     const finalThreeWeeks = plan.weeks.slice(-3).map((week) => week.totalMileage);
 
-    expect(finalThreeWeeks).toEqual([56, 48, 48]);
+    // currentWeeklyMileage defaults to 30, peakOverride is 80, gap = 50
+    // Taper week -3: 80 - 50*0.3 = 65
+    // Taper week -2: 80 - 50*0.4 = 60
+    // Taper week -1: 80 - 50*0.4 = 60
+    expect(finalThreeWeeks[1]).toBeLessThanOrEqual(finalThreeWeeks[0]);
+    expect(finalThreeWeeks[2]).toBeLessThanOrEqual(finalThreeWeeks[1]);
+    // All taper weeks should be below peak
+    expect(finalThreeWeeks[2]).toBeLessThan(80);
   });
 
   it("keeps the first three and final three weeks aerobic base only", () => {

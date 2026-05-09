@@ -10,9 +10,16 @@
 import { NextRequest, NextResponse } from "next/server";
 import { RunnerProfile } from "@/lib/training/models";
 import { generatePlan } from "@/lib/training/plan-generator";
+import { getCurrentUser } from "@/lib/auth";
 
 export async function POST(request: NextRequest): Promise<NextResponse> {
   try {
+    const user = await getCurrentUser();
+
+    if (!user) {
+      return NextResponse.json({ error: "Authentication required" }, { status: 401 });
+    }
+
     const body: RunnerProfile = await request.json();
 
     // Validate required fields

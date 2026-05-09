@@ -10,6 +10,7 @@
 
 import React from "react";
 import { useState, useEffect } from "react";
+import { useRouter } from "next/navigation";
 import { RunnerProfile, MarathonPlan } from "@/lib/training/models";
 import OnboardingForm from "@/app/components/onboarding/OnboardingForm";
 import PlanOverviewCard from "@/app/components/plan/PlanOverviewCard";
@@ -72,7 +73,9 @@ function recommendedStartMileage(plan: MarathonPlan, runsPerWeek: number): numbe
 }
 
 export default function PlanPage(): React.ReactNode {
+  const router = useRouter();
   const [plan, setPlan] = useState<MarathonPlan | null>(null);
+  const [isCheckingAuth, setIsCheckingAuth] = useState(true);
   const [isLoading, setIsLoading] = useState(false);
   const [expandedWeeks, setExpandedWeeks] = useState<Set<number>>(new Set());
   const [error, setError] = useState<string | null>(null);
@@ -86,13 +89,35 @@ export default function PlanPage(): React.ReactNode {
   const [activePlanTab, setActivePlanTab] = useState<PlanTab>("overview");
   const [dailyLogRefresh, setDailyLogRefresh] = useState(0);
 
-  // Load saved plans on mount
   useEffect(() => {
-    fetch("/api/plan/list")
-      .then((res) => res.json())
-      .then((data) => setSavedPlans(data))
-      .catch(() => setSavedPlans([]));
-  }, []);
+    let isMounted = true;
+
+    async function loadAuthenticatedPlans(): Promise<void> {
+      const authRes = await fetch("/api/auth/me");
+
+      if (!authRes.ok) {
+        router.replace("/login?redirect=/plan");
+        return;
+      }
+
+      const listRes = await fetch("/api/plan/list");
+
+      if (isMounted) {
+        setSavedPlans(listRes.ok ? await listRes.json() : []);
+        setIsCheckingAuth(false);
+      }
+    }
+
+    loadAuthenticatedPlans().catch(() => {
+      if (isMounted) {
+        router.replace("/login?redirect=/plan");
+      }
+    });
+
+    return () => {
+      isMounted = false;
+    };
+  }, [router]);
 
   const refreshSavedPlans = async (): Promise<void> => {
     const listRes = await fetch("/api/plan/list");
@@ -494,6 +519,17 @@ export default function PlanPage(): React.ReactNode {
       return next;
     });
   };
+
+  if (isCheckingAuth) {
+    return (
+      <div className="flex items-center justify-center py-32">
+        <div className="text-center">
+          <div className="mx-auto mb-4 h-12 w-12 animate-spin rounded-full border-4 border-enduro-200 border-t-enduro-600" />
+          <p className="text-lg font-medium text-gray-700">Checking your session...</p>
+        </div>
+      </div>
+    );
+  }
 
   if (!plan && !isLoading) {
     return (

@@ -9,9 +9,16 @@
 import { NextRequest, NextResponse } from "next/server";
 import { MarathonPlan } from "@/lib/training/models";
 import { generateICS } from "@/lib/training/calendar-export";
+import { getCurrentUser } from "@/lib/auth";
 
 export async function POST(request: NextRequest): Promise<NextResponse> {
   try {
+    const user = await getCurrentUser();
+
+    if (!user) {
+      return NextResponse.json({ error: "Authentication required" }, { status: 401 });
+    }
+
     const body: MarathonPlan = await request.json();
 
     const icsContent = generateICS(body);
