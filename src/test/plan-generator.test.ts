@@ -241,6 +241,25 @@ describe("generatePlan", () => {
     expect(peakScheduledMileage).toBeCloseTo(55, 1);
   });
 
+  it("starts at current mileage and scales to peak using the prescribed 24-week pattern", () => {
+    const plan = generatePlan(makeProfile({
+      currentWeeklyMileage: 30,
+      weeksOverride: 24,
+      peakMileageOverride: 50,
+    }));
+
+    expect(plan.weeks.map((week) => week.totalMileage)).toEqual([
+      30, 30, 30,
+      35, 35, 35,
+      40, 40, 35,
+      45, 45, 35,
+      50, 45, 40,
+      50, 45, 35,
+      50, 40, 35, 35,
+      30, 30,
+    ]);
+  });
+
   it("tapers the final three weeks relative to the gap between start and peak mileage", () => {
     const plan = generatePlan(makeProfile({ weeksOverride: 18, peakMileageOverride: 80 }));
     const finalThreeWeeks = plan.weeks.slice(-3).map((week) => week.totalMileage);

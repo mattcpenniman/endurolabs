@@ -53,6 +53,7 @@ const RACE_DISTANCES: Array<{ key: RaceDistanceKey; label: string; miles: number
   { key: "5k", label: "5K", miles: 3.1 },
 ];
 type PacingStrategy = NonNullable<RunnerProfile["racePacingStrategy"]>;
+const MILEAGE_BUILD_STEPS = 4;
 
 function clampMileage(value: number): number {
   if (!Number.isFinite(value)) return 5;
@@ -60,17 +61,12 @@ function clampMileage(value: number): number {
 }
 
 function recommendedStartMileage(plan: MarathonPlan, runsPerWeek: number): number {
-  if (plan.weeks.length === 0) {
-    return clampMileage(plan.runnerProfile.currentWeeklyMileage);
-  }
-  const peakWeek = plan.weeks.reduce(
-    (best, week) => (week.totalMileage > best.totalMileage ? week : best),
-    plan.weeks[0]!
-  );
-  const weeksToPeak = Math.max(0, (peakWeek?.weekNumber ?? plan.totalWeeks) - 1);
-  const threeWeekBuilds = Math.floor(weeksToPeak / 3);
-  const buildCapacity = Math.max(0, runsPerWeek * threeWeekBuilds);
+  const buildCapacity = Math.max(0, runsPerWeek * MILEAGE_BUILD_STEPS);
   return clampMileage(plan.peakWeeklyMileage - buildCapacity);
+}
+
+function mileageStepPerBuild(startMileage: number, peakMileage: number): number {
+  return Math.max(0, (peakMileage - startMileage) / MILEAGE_BUILD_STEPS);
 }
 
 function formatRaceGoalInput(minutes: number): string {
@@ -788,14 +784,9 @@ export default function PlanPage(): React.ReactNode {
     ),
   }));
   const recommendedStart = recommendedStartMileage(plan, currentRunCount);
-  const peakWeekNumber = plan.weeks.length > 0
-    ? plan.weeks.reduce(
-        (best, week) => (week.totalMileage > best.totalMileage ? week : best),
-        plan.weeks[0]!
-      ).weekNumber
-    : plan.totalWeeks;
-  const weeksToPeak = Math.max(0, peakWeekNumber - 1);
-  const threeWeekBuilds = Math.floor(weeksToPeak / 3);
+  const actualMileageStep = mileageStepPerBuild(plan.runnerProfile.currentWeeklyMileage, plan.peakWeeklyMileage);
+  const recommendedMileageStep = currentRunCount;
+  const mileageStepDelta = actualMileageStep - recommendedMileageStep;
   void dailyLogRefresh;
 
   return (
@@ -1155,10 +1146,18 @@ export default function PlanPage(): React.ReactNode {
                   <div>
                     <h3 className="text-sm font-semibold text-gray-900">Mileage targets</h3>
                     <p className="mt-1 text-sm text-gray-500">
-                      Start recommendation back-calculates from peak using +1 mile per run every three weeks.
+                      The plan starts at Start mileage and scales to Peak mileage. Each build step represents one three-week mileage increase.
                     </p>
                     <p className="mt-2 text-xs text-gray-500">
-                      Recommended start: {recommendedStart} mi/week from {plan.peakWeeklyMileage} peak mi/week, {currentRunCount} runs/week, and {threeWeekBuilds} three-week build {threeWeekBuilds === 1 ? "block" : "blocks"} before peak week {peakWeekNumber}.
+                      Required step: {actualMileageStep.toFixed(1)} mi every three weeks. Recommended step: {recommendedMileageStep.toFixed(1)} mi every three weeks ({currentRunCount} runs/week x 1 mi/run).{" "}
+                      {Math.abs(mileageStepDelta) < 0.1
+                        ? "This matches the recommendation."
+                        : mileageStepDelta > 0
+                          ? `${mileageStepDelta.toFixed(1)} mi above recommended.`
+                          : `${Math.abs(mileageStepDelta).toFixed(1)} mi below recommended.`}
+                    </p>
+                    <p className="mt-1 text-xs text-gray-500">
+                      Recommended start for this peak: {recommendedStart} mi/week.
                     </p>
                   </div>
                   <div className="grid gap-3 sm:grid-cols-3 lg:min-w-[34rem]">
