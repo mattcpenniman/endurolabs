@@ -58,6 +58,7 @@ interface AuthMeResponse {
 type PlanTab = "overview" | "schedule" | "race" | "scorecard" | "settings";
 type RaceDistanceKey = NonNullable<RunnerProfile["raceDistance"]>;
 type IntensityTargetKey = keyof NonNullable<RunnerProfile["intensityTargetPercents"]>;
+const OPEN_CURRENT_PLAN_EVENT = "endurlab-open-current-plan";
 
 const DAYS_OF_WEEK = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
 const RACE_DISTANCES: Array<{ key: RaceDistanceKey; label: string; miles: number }> = [
@@ -173,6 +174,7 @@ export default function PlanPage(): React.ReactNode {
   const [activePlanId, setActivePlanIdState] = useState<string | null>(null);
   const [pendingCurrentPlanFocus, setPendingCurrentPlanFocus] = useState(false);
   const [hasAttemptedCurrentPlanLoad, setHasAttemptedCurrentPlanLoad] = useState(false);
+  const [currentPlanRequestCount, setCurrentPlanRequestCount] = useState(0);
 
   const currentView = searchParams.get("view");
   const isListView = currentView === "list";
@@ -916,9 +918,16 @@ export default function PlanPage(): React.ReactNode {
     }
   };
 
-  const handleSetCurrentPlan = async (planId: string): Promise<void> => {
+  const handleSetCurrentPlan = async (
+    planId: string,
+    options: { openCurrentPlan?: boolean } = {}
+  ): Promise<void> => {
     setError(null);
-    await persistCurrentPlan(planId);
+    const didPersist = await persistCurrentPlan(planId);
+
+    if (didPersist && options.openCurrentPlan) {
+      await handleLoadPlan(planId, { focusCurrentSchedule: true });
+    }
   };
 
   useEffect(() => {
@@ -926,6 +935,16 @@ export default function PlanPage(): React.ReactNode {
       setHasAttemptedCurrentPlanLoad(false);
     }
   }, [isCurrentPlanView, activePlanId]);
+
+  useEffect(() => {
+    const handleOpenCurrentPlan = () => {
+      setHasAttemptedCurrentPlanLoad(false);
+      setCurrentPlanRequestCount((value) => value + 1);
+    };
+
+    window.addEventListener(OPEN_CURRENT_PLAN_EVENT, handleOpenCurrentPlan);
+    return () => window.removeEventListener(OPEN_CURRENT_PLAN_EVENT, handleOpenCurrentPlan);
+  }, []);
 
   useEffect(() => {
     if (!isCurrentPlanView || isCheckingAuth || isLoading || hasAttemptedCurrentPlanLoad) {
@@ -948,7 +967,7 @@ export default function PlanPage(): React.ReactNode {
     handleLoadPlan(activePlanId, { focusCurrentSchedule: true, updateRoute: false }).catch(() => {
       // Errors are handled inside handleLoadPlan.
     });
-  }, [activePlanId, hasAttemptedCurrentPlanLoad, isCheckingAuth, isCurrentPlanView, isLoading, plan]);
+  }, [activePlanId, currentPlanRequestCount, hasAttemptedCurrentPlanLoad, isCheckingAuth, isCurrentPlanView, isLoading, plan]);
 
   useEffect(() => {
     if (!pendingCurrentPlanFocus || !plan || activePlanTab !== "schedule") return;
@@ -1092,7 +1111,7 @@ export default function PlanPage(): React.ReactNode {
                           Load
                         </button>
                         <button
-                          onClick={() => handleSetCurrentPlan(row.id)}
+                          onClick={() => handleSetCurrentPlan(row.id, { openCurrentPlan: true })}
                           className={`rounded-lg px-4 py-2 text-sm font-medium ${
                             activePlanId === row.id
                               ? "border border-enduro-200 bg-enduro-50 text-enduro-700"

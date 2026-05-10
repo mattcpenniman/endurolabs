@@ -9,6 +9,7 @@ import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 
 const STORAGE_KEY = "endurlab-theme";
+const OPEN_CURRENT_PLAN_EVENT = "endurlab-open-current-plan";
 
 interface CurrentUser {
   email: string;
@@ -47,6 +48,11 @@ export default function Header() {
     router.refresh();
   };
 
+  const handleOpenCurrentPlan = (): void => {
+    router.push("/plan?view=current");
+    window.dispatchEvent(new CustomEvent(OPEN_CURRENT_PLAN_EVENT));
+  };
+
   return (
     <header className="sticky top-0 z-50 border-b border-[var(--color-border)] bg-[var(--color-bg)]/80 backdrop-blur-sm">
       <div className="container-narrow flex h-16 items-center justify-between">
@@ -57,9 +63,9 @@ export default function Header() {
           <Link href="/" className="hover:text-enduro-600">
             Home
           </Link>
-          <Link href="/plan?view=current" className="hover:text-enduro-600">
+          <button onClick={handleOpenCurrentPlan} className="hover:text-enduro-600">
             Current Plan
-          </Link>
+          </button>
           <a href="/plan?view=list" className="hover:text-enduro-600">
             My Plans
           </a>

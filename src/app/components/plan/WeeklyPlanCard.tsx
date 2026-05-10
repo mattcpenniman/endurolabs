@@ -107,6 +107,10 @@ function toDateKey(date: Date | string): string {
   return new Date(date).toISOString().slice(0, 10);
 }
 
+function formatMileageValue(distance: number): string {
+  return `${distance.toFixed(2).replace(/\.?0+$/, "")} mi`;
+}
+
 function segmentDistanceLabel(segment: Workout["segments"][number]): string {
   if (!segment.distance) {
     return segment.duration ? `${segment.duration} min` : "";
@@ -142,6 +146,9 @@ function renderWorkoutSegments(workout: Workout) {
     </div>
   );
 }
+
+const MOBILE_MILEAGE_WHOLE_OPTIONS = Array.from({ length: 41 }, (_, index) => index);
+const MOBILE_MILEAGE_FRACTION_OPTIONS = Array.from({ length: 20 }, (_, index) => index * 0.05);
 
 interface DayLogDraft {
   actualMileage: number;
@@ -342,12 +349,29 @@ function DailyLogControls({
   onSave: () => void;
   onRemove: () => void;
 }) {
+  const [isMobileMileagePickerOpen, setIsMobileMileagePickerOpen] = useState(false);
   const logButtonLabel = log ? (log.completed ? "Update" : "Mark done") : "Log";
+  const normalizedMileage = Number.isFinite(draft.actualMileage) ? Math.max(0, draft.actualMileage) : 0;
+  const wholeMiles = Math.min(40, Math.floor(normalizedMileage));
+  const fractionalMiles = Math.round((normalizedMileage - wholeMiles) * 20) / 20;
+
+  const updateMobileMileage = (whole: number, fraction: number): void => {
+    const actualMileage = Math.min(40, Math.round((whole + fraction) * 20) / 20);
+    onDraftChange(day.dayOfWeek, { actualMileage });
+  };
 
   return (
     <div className="grid gap-2 border-t border-gray-100 pt-3 sm:grid-cols-[8rem_8rem_1fr_auto] sm:items-end">
-      <label className="block">
+      <div className="block">
         <span className="text-xs font-medium text-gray-500">Actual mi</span>
+        <button
+          type="button"
+          onClick={() => setIsMobileMileagePickerOpen(true)}
+          className="mt-1 flex w-full items-center justify-between rounded border border-gray-300 bg-white px-3 py-2 text-sm text-gray-700 focus:border-enduro-500 focus:outline-none focus:ring-1 focus:ring-enduro-500/20 sm:hidden"
+        >
+          <span>{formatMileageValue(normalizedMileage)}</span>
+          <span className="text-xs text-gray-400">Set</span>
+        </button>
         <input
           type="number"
           min={0}
@@ -357,9 +381,67 @@ function DailyLogControls({
           onChange={(e) =>
             onDraftChange(day.dayOfWeek, { actualMileage: parseFloat(e.target.value) || 0 })
           }
-          className="mt-1 w-full rounded border border-gray-300 px-2 py-1 text-sm focus:border-enduro-500 focus:outline-none focus:ring-1 focus:ring-enduro-500/20"
+          className="mt-1 hidden w-full rounded border border-gray-300 px-2 py-1 text-sm focus:border-enduro-500 focus:outline-none focus:ring-1 focus:ring-enduro-500/20 sm:block"
         />
-      </label>
+        {isMobileMileagePickerOpen && (
+          <div className="fixed inset-0 z-50 flex items-end bg-slate-950/35 sm:hidden">
+            <button
+              type="button"
+              aria-label="Close actual mileage picker"
+              className="absolute inset-0"
+              onClick={() => setIsMobileMileagePickerOpen(false)}
+            />
+            <div className="relative w-full rounded-t-3xl bg-white p-4 shadow-2xl">
+              <div className="mx-auto mb-4 h-1.5 w-12 rounded-full bg-slate-200" />
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-sm font-semibold text-gray-900">Actual miles</p>
+                  <p className="text-xs text-gray-500">{formatMileageValue(normalizedMileage)}</p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setIsMobileMileagePickerOpen(false)}
+                  className="rounded-full border border-slate-200 px-3 py-1 text-xs font-medium text-slate-600"
+                >
+                  Done
+                </button>
+              </div>
+              <div className="mt-4 grid grid-cols-[1fr_1fr] gap-3">
+                <label className="block">
+                  <span className="text-[11px] font-semibold uppercase tracking-wide text-gray-400">Whole</span>
+                  <select
+                    value={wholeMiles}
+                    onChange={(e) => updateMobileMileage(parseInt(e.target.value, 10), fractionalMiles)}
+                    className="mt-2 h-40 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-3 text-base focus:border-enduro-500 focus:outline-none focus:ring-1 focus:ring-enduro-500/20"
+                    size={6}
+                  >
+                    {MOBILE_MILEAGE_WHOLE_OPTIONS.map((value) => (
+                      <option key={value} value={value}>
+                        {value}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label className="block">
+                  <span className="text-[11px] font-semibold uppercase tracking-wide text-gray-400">Fraction</span>
+                  <select
+                    value={fractionalMiles.toFixed(2)}
+                    onChange={(e) => updateMobileMileage(wholeMiles, parseFloat(e.target.value))}
+                    className="mt-2 h-40 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-3 text-base focus:border-enduro-500 focus:outline-none focus:ring-1 focus:ring-enduro-500/20"
+                    size={6}
+                  >
+                    {MOBILE_MILEAGE_FRACTION_OPTIONS.map((value) => (
+                      <option key={value.toFixed(2)} value={value.toFixed(2)}>
+                        {value === 0 ? ".00" : value.toFixed(2).replace(/^0/, "")}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
       <label className="block">
         <span className="text-xs font-medium text-gray-500">Feel</span>
         <select
