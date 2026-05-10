@@ -101,6 +101,10 @@ function formatPercent(value: number): string {
   return `${Math.round(value * 10) / 10}%`;
 }
 
+function toDateKey(date: Date | string): string {
+  return new Date(date).toISOString().slice(0, 10);
+}
+
 function segmentDistanceLabel(segment: Workout["segments"][number]): string {
   if (!segment.distance) {
     return segment.duration ? `${segment.duration} min` : "";
@@ -154,7 +158,8 @@ function renderDay(
   onDraftChange: (dayOfWeek: string, patch: Partial<DayLogDraft>) => void,
   onDraftReset: (dayOfWeek: string) => void,
   onSaved: () => void,
-  isToday: boolean
+  isToday: boolean,
+  isTomorrow: boolean
 ) {
   const currentWorkout = day.workout;
   const plannedMileage =
@@ -185,6 +190,16 @@ function renderDay(
     return (
       <div key={day.dayOfWeek} className="grid gap-3 py-3 lg:grid-cols-[6rem_1fr]">
         <div>
+          {isToday && (
+            <span className="mb-1 inline-block rounded-full bg-green-600 px-2 py-0.5 text-[10px] font-bold text-white">
+              Today
+            </span>
+          )}
+          {isTomorrow && (
+            <span className="mb-1 inline-block rounded-full bg-sky-600 px-2 py-0.5 text-[10px] font-bold text-white">
+              Tomorrow
+            </span>
+          )}
           <p className="text-xs font-medium text-gray-400">{day.dayOfWeek.slice(0, 3)}</p>
           <p className="text-xs text-gray-400">{formatShortDate(day.date)}</p>
         </div>
@@ -212,6 +227,11 @@ function renderDay(
         {isToday && (
           <span className="mb-1 inline-block rounded-full bg-green-600 px-2 py-0.5 text-[10px] font-bold text-white">
             Today
+          </span>
+        )}
+        {isTomorrow && (
+          <span className="mb-1 inline-block rounded-full bg-sky-600 px-2 py-0.5 text-[10px] font-bold text-white">
+            Tomorrow
           </span>
         )}
         <p className="text-xs font-medium text-gray-500">{day.dayOfWeek.slice(0, 3)}</p>
@@ -598,27 +618,45 @@ export default function WeeklyPlanCard({
       ? "bg-amber-50 text-amber-700"
       : "bg-blue-50 text-blue-700";
 
-  // Highlight the current week and today's day
+  // Highlight the current week, next week, and upcoming day markers.
   const today = new Date();
-  const todayStr = today.toISOString().slice(0, 10);
+  const todayStr = toDateKey(today);
+  const tomorrow = new Date(today);
+  tomorrow.setDate(tomorrow.getDate() + 1);
+  const tomorrowStr = toDateKey(tomorrow);
+  const nextWeekBoundary = new Date(today);
+  nextWeekBoundary.setDate(nextWeekBoundary.getDate() + 7);
+  const nextWeekBoundaryStr = toDateKey(nextWeekBoundary);
   const weekEnd = orderedDays.length > 0
     ? orderedDays[orderedDays.length - 1]
-      ? new Date(orderedDays[orderedDays.length - 1].date).toISOString().slice(0, 10)
+      ? toDateKey(orderedDays[orderedDays.length - 1].date)
       : ""
     : "";
-  const weekStart = week.startDate ? new Date(week.startDate).toISOString().slice(0, 10) : "";
+  const weekStart = week.startDate ? toDateKey(week.startDate) : "";
   const isCurrentWeek = todayStr >= weekStart && todayStr <= weekEnd;
+  const isNextWeek =
+    !isCurrentWeek &&
+    weekStart > todayStr &&
+    weekStart <= nextWeekBoundaryStr;
 
   const isToday = (dayOfWeek: string): boolean => {
     const day = orderedDays.find((d) => d.dayOfWeek === dayOfWeek);
     if (!day) return false;
-    return day.date ? new Date(day.date).toISOString().slice(0, 10) === todayStr : false;
+    return day.date ? toDateKey(day.date) === todayStr : false;
+  };
+
+  const isTomorrow = (dayOfWeek: string): boolean => {
+    const day = orderedDays.find((d) => d.dayOfWeek === dayOfWeek);
+    if (!day) return false;
+    return day.date ? toDateKey(day.date) === tomorrowStr : false;
   };
 
   return (
     <div className={`overflow-hidden rounded-xl border shadow-sm ${
       isCurrentWeek
         ? "border-green-300 bg-green-50/30"
+        : isNextWeek
+        ? "border-sky-300 bg-sky-50/30"
         : "border-gray-200 bg-white"
     }`}>
       {/* Header */}
@@ -636,6 +674,11 @@ export default function WeeklyPlanCard({
             {isCurrentWeek && (
               <span className="rounded-full bg-green-600 px-2 py-1 text-xs font-bold text-white">
                 Current Week
+              </span>
+            )}
+            {isNextWeek && (
+              <span className="rounded-full bg-sky-600 px-2 py-1 text-xs font-bold text-white">
+                Next Week
               </span>
             )}
             <span className="text-sm font-medium text-gray-800">
@@ -754,7 +797,8 @@ export default function WeeklyPlanCard({
                 updateDraft,
                 resetDraft,
                 onDailyLogSaved,
-                isToday(day.dayOfWeek)
+                isToday(day.dayOfWeek),
+                isTomorrow(day.dayOfWeek)
               );
             })}
           </div>
