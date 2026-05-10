@@ -735,16 +735,24 @@ export default function WeeklyPlanCard({
           </div>
 
           {activeIntensityRows.length > 0 && (
-            <div className="my-3 grid gap-2 rounded-lg border border-gray-100 bg-gray-50 p-3 md:grid-cols-3">
+            <div className="my-3 grid grid-cols-2 gap-2 rounded-lg border border-gray-100 bg-gray-50 p-3 md:grid-cols-3">
               {activeIntensityRows.map((row) => {
                 const actualPercent = week.totalMileage > 0 ? (row.actualMiles / week.totalMileage) * 100 : 0;
+                const targetMileage = (week.totalMileage * row.targetPercent) / 100;
 
                 return (
                   <label key={row.key} className="block rounded-lg bg-white p-3 shadow-sm">
-                    <span className="text-xs font-semibold text-gray-700">{row.label}</span>
-                    <span className="mt-1 block text-xs text-gray-500">
-                      Actual {formatPercent(actualPercent)} ({formatMiles(row.actualMiles)} mi) · Target {formatPercent(row.targetPercent)} ({formatMiles((week.totalMileage * row.targetPercent) / 100)} mi)
-                    </span>
+                    <span className="text-xs font-semibold leading-tight text-gray-700">{row.label}</span>
+                    <div className="mt-2 space-y-1 text-[11px] leading-tight text-gray-500">
+                      <div>
+                        <span className="block font-semibold uppercase tracking-wide text-gray-400">Actual</span>
+                        <span className="block">{formatPercent(actualPercent)} ({formatMiles(row.actualMiles)} mi)</span>
+                      </div>
+                      <div>
+                        <span className="block font-semibold uppercase tracking-wide text-gray-400">Target</span>
+                        <span className="block">{formatPercent(row.targetPercent)} ({formatMiles(targetMileage)} mi)</span>
+                      </div>
+                    </div>
                     <input
                       key={`${week.weekNumber}-${row.key}-${actualPercent}`}
                       type="number"
