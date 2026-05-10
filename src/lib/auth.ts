@@ -22,6 +22,7 @@ export interface AuthenticatedUser {
   id: string;
   email: string;
   name: string | null;
+  currentPlanId: string | null;
 }
 
 export function normalizeEmail(email: string): string {
@@ -106,6 +107,7 @@ export async function getCurrentUser(): Promise<AuthenticatedUser | null> {
       id: users.id,
       email: users.email,
       name: users.name,
+      currentPlanId: users.currentPlanId,
     })
     .from(sessions)
     .innerJoin(users, eq(sessions.userId, users.id))

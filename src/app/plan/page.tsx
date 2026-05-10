@@ -25,7 +25,6 @@ import { generateRaceDayPlan } from "@/lib/training/race-day-plan";
 import { calculatePaceZones, calculatePowerZones } from "@/lib/training/zone-calculator";
 import { analyzeProgress, dailyLogsToWeeklyLogs, loadDailyLogs } from "@/lib/training/progress-tracker";
 import { adjustWeeklyIntensityPercent } from "@/lib/training/intensity-adjustments";
-import { ACTIVE_PLAN_EVENT, clearActivePlanId, getActivePlanId, setActivePlanId } from "@/lib/current-plan";
 
 // Shape of a saved plan row from the database
 interface SavedPlanRow {
@@ -45,6 +44,15 @@ interface SavePlanResponse {
   success: boolean;
   id: string;
   planData: MarathonPlan;
+}
+
+interface AuthMeResponse {
+  user: {
+    id: string;
+    email: string;
+    name: string | null;
+    currentPlanId: string | null;
+  } | null;
 }
 
 type PlanTab = "overview" | "schedule" | "race" | "scorecard" | "settings";
@@ -167,22 +175,6 @@ export default function PlanPage(): React.ReactNode {
   const isCurrentPlanView = currentView === "current";
 
   useEffect(() => {
-    setActivePlanIdState(getActivePlanId());
-
-    const handleActivePlanChange = () => {
-      setActivePlanIdState(getActivePlanId());
-    };
-
-    window.addEventListener(ACTIVE_PLAN_EVENT, handleActivePlanChange as EventListener);
-    window.addEventListener("storage", handleActivePlanChange);
-
-    return () => {
-      window.removeEventListener(ACTIVE_PLAN_EVENT, handleActivePlanChange as EventListener);
-      window.removeEventListener("storage", handleActivePlanChange);
-    };
-  }, []);
-
-  useEffect(() => {
     let isMounted = true;
 
     async function loadAuthenticatedPlans(): Promise<void> {
@@ -193,9 +185,12 @@ export default function PlanPage(): React.ReactNode {
         return;
       }
 
+      const authData = (await authRes.json()) as AuthMeResponse;
+
       const listRes = await fetch("/api/plan/list");
 
       if (isMounted) {
+        setActivePlanIdState(authData.user?.currentPlanId ?? null);
         setSavedPlans(listRes.ok ? await listRes.json() : []);
         setIsCheckingAuth(false);
       }
@@ -216,6 +211,26 @@ export default function PlanPage(): React.ReactNode {
     const listRes = await fetch("/api/plan/list");
     if (listRes.ok) {
       setSavedPlans(await listRes.json());
+    }
+  };
+
+  const persistCurrentPlan = async (planId: string | null): Promise<boolean> => {
+    try {
+      const response = await fetch("/api/plan/current", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ currentPlanId: planId }),
+      });
+
+      if (!response.ok) {
+        throw new Error("Failed to update current plan");
+      }
+
+      setActivePlanIdState(planId);
+      return true;
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to update current plan");
+      return false;
     }
   };
 
@@ -308,8 +323,7 @@ export default function PlanPage(): React.ReactNode {
       const savedPlan = await persistPlan(generatedPlan, initialPlanName);
       const nextPlan = savedPlan ?? generatedPlan;
       setPlan(nextPlan);
-      setActivePlanId(nextPlan.id);
-      setActivePlanIdState(nextPlan.id);
+      await persistCurrentPlan(nextPlan.id);
       setShareToken(null);
       setShareLinkUrl(null);
       setRunsPerWeek(
@@ -356,8 +370,7 @@ export default function PlanPage(): React.ReactNode {
       const savedPlan = await persistPlan(plan, planName, { saveAsNew: true });
       if (savedPlan) {
         setPlan(savedPlan);
-        setActivePlanId(savedPlan.id);
-        setActivePlanIdState(savedPlan.id);
+        await persistCurrentPlan(savedPlan.id);
         router.replace("/plan");
       }
     } catch {
@@ -378,8 +391,6 @@ export default function PlanPage(): React.ReactNode {
       if (!res.ok) throw new Error("Failed to load plan");
       const saved = await res.json();
       setPlan(saved.planData);
-      setActivePlanId(saved.id);
-      setActivePlanIdState(saved.id);
       setPlanName(saved.raceName ?? saved.runnerProfile.raceName ?? "");
       setShareToken(saved.shareToken ?? null);
       setShareLinkUrl(saved.shareUrl ?? null);
@@ -433,8 +444,6 @@ export default function PlanPage(): React.ReactNode {
       const savedPlan = await persistPlan(regenerated, planName);
       const nextPlan = savedPlan ?? regenerated;
       setPlan(nextPlan);
-      setActivePlanId(nextPlan.id);
-      setActivePlanIdState(nextPlan.id);
     } catch {
       // Silently fail
     } finally {
@@ -878,8 +887,7 @@ export default function PlanPage(): React.ReactNode {
         setPlan(null);
       }
       if (archived && activePlanId === planId) {
-        clearActivePlanId();
-        setActivePlanIdState(null);
+        await persistCurrentPlan(null);
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to update plan");
@@ -888,10 +896,9 @@ export default function PlanPage(): React.ReactNode {
     }
   };
 
-  const handleSetCurrentPlan = (planId: string): void => {
+  const handleSetCurrentPlan = async (planId: string): Promise<void> => {
     setError(null);
-    setActivePlanId(planId);
-    setActivePlanIdState(planId);
+    await persistCurrentPlan(planId);
   };
 
   useEffect(() => {
@@ -949,8 +956,9 @@ export default function PlanPage(): React.ReactNode {
     );
 
     if (!activePlanStillAvailable) {
-      clearActivePlanId();
-      setActivePlanIdState(null);
+      persistCurrentPlan(null).catch(() => {
+        // Errors are handled inside persistCurrentPlan.
+      });
     }
   }, [activePlanId, savedPlans]);
 

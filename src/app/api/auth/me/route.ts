@@ -1,7 +1,8 @@
 // ============================================================
 // EnduroLab — Current User API Route
 // ============================================================
-// GET /api/auth/me — return the authenticated session user.
+// GET /api/auth/me — return the authenticated session user,
+// including the persisted current plan selection.
 // ============================================================
 
 import { NextResponse } from "next/server";
