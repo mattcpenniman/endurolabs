@@ -22,6 +22,7 @@ interface WeeklyPlanCardProps {
   onDailyLogSaved: () => void;
   intensityTargetPercents: NonNullable<RunnerProfile["intensityTargetPercents"]>;
   onIntensityTargetChange: (key: keyof NonNullable<RunnerProfile["intensityTargetPercents"]>, value: number, weekNumber?: number) => void;
+  highlightCurrentWeek?: boolean;
 }
 
 type IntensityTargetKey = keyof NonNullable<RunnerProfile["intensityTargetPercents"]>;
@@ -159,7 +160,8 @@ function renderDay(
   onDraftReset: (dayOfWeek: string) => void,
   onSaved: () => void,
   isToday: boolean,
-  isTomorrow: boolean
+  isTomorrow: boolean,
+  highlightCurrentWeek: boolean
 ) {
   const currentWorkout = day.workout;
   const plannedMileage =
@@ -188,7 +190,12 @@ function renderDay(
 
   if (day.isRestDay || !currentWorkout) {
     return (
-      <div key={day.dayOfWeek} className="grid gap-3 py-3 lg:grid-cols-[6rem_1fr]">
+      <div
+        key={day.dayOfWeek}
+        data-current-day={isToday ? "true" : undefined}
+        data-current-week={highlightCurrentWeek ? "true" : undefined}
+        className="grid gap-3 py-3 lg:grid-cols-[6rem_1fr]"
+      >
         <div>
           {isToday && (
             <span className="mb-1 inline-block rounded-full bg-green-600 px-2 py-0.5 text-[10px] font-bold text-white">
@@ -222,7 +229,12 @@ function renderDay(
   const hasSecondary = !!day.secondaryWorkout;
 
   return (
-    <div key={day.dayOfWeek} className="grid gap-3 py-3 lg:grid-cols-[6rem_1fr]">
+    <div
+      key={day.dayOfWeek}
+      data-current-day={isToday ? "true" : undefined}
+      data-current-week={highlightCurrentWeek ? "true" : undefined}
+      className="grid gap-3 py-3 lg:grid-cols-[6rem_1fr]"
+    >
       <div>
         {isToday && (
           <span className="mb-1 inline-block rounded-full bg-green-600 px-2 py-0.5 text-[10px] font-bold text-white">
@@ -402,6 +414,7 @@ export default function WeeklyPlanCard({
   onDailyLogSaved,
   intensityTargetPercents,
   onIntensityTargetChange,
+  highlightCurrentWeek = false,
 }: WeeklyPlanCardProps) {
   // Track swapped workouts by day-of-week key
   const [swappedWorkouts, setSwappedWorkouts] = useState<Record<string, Workout | null>>({});
@@ -652,13 +665,16 @@ export default function WeeklyPlanCard({
   };
 
   return (
-    <div className={`overflow-hidden rounded-xl border shadow-sm ${
+    <div
+      data-current-week-card={highlightCurrentWeek ? "true" : undefined}
+      className={`overflow-hidden rounded-xl border shadow-sm ${
       isCurrentWeek
         ? "border-green-300 bg-green-50/30"
         : isNextWeek
         ? "border-sky-300 bg-sky-50/30"
         : "border-gray-200 bg-white"
-    }`}>
+    }`}
+    >
       {/* Header */}
       <button
         onClick={onToggle}
@@ -806,7 +822,8 @@ export default function WeeklyPlanCard({
                 resetDraft,
                 onDailyLogSaved,
                 isToday(day.dayOfWeek),
-                isTomorrow(day.dayOfWeek)
+                isTomorrow(day.dayOfWeek),
+                highlightCurrentWeek
               );
             })}
           </div>

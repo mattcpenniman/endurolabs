@@ -10,7 +10,7 @@
 
 import React from "react";
 import { useState, useEffect } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { RunnerProfile, MarathonPlan } from "@/lib/training/models";
 import OnboardingForm from "@/app/components/onboarding/OnboardingForm";
 import PlanOverviewCard from "@/app/components/plan/PlanOverviewCard";
@@ -25,6 +25,7 @@ import { generateRaceDayPlan } from "@/lib/training/race-day-plan";
 import { calculatePaceZones, calculatePowerZones } from "@/lib/training/zone-calculator";
 import { analyzeProgress, dailyLogsToWeeklyLogs, loadDailyLogs } from "@/lib/training/progress-tracker";
 import { adjustWeeklyIntensityPercent } from "@/lib/training/intensity-adjustments";
+import { ACTIVE_PLAN_EVENT, clearActivePlanId, getActivePlanId, setActivePlanId } from "@/lib/current-plan";
 
 // Shape of a saved plan row from the database
 interface SavedPlanRow {
@@ -139,6 +140,7 @@ function parseRaceGoalInput(value: string): number | null {
 
 export default function PlanPage(): React.ReactNode {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const [plan, setPlan] = useState<MarathonPlan | null>(null);
   const [isCheckingAuth, setIsCheckingAuth] = useState(true);
   const [isLoading, setIsLoading] = useState(false);
@@ -156,6 +158,29 @@ export default function PlanPage(): React.ReactNode {
   const [shareToken, setShareToken] = useState<string | null>(null);
   const [shareLinkUrl, setShareLinkUrl] = useState<string | null>(null);
   const [shareStatus, setShareStatus] = useState<string | null>(null);
+  const [activePlanId, setActivePlanIdState] = useState<string | null>(null);
+  const [pendingCurrentPlanFocus, setPendingCurrentPlanFocus] = useState(false);
+  const [hasAttemptedCurrentPlanLoad, setHasAttemptedCurrentPlanLoad] = useState(false);
+
+  const currentView = searchParams.get("view");
+  const isListView = currentView === "list";
+  const isCurrentPlanView = currentView === "current";
+
+  useEffect(() => {
+    setActivePlanIdState(getActivePlanId());
+
+    const handleActivePlanChange = () => {
+      setActivePlanIdState(getActivePlanId());
+    };
+
+    window.addEventListener(ACTIVE_PLAN_EVENT, handleActivePlanChange as EventListener);
+    window.addEventListener("storage", handleActivePlanChange);
+
+    return () => {
+      window.removeEventListener(ACTIVE_PLAN_EVENT, handleActivePlanChange as EventListener);
+      window.removeEventListener("storage", handleActivePlanChange);
+    };
+  }, []);
 
   useEffect(() => {
     let isMounted = true;
@@ -192,6 +217,31 @@ export default function PlanPage(): React.ReactNode {
     if (listRes.ok) {
       setSavedPlans(await listRes.json());
     }
+  };
+
+  const getCurrentWeekNumber = (targetPlan: MarathonPlan): number | null => {
+    const todayStr = new Date().toISOString().slice(0, 10);
+    const currentWeek = targetPlan.weeks.find((week) => {
+      const weekStart = new Date(week.startDate).toISOString().slice(0, 10);
+      const lastDay = week.days[week.days.length - 1];
+      const weekEnd = lastDay
+        ? new Date(lastDay.date).toISOString().slice(0, 10)
+        : weekStart;
+
+      return todayStr >= weekStart && todayStr <= weekEnd;
+    });
+
+    return currentWeek?.weekNumber ?? null;
+  };
+
+  const focusCurrentSchedule = (targetPlan: MarathonPlan): void => {
+    const currentWeekNumber = getCurrentWeekNumber(targetPlan);
+    if (currentWeekNumber !== null) {
+      setExpandedWeeks(new Set([currentWeekNumber]));
+    }
+
+    setActivePlanTab("schedule");
+    setPendingCurrentPlanFocus(true);
   };
 
   const persistPlan = async (
@@ -256,8 +306,10 @@ export default function PlanPage(): React.ReactNode {
 
       // Auto-save to database
       const savedPlan = await persistPlan(generatedPlan, initialPlanName);
-
-      setPlan(savedPlan ?? generatedPlan);
+      const nextPlan = savedPlan ?? generatedPlan;
+      setPlan(nextPlan);
+      setActivePlanId(nextPlan.id);
+      setActivePlanIdState(nextPlan.id);
       setShareToken(null);
       setShareLinkUrl(null);
       setRunsPerWeek(
@@ -270,8 +322,11 @@ export default function PlanPage(): React.ReactNode {
           ? Math.max(14, Math.min(28, profile.weeksOverride))
           : generatedPlan.totalWeeks
       );
-      setPacingStrategy(savedPlan?.runnerProfile.racePacingStrategy ?? generatedPlan.runnerProfile.racePacingStrategy ?? "even");
-      setExpectedTempF(savedPlan?.runnerProfile.expectedRaceTempF ?? generatedPlan.runnerProfile.expectedRaceTempF ?? 50);
+      setPacingStrategy(nextPlan.runnerProfile.racePacingStrategy ?? "even");
+      setExpectedTempF(nextPlan.runnerProfile.expectedRaceTempF ?? 50);
+      setExpandedWeeks(new Set());
+      setActivePlanTab("overview");
+      router.replace("/plan");
     } catch (err) {
       setError(err instanceof Error ? err.message : "An unexpected error occurred");
     } finally {
@@ -301,6 +356,9 @@ export default function PlanPage(): React.ReactNode {
       const savedPlan = await persistPlan(plan, planName, { saveAsNew: true });
       if (savedPlan) {
         setPlan(savedPlan);
+        setActivePlanId(savedPlan.id);
+        setActivePlanIdState(savedPlan.id);
+        router.replace("/plan");
       }
     } catch {
       // Silently fail — plan is still usable in session
@@ -309,13 +367,19 @@ export default function PlanPage(): React.ReactNode {
     }
   };
 
-  const handleLoadPlan = async (planId: string) => {
+  const handleLoadPlan = async (
+    planId: string,
+    options: { focusCurrentSchedule?: boolean; updateRoute?: boolean } = {}
+  ) => {
     setIsLoading(true);
+    setError(null);
     try {
       const res = await fetch(`/api/plan/${planId}`);
       if (!res.ok) throw new Error("Failed to load plan");
       const saved = await res.json();
       setPlan(saved.planData);
+      setActivePlanId(saved.id);
+      setActivePlanIdState(saved.id);
       setPlanName(saved.raceName ?? saved.runnerProfile.raceName ?? "");
       setShareToken(saved.shareToken ?? null);
       setShareLinkUrl(saved.shareUrl ?? null);
@@ -331,6 +395,15 @@ export default function PlanPage(): React.ReactNode {
       );
       setPacingStrategy(saved.runnerProfile.racePacingStrategy ?? "even");
       setExpectedTempF(saved.runnerProfile.expectedRaceTempF ?? 50);
+      if (options.focusCurrentSchedule) {
+        focusCurrentSchedule(saved.planData);
+      } else {
+        setExpandedWeeks(new Set());
+        setActivePlanTab("overview");
+      }
+      if (options.updateRoute !== false) {
+        router.replace(options.focusCurrentSchedule ? "/plan?view=current" : "/plan");
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to load plan");
     } finally {
@@ -358,7 +431,10 @@ export default function PlanPage(): React.ReactNode {
       setRunsPerWeek(newRuns);
       // Auto-save
       const savedPlan = await persistPlan(regenerated, planName);
-      setPlan(savedPlan ?? regenerated);
+      const nextPlan = savedPlan ?? regenerated;
+      setPlan(nextPlan);
+      setActivePlanId(nextPlan.id);
+      setActivePlanIdState(nextPlan.id);
     } catch {
       // Silently fail
     } finally {
@@ -801,12 +877,82 @@ export default function PlanPage(): React.ReactNode {
       if (archived && plan?.id === planId) {
         setPlan(null);
       }
+      if (archived && activePlanId === planId) {
+        clearActivePlanId();
+        setActivePlanIdState(null);
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to update plan");
     } finally {
       setIsSaving(false);
     }
   };
+
+  const handleSetCurrentPlan = (planId: string): void => {
+    setError(null);
+    setActivePlanId(planId);
+    setActivePlanIdState(planId);
+  };
+
+  useEffect(() => {
+    if (isCurrentPlanView) {
+      setHasAttemptedCurrentPlanLoad(false);
+    }
+  }, [isCurrentPlanView, activePlanId]);
+
+  useEffect(() => {
+    if (!isCurrentPlanView || isCheckingAuth || isLoading || hasAttemptedCurrentPlanLoad) {
+      return;
+    }
+
+    if (!activePlanId) {
+      setHasAttemptedCurrentPlanLoad(true);
+      setError("No current plan selected yet.");
+      return;
+    }
+
+    if (plan?.id === activePlanId) {
+      focusCurrentSchedule(plan);
+      setHasAttemptedCurrentPlanLoad(true);
+      return;
+    }
+
+    setHasAttemptedCurrentPlanLoad(true);
+    handleLoadPlan(activePlanId, { focusCurrentSchedule: true, updateRoute: false }).catch(() => {
+      // Errors are handled inside handleLoadPlan.
+    });
+  }, [activePlanId, hasAttemptedCurrentPlanLoad, isCheckingAuth, isCurrentPlanView, isLoading, plan]);
+
+  useEffect(() => {
+    if (!pendingCurrentPlanFocus || !plan || activePlanTab !== "schedule") return;
+
+    const timeoutId = window.setTimeout(() => {
+      const dayTarget = document.querySelector("[data-current-day='true']");
+      const weekTarget = document.querySelector("[data-current-week-card='true']");
+      const target = dayTarget ?? weekTarget;
+
+      if (target instanceof HTMLElement) {
+        target.scrollIntoView({ behavior: "smooth", block: "start" });
+      }
+
+      setPendingCurrentPlanFocus(false);
+    }, 120);
+
+    return () => window.clearTimeout(timeoutId);
+  }, [activePlanTab, pendingCurrentPlanFocus, plan]);
+
+  useEffect(() => {
+    if (!activePlanId || savedPlans.length === 0) return;
+
+    const activePlanStillAvailable = savedPlans.some(
+      (savedPlan) => !savedPlan.archivedAt && savedPlan.id === activePlanId
+    );
+
+    if (!activePlanStillAvailable) {
+      clearActivePlanId();
+      setActivePlanIdState(null);
+    }
+  }, [activePlanId, savedPlans]);
 
   const handleUpdateShareAccess = async (enabled: boolean) => {
     if (!plan) return;
@@ -867,14 +1013,16 @@ export default function PlanPage(): React.ReactNode {
   const activeSavedPlans = savedPlans.filter((savedPlan) => !savedPlan.archivedAt);
   const archivedSavedPlans = savedPlans.filter((savedPlan) => savedPlan.archivedAt);
 
-  if (!plan && !isLoading) {
+  if ((!plan || isListView) && !isLoading) {
     return (
       <div className="section-padding">
         <div className="container-narrow">
           <div className="mb-8 text-center">
-            <h1 className="text-3xl font-bold text-gray-900">Generate Your Training Plan</h1>
+            <h1 className="text-3xl font-bold text-gray-900">{isListView ? "My Plans" : "Generate Your Training Plan"}</h1>
             <p className="mt-2 text-gray-600">
-              Fill in your profile below and we&apos;ll create a personalized marathon plan.
+              {isListView
+                ? "Pick a saved plan, make one current, or create a new training plan."
+                : "Fill in your profile below and we&apos;ll create a personalized marathon plan."}
             </p>
           </div>
 
@@ -896,8 +1044,13 @@ export default function PlanPage(): React.ReactNode {
                       className="flex flex-col gap-3 rounded-lg border border-gray-200 bg-white p-4 hover:border-enduro-300 sm:flex-row sm:items-center sm:justify-between"
                     >
                       <div>
-                        <p className="font-medium text-gray-900">
+                        <p className="flex flex-wrap items-center gap-2 font-medium text-gray-900">
                           {row.raceName || `Goal ${goalStr}`}
+                          {activePlanId === row.id && (
+                            <span className="rounded-full bg-enduro-100 px-2 py-0.5 text-xs font-semibold text-enduro-700">
+                              Current Plan
+                            </span>
+                          )}
                         </p>
                         <p className="text-sm text-gray-500">
                           {row.planData.totalWeeks} weeks · Peak {row.planData.peakWeeklyMileage} mi/week · Created {created}
@@ -909,6 +1062,16 @@ export default function PlanPage(): React.ReactNode {
                           className="rounded-lg bg-enduro-600 px-4 py-2 text-sm font-medium text-white hover:bg-enduro-700"
                         >
                           Load
+                        </button>
+                        <button
+                          onClick={() => handleSetCurrentPlan(row.id)}
+                          className={`rounded-lg px-4 py-2 text-sm font-medium ${
+                            activePlanId === row.id
+                              ? "border border-enduro-200 bg-enduro-50 text-enduro-700"
+                              : "border border-gray-300 bg-white text-gray-700 hover:bg-gray-50"
+                          }`}
+                        >
+                          {activePlanId === row.id ? "Current" : "Make Current"}
                         </button>
                         <button
                           onClick={() => handleCopyPlan(row.id)}
@@ -980,7 +1143,7 @@ export default function PlanPage(): React.ReactNode {
             </div>
           )}
 
-          <OnboardingForm onSubmit={handleGenerate} isLoading={isLoading} />
+          {!isListView && <OnboardingForm onSubmit={handleGenerate} isLoading={isLoading} />}
           {error && (
             <div className="mt-4 rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-700">
               {error}
@@ -1061,6 +1224,7 @@ export default function PlanPage(): React.ReactNode {
   const recommendedMileageStep = currentRunCount;
   const mileageStepDelta = actualMileageStep - recommendedMileageStep;
   const currentIntensityTargetPercents = getCurrentIntensityTargetPercents(plan.runnerProfile);
+  const currentWeekNumber = getCurrentWeekNumber(plan);
   const calculatedMaxLongRun = plan.weeks.length > 0
     ? Math.max(...plan.weeks.map((week) => week.longRunDistance))
     : 0;
@@ -1292,6 +1456,7 @@ export default function PlanPage(): React.ReactNode {
                         onDailyLogSaved={() => setDailyLogRefresh((value) => value + 1)}
                         intensityTargetPercents={currentIntensityTargetPercents}
                         onIntensityTargetChange={handleAdjustIntensityTarget}
+                        highlightCurrentWeek={week.weekNumber === currentWeekNumber}
                       />
                     ))}
                   </section>
