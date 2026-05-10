@@ -11,7 +11,7 @@
 import React from "react";
 import { useState, useEffect } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { RunnerProfile, MarathonPlan } from "@/lib/training/models";
+import { RunnerProfile, MarathonPlan, DailyLog } from "@/lib/training/models";
 import OnboardingForm from "@/app/components/onboarding/OnboardingForm";
 import PlanOverviewCard from "@/app/components/plan/PlanOverviewCard";
 import PaceZonesCard from "@/app/components/plan/PaceZonesCard";
@@ -146,6 +146,10 @@ function parseRaceGoalInput(value: string): number | null {
   return first * 60 + second + third / 60;
 }
 
+function toDateKey(date: string): string {
+  return new Date(date).toISOString().slice(0, 10);
+}
+
 export default function PlanPage(): React.ReactNode {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -234,25 +238,41 @@ export default function PlanPage(): React.ReactNode {
     }
   };
 
-  const getCurrentWeekNumber = (targetPlan: MarathonPlan): number | null => {
-    const todayStr = new Date().toISOString().slice(0, 10);
-    const currentWeek = targetPlan.weeks.find((week) => {
-      const weekStart = new Date(week.startDate).toISOString().slice(0, 10);
+  const getWeekNumberForDate = (targetPlan: MarathonPlan, dateKey: string): number | null => {
+    const matchingWeek = targetPlan.weeks.find((week) => {
+      const weekStart = toDateKey(week.startDate);
       const lastDay = week.days[week.days.length - 1];
-      const weekEnd = lastDay
-        ? new Date(lastDay.date).toISOString().slice(0, 10)
-        : weekStart;
+      const weekEnd = lastDay ? toDateKey(lastDay.date) : weekStart;
 
-      return todayStr >= weekStart && todayStr <= weekEnd;
+      return dateKey >= weekStart && dateKey <= weekEnd;
     });
 
-    return currentWeek?.weekNumber ?? null;
+    return matchingWeek?.weekNumber ?? null;
   };
 
-  const focusCurrentSchedule = (targetPlan: MarathonPlan): void => {
-    const currentWeekNumber = getCurrentWeekNumber(targetPlan);
-    if (currentWeekNumber !== null) {
-      setExpandedWeeks(new Set([currentWeekNumber]));
+  const getFocusDate = (targetPlan: MarathonPlan, logs: DailyLog[]): string | null => {
+    const todayStr = new Date().toISOString().slice(0, 10);
+    const completedDates = new Set(
+      logs.filter((log) => log.completed).map((log) => toDateKey(log.date))
+    );
+    const allDays = targetPlan.weeks.flatMap((week) => week.days.map((day) => toDateKey(day.date)));
+
+    if (allDays.includes(todayStr) && !completedDates.has(todayStr)) {
+      return todayStr;
+    }
+
+    const nextUpcomingDay = allDays.find((dateKey) => dateKey > todayStr);
+    if (nextUpcomingDay) return nextUpcomingDay;
+
+    return allDays[0] ?? null;
+  };
+
+  const focusCurrentSchedule = (targetPlan: MarathonPlan, logs: DailyLog[]): void => {
+    const focusDate = getFocusDate(targetPlan, logs);
+    const focusWeekNumber = focusDate ? getWeekNumberForDate(targetPlan, focusDate) : null;
+
+    if (focusWeekNumber !== null) {
+      setExpandedWeeks(new Set([focusWeekNumber]));
     }
 
     setActivePlanTab("schedule");
@@ -407,7 +427,7 @@ export default function PlanPage(): React.ReactNode {
       setPacingStrategy(saved.runnerProfile.racePacingStrategy ?? "even");
       setExpectedTempF(saved.runnerProfile.expectedRaceTempF ?? 50);
       if (options.focusCurrentSchedule) {
-        focusCurrentSchedule(saved.planData);
+        focusCurrentSchedule(saved.planData, loadDailyLogs(saved.planData.id));
       } else {
         setExpandedWeeks(new Set());
         setActivePlanTab("overview");
@@ -919,7 +939,7 @@ export default function PlanPage(): React.ReactNode {
     }
 
     if (plan?.id === activePlanId) {
-      focusCurrentSchedule(plan);
+      focusCurrentSchedule(plan, loadDailyLogs(plan.id));
       setHasAttemptedCurrentPlanLoad(true);
       return;
     }
@@ -934,7 +954,7 @@ export default function PlanPage(): React.ReactNode {
     if (!pendingCurrentPlanFocus || !plan || activePlanTab !== "schedule") return;
 
     const timeoutId = window.setTimeout(() => {
-      const dayTarget = document.querySelector("[data-current-day='true']");
+      const dayTarget = document.querySelector("[data-focus-day='true']");
       const weekTarget = document.querySelector("[data-current-week-card='true']");
       const target = dayTarget ?? weekTarget;
 
@@ -1232,7 +1252,8 @@ export default function PlanPage(): React.ReactNode {
   const recommendedMileageStep = currentRunCount;
   const mileageStepDelta = actualMileageStep - recommendedMileageStep;
   const currentIntensityTargetPercents = getCurrentIntensityTargetPercents(plan.runnerProfile);
-  const currentWeekNumber = getCurrentWeekNumber(plan);
+  const focusDate = getFocusDate(plan, dailyLogs);
+  const currentWeekNumber = focusDate ? getWeekNumberForDate(plan, focusDate) : null;
   const calculatedMaxLongRun = plan.weeks.length > 0
     ? Math.max(...plan.weeks.map((week) => week.longRunDistance))
     : 0;
@@ -1465,6 +1486,7 @@ export default function PlanPage(): React.ReactNode {
                         intensityTargetPercents={currentIntensityTargetPercents}
                         onIntensityTargetChange={handleAdjustIntensityTarget}
                         highlightCurrentWeek={week.weekNumber === currentWeekNumber}
+                        focusDate={focusDate}
                       />
                     ))}
                   </section>

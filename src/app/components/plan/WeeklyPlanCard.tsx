@@ -23,6 +23,7 @@ interface WeeklyPlanCardProps {
   intensityTargetPercents: NonNullable<RunnerProfile["intensityTargetPercents"]>;
   onIntensityTargetChange: (key: keyof NonNullable<RunnerProfile["intensityTargetPercents"]>, value: number, weekNumber?: number) => void;
   highlightCurrentWeek?: boolean;
+  focusDate?: string | null;
 }
 
 type IntensityTargetKey = keyof NonNullable<RunnerProfile["intensityTargetPercents"]>;
@@ -161,7 +162,8 @@ function renderDay(
   onSaved: () => void,
   isToday: boolean,
   isTomorrow: boolean,
-  highlightCurrentWeek: boolean
+  highlightCurrentWeek: boolean,
+  isFocusDay: boolean
 ) {
   const currentWorkout = day.workout;
   const plannedMileage =
@@ -194,6 +196,7 @@ function renderDay(
         key={day.dayOfWeek}
         data-current-day={isToday ? "true" : undefined}
         data-current-week={highlightCurrentWeek ? "true" : undefined}
+        data-focus-day={isFocusDay ? "true" : undefined}
         className="grid scroll-mt-24 gap-3 rounded-xl border border-slate-200 bg-white p-3 shadow-sm shadow-slate-100 lg:grid-cols-[6.5rem_1fr]"
       >
         <div className="rounded-lg bg-slate-50 px-3 py-2">
@@ -233,6 +236,7 @@ function renderDay(
       key={day.dayOfWeek}
       data-current-day={isToday ? "true" : undefined}
       data-current-week={highlightCurrentWeek ? "true" : undefined}
+      data-focus-day={isFocusDay ? "true" : undefined}
       className="grid scroll-mt-24 gap-3 rounded-xl border border-slate-200 bg-white p-3 shadow-sm shadow-slate-100 lg:grid-cols-[6.5rem_1fr]"
     >
       <div className="rounded-lg bg-slate-50 px-3 py-2">
@@ -415,6 +419,7 @@ export default function WeeklyPlanCard({
   intensityTargetPercents,
   onIntensityTargetChange,
   highlightCurrentWeek = false,
+  focusDate = null,
 }: WeeklyPlanCardProps) {
   // Track swapped workouts by day-of-week key
   const [swappedWorkouts, setSwappedWorkouts] = useState<Record<string, Workout | null>>({});
@@ -823,7 +828,8 @@ export default function WeeklyPlanCard({
                 onDailyLogSaved,
                 isToday(day.dayOfWeek),
                 isTomorrow(day.dayOfWeek),
-                highlightCurrentWeek
+                highlightCurrentWeek,
+                Boolean(focusDate && toDateKey(day.date) === focusDate)
               );
             })}
           </div>
