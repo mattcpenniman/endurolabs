@@ -44,6 +44,13 @@ function makePlan(): MarathonPlan {
       marathonEffort: "Marathon",
       thresholdEffort: "Threshold",
       vo2Effort: "VO2",
+      heartRateZones: {
+        recovery: { hrrPercent: { min: 0.6, max: 0.67 }, hrMaxPercent: { min: 0.65, max: 0.72 }, targetBpm: null },
+        easy: { hrrPercent: { min: 0.6, max: 0.74 }, hrMaxPercent: { min: 0.65, max: 0.79 }, targetBpm: null },
+        marathon: { hrrPercent: { min: 0.75, max: 0.84 }, hrMaxPercent: { min: 0.8, max: 0.9 }, targetBpm: null },
+        threshold: { hrrPercent: { min: 0.83, max: 0.88 }, hrMaxPercent: { min: 0.88, max: 0.92 }, targetBpm: null },
+        vo2: { hrrPercent: { min: 0.95, max: 1 }, hrMaxPercent: { min: 0.98, max: 1 }, targetBpm: null },
+      },
     },
     powerZones: undefined,
     weeks: [
@@ -266,6 +273,8 @@ describe("dailyLogsToWeeklyLogs", () => {
         weekNumber: 1,
         date: "2026-05-05",
         dayOfWeek: "Tuesday",
+        runId: "easy-1",
+        plannedWorkoutId: "easy-1",
         actualMileage: 4,
         completed: true,
         feelRating: 7,
@@ -276,6 +285,8 @@ describe("dailyLogsToWeeklyLogs", () => {
         weekNumber: 1,
         date: "2026-05-10",
         dayOfWeek: "Sunday",
+        runId: "long-1",
+        plannedWorkoutId: "long-1",
         actualMileage: 5,
         completed: false,
         feelRating: 5,
@@ -304,6 +315,8 @@ describe("removeDailyLog", () => {
       weekNumber: 1,
       date: "2026-05-05",
       dayOfWeek: "Tuesday",
+      runId: "tue-run",
+      plannedWorkoutId: "tue-run",
       actualMileage: 4,
       completed: true,
       feelRating: 7,
@@ -314,6 +327,8 @@ describe("removeDailyLog", () => {
       weekNumber: 1,
       date: "2026-05-06",
       dayOfWeek: "Wednesday",
+      runId: "wed-run",
+      plannedWorkoutId: "wed-run",
       actualMileage: 5,
       completed: true,
       feelRating: 6,
@@ -321,7 +336,7 @@ describe("removeDailyLog", () => {
       loggedAt: "2026-05-06T12:00:00.000Z",
     });
 
-    const logs = removeDailyLog("test-plan", 1, "Tuesday");
+    const logs = removeDailyLog("test-plan", 1, "Tuesday", "tue-run");
 
     expect(logs).toHaveLength(1);
     expect(logs[0].dayOfWeek).toBe("Wednesday");

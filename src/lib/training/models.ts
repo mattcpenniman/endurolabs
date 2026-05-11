@@ -271,6 +271,10 @@ export interface DailyLog {
   weekNumber: number;
   date: string;
   dayOfWeek: string;
+  runId: string;
+  plannedWorkoutId?: string | null;
+  runTitle?: string;
+  isAdditionalRun?: boolean;
   actualMileage: number;
   completed: boolean;
   feelRating: number;           // 1-10 how the day felt

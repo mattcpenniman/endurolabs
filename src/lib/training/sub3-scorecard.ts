@@ -87,12 +87,9 @@ function weeklyActualMileage(plan: MarathonPlan, dailyLogs: DailyLog[]): Array<{
 }
 
 function completedWorkout(plan: MarathonPlan, workout: Workout, dailyLogs: DailyLog[]): boolean {
-  const day = plan.weeks
-    .flatMap((week) => week.days)
-    .find((dailyPlan) => dailyPlan.workout?.id === workout.id || dailyPlan.secondaryWorkout?.id === workout.id);
-
-  if (!day) return false;
-  return dailyLogs.some((log) => log.weekNumber === plan.weeks.find((week) => week.days.includes(day))?.weekNumber && log.dayOfWeek === day.dayOfWeek && log.completed);
+  return dailyLogs.some(
+    (log) => log.completed && (log.plannedWorkoutId === workout.id || log.runId === workout.id)
+  );
 }
 
 function hasCompletedMatchingWorkout(plan: MarathonPlan, dailyLogs: DailyLog[], predicate: (workout: Workout) => boolean): boolean {
@@ -103,8 +100,14 @@ function longRunActuals(plan: MarathonPlan, dailyLogs: DailyLog[]): number[] {
   return plan.weeks.flatMap((week) => {
     const longRunDay = week.days.find((day) => day.workout?.type === "long");
     if (!longRunDay) return [];
-    const log = dailyLogs.find((entry) => entry.weekNumber === week.weekNumber && entry.dayOfWeek === longRunDay.dayOfWeek);
-    return log ? [log.actualMileage] : [];
+    const longRunWorkoutId = longRunDay.workout?.id;
+    if (!longRunWorkoutId) return [];
+    const actualMileage = Math.round(
+      dailyLogs
+        .filter((entry) => entry.weekNumber === week.weekNumber && entry.plannedWorkoutId === longRunWorkoutId)
+        .reduce((sum, entry) => sum + entry.actualMileage, 0) * 10
+    ) / 10;
+    return actualMileage > 0 ? [actualMileage] : [];
   });
 }
 
@@ -186,8 +189,12 @@ export function buildSub3Scorecard(plan: MarathonPlan, dailyLogs: DailyLog[]): S
   const actualMediumLongBuildWeeks = buildWeeks.filter((week) =>
     week.days.some((day) => {
       if (day.workout?.type === "long") return false;
-      const log = dailyLogs.find((entry) => entry.weekNumber === week.weekNumber && entry.dayOfWeek === day.dayOfWeek);
-      return log !== undefined && log.actualMileage >= 12 && log.actualMileage <= 15;
+      const workoutId = day.workout?.id;
+      if (!workoutId) return false;
+      const actualMileage = dailyLogs
+        .filter((entry) => entry.weekNumber === week.weekNumber && entry.plannedWorkoutId === workoutId)
+        .reduce((sum, entry) => sum + entry.actualMileage, 0);
+      return actualMileage >= 12 && actualMileage <= 15;
     })
   ).length;
   const gapDays = longestCompletedGapDays(plan, dailyLogs);

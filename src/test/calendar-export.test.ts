@@ -38,6 +38,13 @@ function makePlan(): MarathonPlan {
       marathonEffort: "Marathon pace (goal effort)",
       thresholdEffort: "Threshold (comfortably hard)",
       vo2Effort: "VO2 Max (hard)",
+      heartRateZones: {
+        recovery: { hrrPercent: { min: 0.6, max: 0.67 }, hrMaxPercent: { min: 0.65, max: 0.72 }, targetBpm: null },
+        easy: { hrrPercent: { min: 0.6, max: 0.74 }, hrMaxPercent: { min: 0.65, max: 0.79 }, targetBpm: null },
+        marathon: { hrrPercent: { min: 0.75, max: 0.84 }, hrMaxPercent: { min: 0.8, max: 0.9 }, targetBpm: null },
+        threshold: { hrrPercent: { min: 0.83, max: 0.88 }, hrMaxPercent: { min: 0.88, max: 0.92 }, targetBpm: null },
+        vo2: { hrrPercent: { min: 0.95, max: 1 }, hrMaxPercent: { min: 0.98, max: 1 }, targetBpm: null },
+      },
     },
     powerZones: undefined,
     weeks: [

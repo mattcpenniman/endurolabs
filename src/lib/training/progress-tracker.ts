@@ -63,7 +63,7 @@ export function saveDailyLogs(planId: string, logs: DailyLog[]): void {
 export function addDailyLog(planId: string, log: DailyLog): DailyLog[] {
   const logs = loadDailyLogs(planId);
   const existingIdx = logs.findIndex(
-    (l) => l.weekNumber === log.weekNumber && l.dayOfWeek === log.dayOfWeek
+    (l) => l.weekNumber === log.weekNumber && l.dayOfWeek === log.dayOfWeek && l.runId === log.runId
   );
 
   if (existingIdx >= 0) {
@@ -79,10 +79,11 @@ export function addDailyLog(planId: string, log: DailyLog): DailyLog[] {
 export function removeDailyLog(
   planId: string,
   weekNumber: number,
-  dayOfWeek: string
+  dayOfWeek: string,
+  runId: string
 ): DailyLog[] {
   const logs = loadDailyLogs(planId).filter(
-    (log) => !(log.weekNumber === weekNumber && log.dayOfWeek === dayOfWeek)
+    (log) => !(log.weekNumber === weekNumber && log.dayOfWeek === dayOfWeek && log.runId === runId)
   );
   saveDailyLogs(planId, logs);
   return logs;
@@ -94,12 +95,25 @@ export function dailyLogsToWeeklyLogs(plan: MarathonPlan, dailyLogs: DailyLog[])
       const weekLogs = dailyLogs.filter((log) => log.weekNumber === week.weekNumber);
       if (weekLogs.length === 0) return null;
 
-      const longRunDay = week.days.find((day) => day.workout?.type === "long");
-      const longRunLog = longRunDay
-        ? weekLogs.find((log) => log.dayOfWeek === longRunDay.dayOfWeek)
-        : undefined;
-      const completedCount = weekLogs.filter((log) => log.completed).length;
-      const plannedWorkoutCount = week.days.filter((day) => !day.isRestDay && day.workout).length;
+      const plannedWorkoutIds = week.days.flatMap((day) => [
+        ...(day.workout ? [day.workout.id] : []),
+        ...(day.secondaryWorkout ? [day.secondaryWorkout.id] : []),
+      ]);
+      const longRunWorkoutIds = week.days.flatMap((day) => [
+        ...(day.workout?.type === "long" ? [day.workout.id] : []),
+        ...(day.secondaryWorkout?.type === "long" ? [day.secondaryWorkout.id] : []),
+      ]);
+      const longRunActual = Math.round(
+        weekLogs
+          .filter((log) => log.plannedWorkoutId && longRunWorkoutIds.includes(log.plannedWorkoutId))
+          .reduce((sum, log) => sum + log.actualMileage, 0) * 10
+      ) / 10;
+      const completedCount = new Set(
+        weekLogs
+          .filter((log) => log.completed && log.plannedWorkoutId && plannedWorkoutIds.includes(log.plannedWorkoutId))
+          .map((log) => log.plannedWorkoutId)
+      ).size;
+      const plannedWorkoutCount = plannedWorkoutIds.length;
       const adherence =
         plannedWorkoutCount > 0
           ? Math.round((completedCount / plannedWorkoutCount) * 100)
@@ -109,7 +123,7 @@ export function dailyLogsToWeeklyLogs(plan: MarathonPlan, dailyLogs: DailyLog[])
         weekNumber: week.weekNumber,
         actualMileage: Math.round(weekLogs.reduce((sum, log) => sum + log.actualMileage, 0) * 10) / 10,
         plannedMileage: week.totalMileage,
-        longRunActual: longRunLog?.actualMileage ?? 0,
+        longRunActual,
         longRunPlanned: week.longRunDistance,
         feelRating:
           Math.round(

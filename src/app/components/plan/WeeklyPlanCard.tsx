@@ -24,6 +24,7 @@ interface WeeklyPlanCardProps {
   onIntensityTargetChange: (key: keyof NonNullable<RunnerProfile["intensityTargetPercents"]>, value: number, weekNumber?: number) => void;
   highlightCurrentWeek?: boolean;
   focusDate?: string | null;
+  onWeekUpdate?: (updatedWeek: WeeklyPlan) => Promise<void> | void;
 }
 
 type IntensityTargetKey = keyof NonNullable<RunnerProfile["intensityTargetPercents"]>;
@@ -150,214 +151,136 @@ function renderWorkoutSegments(workout: Workout) {
 const MOBILE_MILEAGE_WHOLE_OPTIONS = Array.from({ length: 41 }, (_, index) => index);
 const MOBILE_MILEAGE_FRACTION_OPTIONS = Array.from({ length: 20 }, (_, index) => index * 0.05);
 
-interface DayLogDraft {
+interface RunLogDraft {
   actualMileage: number;
-  completed: boolean;
   feelRating: number;
   notes: string;
 }
 
-function renderDay(
-  planId: string,
-  weekNumber: number,
-  day: DailyPlan,
-  isSwapped: boolean,
-  log: DailyLog | undefined,
-  draft: DayLogDraft,
-  onDraftChange: (dayOfWeek: string, patch: Partial<DayLogDraft>) => void,
-  onDraftReset: (dayOfWeek: string) => void,
-  onSaved: () => void,
-  isToday: boolean,
-  isTomorrow: boolean,
-  highlightCurrentWeek: boolean,
-  isFocusDay: boolean
-) {
-  const currentWorkout = day.workout;
-  const plannedMileage =
-    (currentWorkout?.weeklyMileageContribution ?? 0) +
-    (day.secondaryWorkout?.weeklyMileageContribution ?? 0);
+interface RunEditorState {
+  title: string;
+  totalDistance: number;
+  estimatedDuration: number;
+  targetDayOfWeek: string;
+}
 
-  const handleSaveLog = () => {
-    addDailyLog(planId, {
-      weekNumber,
-      date: day.date,
-      dayOfWeek: day.dayOfWeek,
-      actualMileage: draft.actualMileage,
-      completed: true,
-      feelRating: draft.feelRating,
-      notes: draft.notes,
-      loggedAt: new Date().toISOString(),
-    });
-    onSaved();
+type WorkoutSlot = "workout" | "secondaryWorkout";
+
+interface RunLocation {
+  dayIndex: number;
+  slot: WorkoutSlot;
+}
+
+interface RunEntry {
+  runId: string;
+  title: string;
+  plannedMileage: number;
+  plannedWorkoutId: string | null;
+  workout: Workout | null;
+  log: DailyLog | undefined;
+  isAdditionalRun: boolean;
+}
+
+function createDefaultRunDraft(plannedMileage: number): RunLogDraft {
+  return {
+    actualMileage: plannedMileage,
+    feelRating: 5,
+    notes: "",
   };
+}
 
-  const handleRemoveLog = () => {
-    removeDailyLog(planId, weekNumber, day.dayOfWeek);
-    onDraftReset(day.dayOfWeek);
-    onSaved();
+function workoutToIntensityBucket(workout: Workout | null | undefined): keyof WeeklyPlan["intensityDistribution"] {
+  switch (workout?.type) {
+    case "threshold":
+      return "threshold";
+    case "marathon_pace":
+      return "marathon";
+    case "vo2":
+      return "vo2";
+    default:
+      return "easy";
+  }
+}
+
+function calculateWeekMetrics(days: DailyPlan[]): Pick<WeeklyPlan, "totalMileage" | "longRunDistance" | "intensityDistribution"> {
+  const totals = days.reduce(
+    (acc, day) => {
+      [day.workout, day.secondaryWorkout].forEach((workout) => {
+        if (!workout) return;
+        const contribution = workout.weeklyMileageContribution ?? 0;
+        acc.totalMileage += contribution;
+        acc.longRunDistance = Math.max(acc.longRunDistance, workout.type === "long" ? workout.totalDistance : 0);
+        acc.intensityDistribution[workoutToIntensityBucket(workout)] += contribution;
+      });
+      return acc;
+    },
+    {
+      totalMileage: 0,
+      longRunDistance: 0,
+      intensityDistribution: {
+        easy: 0,
+        threshold: 0,
+        marathon: 0,
+        vo2: 0,
+      },
+    }
+  );
+
+  return {
+    totalMileage: Math.round(totals.totalMileage * 10) / 10,
+    longRunDistance: Math.round(totals.longRunDistance * 10) / 10,
+    intensityDistribution: {
+      easy: Math.round(totals.intensityDistribution.easy * 10) / 10,
+      threshold: Math.round(totals.intensityDistribution.threshold * 10) / 10,
+      marathon: Math.round(totals.intensityDistribution.marathon * 10) / 10,
+      vo2: Math.round(totals.intensityDistribution.vo2 * 10) / 10,
+    },
   };
+}
 
-  if (day.isRestDay || !currentWorkout) {
-    return (
-      <div
-        key={day.dayOfWeek}
-        data-current-day={isToday ? "true" : undefined}
-        data-current-week={highlightCurrentWeek ? "true" : undefined}
-        data-focus-day={isFocusDay ? "true" : undefined}
-        className="grid scroll-mt-24 gap-3 rounded-xl border border-slate-200 bg-white p-3 shadow-sm shadow-slate-100 lg:grid-cols-[6.5rem_1fr]"
-      >
-        <div className="rounded-lg bg-slate-50 px-3 py-2">
-          {isToday && (
-            <span className="mb-1 inline-block rounded-full bg-green-600 px-2 py-0.5 text-[10px] font-bold text-white">
-              Today
-            </span>
-          )}
-          {isTomorrow && (
-            <span className="mb-1 inline-block rounded-full bg-sky-600 px-2 py-0.5 text-[10px] font-bold text-white">
-              Tomorrow
-            </span>
-          )}
-          <p className="text-xs font-medium text-gray-400">{day.dayOfWeek.slice(0, 3)}</p>
-          <p className="text-xs text-gray-400">{formatShortDate(day.date)}</p>
-        </div>
-        <div className="rounded-lg border border-slate-100 bg-slate-50 p-3">
-          <p className="text-sm text-gray-400">Rest</p>
-          <DailyLogControls
-            day={day}
-            draft={draft}
-            log={log}
-            plannedMileage={0}
-            onDraftChange={onDraftChange}
-            onSave={handleSaveLog}
-            onRemove={handleRemoveLog}
-          />
-        </div>
-      </div>
-    );
+function buildUpdatedWeek(baseWeek: WeeklyPlan, days: DailyPlan[]): WeeklyPlan {
+  const metrics = calculateWeekMetrics(days);
+  return {
+    ...baseWeek,
+    days,
+    ...metrics,
+  };
+}
+
+function findRunLocation(days: DailyPlan[], runId: string): RunLocation | null {
+  for (let dayIndex = 0; dayIndex < days.length; dayIndex += 1) {
+    if (days[dayIndex]?.workout?.id === runId) {
+      return { dayIndex, slot: "workout" };
+    }
+    if (days[dayIndex]?.secondaryWorkout?.id === runId) {
+      return { dayIndex, slot: "secondaryWorkout" };
+    }
   }
 
-  const hasSecondary = !!day.secondaryWorkout;
-
-  return (
-    <div
-      key={day.dayOfWeek}
-      data-current-day={isToday ? "true" : undefined}
-      data-current-week={highlightCurrentWeek ? "true" : undefined}
-      data-focus-day={isFocusDay ? "true" : undefined}
-      className="grid scroll-mt-24 gap-3 rounded-xl border border-slate-200 bg-white p-3 shadow-sm shadow-slate-100 lg:grid-cols-[6.5rem_1fr]"
-    >
-      <div className="rounded-lg bg-slate-50 px-3 py-2">
-        {isToday && (
-          <span className="mb-1 inline-block rounded-full bg-green-600 px-2 py-0.5 text-[10px] font-bold text-white">
-            Today
-          </span>
-        )}
-        {isTomorrow && (
-          <span className="mb-1 inline-block rounded-full bg-sky-600 px-2 py-0.5 text-[10px] font-bold text-white">
-            Tomorrow
-          </span>
-        )}
-        <p className="text-xs font-medium text-gray-500">{day.dayOfWeek.slice(0, 3)}</p>
-        <p className="text-xs text-gray-400">{formatShortDate(day.date)}</p>
-      </div>
-      <div className="flex-1 space-y-3 rounded-lg border border-slate-100 bg-slate-50 p-3">
-        {/* Primary workout */}
-        <div className="flex items-center gap-2">
-          <span className="text-lg">{workoutEmoji[currentWorkout.type] ?? "🏃"}</span>
-          <div className="flex-1">
-            <p className={`text-sm font-medium ${workoutColor[currentWorkout.type] ?? "text-gray-700"}`}>
-              {currentWorkout.title}
-              {isSwapped && <span className="ml-2 text-xs text-gray-400">(swapped)</span>}
-            </p>
-            <p className="text-xs text-gray-500">
-              {currentWorkout.totalDistance > 0 ? `${currentWorkout.totalDistance} mi · ` : ""}
-              {Math.floor(currentWorkout.estimatedDuration / 60)}h {currentWorkout.estimatedDuration % 60}min
-            </p>
-          </div>
-          {/* Swap dropdown */}
-          <select
-            defaultValue=""
-            aria-label={`Swap workout for ${day.dayOfWeek}`}
-            className="rounded border border-gray-200 bg-gray-50 px-2 py-1 text-xs text-gray-600 focus:border-enduro-500 focus:outline-none focus:ring-1 focus:ring-enduro-500/20"
-            onChange={(e) => {
-              const selectedType = e.target.value as WorkoutType;
-              if (!selectedType) return;
-
-              // Dispatch custom event for swap
-              window.dispatchEvent(
-                new CustomEvent("workout-swap", {
-                  detail: { dayOfWeek: day.dayOfWeek, workoutType: selectedType },
-                })
-              );
-            }}
-          >
-            <option value="" disabled>↻ Swap</option>
-            {swapOptions.map((opt) => (
-              <option key={opt.type} value={opt.type}>
-                {opt.emoji} {opt.label}
-              </option>
-            ))}
-          </select>
-        </div>
-        {renderWorkoutSegments(currentWorkout)}
-        {/* Secondary workout (double-day) */}
-        {hasSecondary && day.secondaryWorkout && (
-          <>
-            <div className="flex items-center gap-2 pl-7">
-              <span className="text-base">🏃</span>
-              <div className="flex-1">
-                <p className={`text-sm font-medium ${workoutColor[day.secondaryWorkout.type] ?? "text-gray-700"}`}>
-                  {day.secondaryWorkout.title}
-                </p>
-                <p className="text-xs text-gray-500">
-                  {day.secondaryWorkout.totalDistance > 0 ? `${day.secondaryWorkout.totalDistance} mi · ` : ""}
-                  {Math.floor(day.secondaryWorkout.estimatedDuration / 60)}h {day.secondaryWorkout.estimatedDuration % 60}min
-                </p>
-              </div>
-            </div>
-            {renderWorkoutSegments(day.secondaryWorkout)}
-          </>
-        )}
-        <DailyLogControls
-          day={day}
-          draft={draft}
-          log={log}
-          plannedMileage={plannedMileage}
-          onDraftChange={onDraftChange}
-          onSave={handleSaveLog}
-          onRemove={handleRemoveLog}
-        />
-      </div>
-    </div>
-  );
+  return null;
 }
 
 function DailyLogControls({
-  day,
   draft,
-  log,
   plannedMileage,
   onDraftChange,
   onSave,
-  onRemove,
+  onCancel,
 }: {
-  day: DailyPlan;
-  draft: DayLogDraft;
-  log?: DailyLog;
+  draft: RunLogDraft;
   plannedMileage: number;
-  onDraftChange: (dayOfWeek: string, patch: Partial<DayLogDraft>) => void;
+  onDraftChange: (patch: Partial<RunLogDraft>) => void;
   onSave: () => void;
-  onRemove: () => void;
+  onCancel?: () => void;
 }) {
   const [isMobileMileagePickerOpen, setIsMobileMileagePickerOpen] = useState(false);
-  const logButtonLabel = log ? (log.completed ? "Update" : "Mark done") : "Log";
   const normalizedMileage = Number.isFinite(draft.actualMileage) ? Math.max(0, draft.actualMileage) : 0;
   const wholeMiles = Math.min(40, Math.floor(normalizedMileage));
   const fractionalMiles = Math.round((normalizedMileage - wholeMiles) * 20) / 20;
 
   const updateMobileMileage = (whole: number, fraction: number): void => {
     const actualMileage = Math.min(40, Math.round((whole + fraction) * 20) / 20);
-    onDraftChange(day.dayOfWeek, { actualMileage });
+    onDraftChange({ actualMileage });
   };
 
   return (
@@ -378,9 +301,7 @@ function DailyLogControls({
           max={40}
           step={0.1}
           value={draft.actualMileage}
-          onChange={(e) =>
-            onDraftChange(day.dayOfWeek, { actualMileage: parseFloat(e.target.value) || 0 })
-          }
+          onChange={(e) => onDraftChange({ actualMileage: parseFloat(e.target.value) || 0 })}
           className="mt-1 hidden w-full rounded border border-gray-300 px-2 py-1 text-sm focus:border-enduro-500 focus:outline-none focus:ring-1 focus:ring-enduro-500/20 sm:block"
         />
         {isMobileMileagePickerOpen && (
@@ -446,7 +367,7 @@ function DailyLogControls({
         <span className="text-xs font-medium text-gray-500">Feel</span>
         <select
           value={draft.feelRating}
-          onChange={(e) => onDraftChange(day.dayOfWeek, { feelRating: parseInt(e.target.value) })}
+          onChange={(e) => onDraftChange({ feelRating: parseInt(e.target.value) })}
           className="mt-1 w-full rounded border border-gray-300 px-2 py-1 text-sm focus:border-enduro-500 focus:outline-none focus:ring-1 focus:ring-enduro-500/20"
         >
           {Array.from({ length: 10 }, (_, index) => index + 1).map((value) => (
@@ -461,7 +382,7 @@ function DailyLogControls({
         <input
           type="text"
           value={draft.notes}
-          onChange={(e) => onDraftChange(day.dayOfWeek, { notes: e.target.value })}
+          onChange={(e) => onDraftChange({ notes: e.target.value })}
           placeholder="How did it go?"
           className="mt-1 w-full rounded border border-gray-300 px-2 py-1 text-sm focus:border-enduro-500 focus:outline-none focus:ring-1 focus:ring-enduro-500/20"
         />
@@ -472,20 +393,20 @@ function DailyLogControls({
           onClick={onSave}
           className="rounded bg-enduro-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-enduro-700"
         >
-          {logButtonLabel}
+          Log
         </button>
-        {log && (
+        {onCancel && (
           <button
             type="button"
-            onClick={onRemove}
-            className="rounded border border-red-200 bg-white px-3 py-1.5 text-xs font-medium text-red-600 hover:bg-red-50"
+            onClick={onCancel}
+            className="rounded border border-gray-200 bg-white px-3 py-1.5 text-xs font-medium text-gray-600 hover:bg-gray-50"
           >
-            Remove
+            Cancel
           </button>
         )}
       </div>
       <p className="text-xs text-gray-400 sm:col-span-4">
-        Planned {plannedMileage} mi{log ? ` · Logged ${log.actualMileage} mi` : ""}
+        Planned {plannedMileage} mi
       </p>
     </div>
   );
@@ -502,14 +423,23 @@ export default function WeeklyPlanCard({
   onIntensityTargetChange,
   highlightCurrentWeek = false,
   focusDate = null,
+  onWeekUpdate,
 }: WeeklyPlanCardProps) {
-  // Track swapped workouts by day-of-week key
-  const [swappedWorkouts, setSwappedWorkouts] = useState<Record<string, Workout | null>>({});
-  const [drafts, setDrafts] = useState<Record<string, DayLogDraft>>({});
-  const orderedDays = useMemo(
-    () => [...week.days].sort((a, b) => dayDisplayOrder[a.dayOfWeek] - dayDisplayOrder[b.dayOfWeek]),
-    [week.days]
+  const [localDays, setLocalDays] = useState<DailyPlan[]>(
+    [...week.days].sort((a, b) => dayDisplayOrder[a.dayOfWeek] - dayDisplayOrder[b.dayOfWeek])
   );
+  const [runDrafts, setRunDrafts] = useState<Record<string, RunLogDraft>>({});
+  const [pendingExtraRuns, setPendingExtraRuns] = useState<Record<string, string[]>>({});
+  const [editingRunId, setEditingRunId] = useState<string | null>(null);
+  const [runEditors, setRunEditors] = useState<Record<string, RunEditorState>>({});
+  const orderedDays = useMemo(
+    () => [...localDays].sort((a, b) => dayDisplayOrder[a.dayOfWeek] - dayDisplayOrder[b.dayOfWeek]),
+    [localDays]
+  );
+
+  useEffect(() => {
+    setLocalDays([...week.days].sort((a, b) => dayDisplayOrder[a.dayOfWeek] - dayDisplayOrder[b.dayOfWeek]));
+  }, [week.days]);
 
   // Listen for swap events from child renders
   useEffect(() => {
@@ -517,12 +447,11 @@ export default function WeeklyPlanCard({
       const customEvent = e as CustomEvent;
       const { dayOfWeek, workoutType } = customEvent.detail as { dayOfWeek: string; workoutType: WorkoutType };
 
-      setSwappedWorkouts((prev) => {
-        // Create a placeholder workout for the swap
-        let swapped: Workout | null = null;
+      setLocalDays((prev) => {
+        let replacement: Workout | null = null;
         switch (workoutType) {
           case "easy":
-            swapped = {
+            replacement = {
               id: `swapped-easy-${dayOfWeek}`,
               type: "easy",
               title: "3 mi Easy Run",
@@ -535,7 +464,7 @@ export default function WeeklyPlanCard({
             };
             break;
           case "recovery":
-            swapped = {
+            replacement = {
               id: `swapped-recovery-${dayOfWeek}`,
               type: "recovery",
               title: "2 mi Recovery Run",
@@ -548,7 +477,7 @@ export default function WeeklyPlanCard({
             };
             break;
           case "cross_training":
-            swapped = {
+            replacement = {
               id: `swapped-cross-${dayOfWeek}`,
               type: "cross_training",
               title: "45 min Cross Training",
@@ -561,7 +490,7 @@ export default function WeeklyPlanCard({
             };
             break;
           case "strength":
-            swapped = {
+            replacement = {
               id: `swapped-strength-${dayOfWeek}`,
               type: "strength",
               title: "Strength Training (30 min)",
@@ -574,13 +503,19 @@ export default function WeeklyPlanCard({
             };
             break;
           case "rest":
-            swapped = null;
-            break;
           default:
-            swapped = null;
+            replacement = null;
         }
 
-        return { ...prev, [dayOfWeek]: swapped };
+        return prev.map((day) => {
+          if (day.dayOfWeek !== dayOfWeek) return day;
+          return {
+            ...day,
+            workout: replacement,
+            isRestDay: replacement === null,
+            secondaryWorkout: replacement === null ? null : day.secondaryWorkout,
+          };
+        });
       });
     };
 
@@ -588,74 +523,142 @@ export default function WeeklyPlanCard({
     return () => window.removeEventListener("workout-swap", handler);
   }, []);
 
-  useEffect(() => {
-    setDrafts((prev) => {
-      const next = { ...prev };
-      orderedDays.forEach((day) => {
-        const log = dailyLogs.find(
-          (entry) => entry.weekNumber === week.weekNumber && entry.dayOfWeek === day.dayOfWeek
-        );
-        const plannedMileage =
-          (day.workout?.weeklyMileageContribution ?? 0) +
-          (day.secondaryWorkout?.weeklyMileageContribution ?? 0);
-        next[day.dayOfWeek] = {
-          actualMileage: log?.actualMileage ?? plannedMileage,
-          completed: log?.completed ?? false,
-          feelRating: log?.feelRating ?? 5,
-          notes: log?.notes ?? "",
-        };
-      });
-      return next;
-    });
-  }, [dailyLogs, orderedDays]);
-
-  const updateDraft = (dayOfWeek: string, patch: Partial<DayLogDraft>) => {
-    setDrafts((prev) => {
-      const existing =
-        prev[dayOfWeek] ??
-        ({
-          actualMileage: 0,
-          completed: false,
-          feelRating: 5,
-          notes: "",
-        } satisfies DayLogDraft);
-
-      return {
-        ...prev,
-        [dayOfWeek]: {
-          ...existing,
-          ...patch,
-        },
-      };
-    });
-  };
-
-  const resetDraft = (dayOfWeek: string) => {
-    const day = orderedDays.find((entry) => entry.dayOfWeek === dayOfWeek);
-    const plannedMileage =
-      (day?.workout?.weeklyMileageContribution ?? 0) +
-      (day?.secondaryWorkout?.weeklyMileageContribution ?? 0);
-
-    setDrafts((prev) => ({
+  const updateRunDraft = (runId: string, plannedMileage: number, patch: Partial<RunLogDraft>) => {
+    setRunDrafts((prev) => ({
       ...prev,
-      [dayOfWeek]: {
-        actualMileage: plannedMileage,
-        completed: false,
-        feelRating: 5,
-        notes: "",
+      [runId]: {
+        ...(prev[runId] ?? createDefaultRunDraft(plannedMileage)),
+        ...patch,
       },
     }));
   };
 
-  // Recalculate weekly mileage with swaps applied
-  const adjustedMileage = week.days.reduce((sum, day) => {
-    const workout = swappedWorkouts[day.dayOfWeek] ?? day.workout;
-    const secondaryMileage =
-      swappedWorkouts[day.dayOfWeek] === null
-        ? 0
-        : day.secondaryWorkout?.weeklyMileageContribution ?? 0;
-    return sum + (workout?.weeklyMileageContribution ?? 0) + secondaryMileage;
-  }, 0);
+  const resetRunDraft = (runId: string): void => {
+    setRunDrafts((prev) => {
+      const next = { ...prev };
+      delete next[runId];
+      return next;
+    });
+  };
+
+  const addAdditionalRun = (dayOfWeek: string): void => {
+    const runId = `manual-${dayOfWeek}-${Date.now()}`;
+    setPendingExtraRuns((prev) => ({
+      ...prev,
+      [dayOfWeek]: [...(prev[dayOfWeek] ?? []), runId],
+    }));
+    updateRunDraft(runId, 0, createDefaultRunDraft(0));
+  };
+
+  const cancelAdditionalRun = (dayOfWeek: string, runId: string): void => {
+    setPendingExtraRuns((prev) => ({
+      ...prev,
+      [dayOfWeek]: (prev[dayOfWeek] ?? []).filter((id) => id !== runId),
+    }));
+    resetRunDraft(runId);
+  };
+
+  const saveRunLog = (day: DailyPlan, entry: RunEntry, draft: RunLogDraft): void => {
+    addDailyLog(planId, {
+      weekNumber: week.weekNumber,
+      date: day.date,
+      dayOfWeek: day.dayOfWeek,
+      runId: entry.runId,
+      plannedWorkoutId: entry.plannedWorkoutId,
+      runTitle: entry.title,
+      isAdditionalRun: entry.isAdditionalRun,
+      actualMileage: draft.actualMileage,
+      completed: true,
+      feelRating: draft.feelRating,
+      notes: draft.notes,
+      loggedAt: new Date().toISOString(),
+    });
+    resetRunDraft(entry.runId);
+    setPendingExtraRuns((prev) => ({
+      ...prev,
+      [day.dayOfWeek]: (prev[day.dayOfWeek] ?? []).filter((id) => id !== entry.runId),
+    }));
+    onDailyLogSaved();
+  };
+
+  const removeRunLog = (day: DailyPlan, runId: string): void => {
+    removeDailyLog(planId, week.weekNumber, day.dayOfWeek, runId);
+    onDailyLogSaved();
+  };
+
+  const initializeRunEditor = (runId: string, workout: Workout, dayOfWeek: string): void => {
+    setRunEditors((prev) => ({
+      ...prev,
+      [runId]: prev[runId] ?? {
+        title: workout.title,
+        totalDistance: workout.totalDistance,
+        estimatedDuration: workout.estimatedDuration,
+        targetDayOfWeek: dayOfWeek,
+      },
+    }));
+    setEditingRunId((current) => (current === runId ? null : runId));
+  };
+
+  const saveRunEdit = async (runId: string): Promise<void> => {
+    const editor = runEditors[runId];
+    if (!editor) return;
+
+    const location = findRunLocation(localDays, runId);
+    if (!location) return;
+
+    const sourceDay = localDays[location.dayIndex];
+    const existingWorkout = sourceDay[location.slot];
+    if (!existingWorkout) return;
+
+    const updatedWorkout: Workout = {
+      ...existingWorkout,
+      title: editor.title,
+      totalDistance: editor.totalDistance,
+      estimatedDuration: editor.estimatedDuration,
+      weeklyMileageContribution: existingWorkout.weeklyMileageContribution > 0 ? editor.totalDistance : existingWorkout.weeklyMileageContribution,
+    };
+
+    const nextDays = localDays.map((day) => ({ ...day }));
+    nextDays[location.dayIndex] = { ...nextDays[location.dayIndex] };
+    if (location.slot === "workout") {
+      nextDays[location.dayIndex].workout = nextDays[location.dayIndex].secondaryWorkout;
+      nextDays[location.dayIndex].secondaryWorkout = null;
+      nextDays[location.dayIndex].isRestDay = !nextDays[location.dayIndex].workout;
+    } else {
+      nextDays[location.dayIndex].secondaryWorkout = null;
+    }
+
+    const targetIndex = nextDays.findIndex((day) => day.dayOfWeek === editor.targetDayOfWeek);
+    if (targetIndex < 0) return;
+
+    nextDays[targetIndex] = { ...nextDays[targetIndex] };
+    if (!nextDays[targetIndex].workout) {
+      nextDays[targetIndex].workout = updatedWorkout;
+      nextDays[targetIndex].isRestDay = false;
+    } else if (!nextDays[targetIndex].secondaryWorkout) {
+      nextDays[targetIndex].secondaryWorkout = updatedWorkout;
+    } else if (targetIndex === location.dayIndex && location.slot === "workout") {
+      nextDays[targetIndex].workout = updatedWorkout;
+    } else if (targetIndex === location.dayIndex && location.slot === "secondaryWorkout") {
+      nextDays[targetIndex].secondaryWorkout = updatedWorkout;
+    } else {
+      return;
+    }
+
+    setLocalDays(nextDays);
+    setEditingRunId(null);
+    if (onWeekUpdate) {
+      await onWeekUpdate(buildUpdatedWeek(week, nextDays));
+    }
+  };
+
+  const adjustedMileage = localDays.reduce(
+    (sum, day) =>
+      sum +
+      (day.workout?.weeklyMileageContribution ?? 0) +
+      (day.secondaryWorkout?.weeklyMileageContribution ?? 0),
+    0
+  );
   const phaseDetail = phaseDetails[week.phase];
   const qualityTotals = [
     { label: "T", value: week.intensityDistribution.threshold, className: "bg-amber-50 text-amber-700" },
@@ -751,6 +754,49 @@ export default function WeeklyPlanCard({
     return day.date ? toDateKey(day.date) === tomorrowStr : false;
   };
 
+  const buildRunEntries = (day: DailyPlan): RunEntry[] => {
+    const dayLogs = dailyLogs.filter(
+      (entry) => entry.weekNumber === week.weekNumber && entry.dayOfWeek === day.dayOfWeek
+    );
+    const plannedEntries: RunEntry[] = [day.workout, day.secondaryWorkout]
+      .filter((workout): workout is Workout => Boolean(workout))
+      .map((workout) => ({
+        runId: workout.id,
+        title: workout.title,
+        plannedMileage: workout.weeklyMileageContribution ?? 0,
+        plannedWorkoutId: workout.id,
+        workout,
+        log: dayLogs.find((entry) => entry.runId === workout.id),
+        isAdditionalRun: false,
+      }));
+
+    const additionalEntries: RunEntry[] = dayLogs
+      .filter((entry) => entry.isAdditionalRun)
+      .map((entry) => ({
+        runId: entry.runId,
+        title: entry.runTitle ?? "Actual run",
+        plannedMileage: 0,
+        plannedWorkoutId: null,
+        workout: null,
+        log: entry,
+        isAdditionalRun: true,
+      }));
+
+    const pendingEntries: RunEntry[] = (pendingExtraRuns[day.dayOfWeek] ?? [])
+      .filter((runId) => !additionalEntries.some((entry) => entry.runId === runId))
+      .map((runId) => ({
+        runId,
+        title: "Actual run",
+        plannedMileage: 0,
+        plannedWorkoutId: null,
+        workout: null,
+        log: undefined,
+        isAdditionalRun: true,
+      }));
+
+    return [...plannedEntries, ...additionalEntries, ...pendingEntries];
+  };
+
   return (
     <div
       data-current-week-card={highlightCurrentWeek ? "true" : undefined}
@@ -794,7 +840,7 @@ export default function WeeklyPlanCard({
           </div>
           <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-gray-600">
             <span className="font-medium">
-              {formatMiles(adjustedMileage)} mi{Object.keys(swappedWorkouts).length > 0 ? " adjusted" : ""} total
+              {formatMiles(adjustedMileage)} mi total
             </span>
             <span>Long {formatMiles(week.longRunDistance)} mi</span>
             <span className="rounded bg-green-50 px-2 py-1 text-green-700">
@@ -878,40 +924,255 @@ export default function WeeklyPlanCard({
           {/* Days — apply swaps */}
           <div className="space-y-3 pt-3">
             {orderedDays.map((day) => {
-              const swapped = swappedWorkouts[day.dayOfWeek];
-              const effectiveWorkout = swapped !== undefined ? swapped : day.workout;
-              const isSwapped = swapped !== undefined;
-              const adjustedDay: DailyPlan = {
-                ...day,
-                workout: effectiveWorkout,
-                isRestDay: swapped === null,
-              };
-              const log = dailyLogs.find(
-                (entry) => entry.weekNumber === week.weekNumber && entry.dayOfWeek === day.dayOfWeek
-              );
-              const plannedMileage =
-                (adjustedDay.workout?.weeklyMileageContribution ?? 0) +
-                (adjustedDay.secondaryWorkout?.weeklyMileageContribution ?? 0);
-              const draft = drafts[day.dayOfWeek] ?? {
-                actualMileage: log?.actualMileage ?? plannedMileage,
-                completed: log?.completed ?? false,
-                feelRating: log?.feelRating ?? 5,
-                notes: log?.notes ?? "",
-              };
-              return renderDay(
-                planId,
-                week.weekNumber,
-                adjustedDay,
-                isSwapped,
-                log,
-                draft,
-                updateDraft,
-                resetDraft,
-                onDailyLogSaved,
-                isToday(day.dayOfWeek),
-                isTomorrow(day.dayOfWeek),
-                highlightCurrentWeek,
-                Boolean(focusDate && toDateKey(day.date) === focusDate)
+              const runEntries = buildRunEntries(day);
+              const dayActualMileage = runEntries.reduce((sum, entry) => sum + (entry.log?.actualMileage ?? 0), 0);
+              const dayPlannedMileage = (day.workout?.weeklyMileageContribution ?? 0) + (day.secondaryWorkout?.weeklyMileageContribution ?? 0);
+              const availableTargetDays = orderedDays
+                .filter((candidate) => {
+                  if (candidate.dayOfWeek === day.dayOfWeek) return true;
+                  const occupiedSlots = [candidate.workout, candidate.secondaryWorkout].filter(Boolean).length;
+                  return occupiedSlots < 2;
+                })
+                .map((candidate) => candidate.dayOfWeek);
+
+              return (
+                <div
+                  key={day.dayOfWeek}
+                  data-current-day={isToday(day.dayOfWeek) ? "true" : undefined}
+                  data-current-week={highlightCurrentWeek ? "true" : undefined}
+                  data-focus-day={Boolean(focusDate && toDateKey(day.date) === focusDate) ? "true" : undefined}
+                  className="grid scroll-mt-24 gap-3 rounded-xl border border-slate-200 bg-white p-3 shadow-sm shadow-slate-100 lg:grid-cols-[6.5rem_1fr]"
+                >
+                  <div className="rounded-lg bg-slate-50 px-3 py-2">
+                    {isToday(day.dayOfWeek) && (
+                      <span className="mb-1 inline-block rounded-full bg-green-600 px-2 py-0.5 text-[10px] font-bold text-white">
+                        Today
+                      </span>
+                    )}
+                    {isTomorrow(day.dayOfWeek) && (
+                      <span className="mb-1 inline-block rounded-full bg-sky-600 px-2 py-0.5 text-[10px] font-bold text-white">
+                        Tomorrow
+                      </span>
+                    )}
+                    <p className="text-xs font-medium text-gray-500">{day.dayOfWeek.slice(0, 3)}</p>
+                    <p className="text-xs text-gray-400">{formatShortDate(day.date)}</p>
+                    <p className="mt-3 text-[11px] text-gray-500">
+                      Planned {formatMiles(dayPlannedMileage)} mi
+                    </p>
+                    <p className="text-[11px] text-gray-500">
+                      Actual {formatMiles(dayActualMileage)} mi
+                    </p>
+                  </div>
+                  <div className="space-y-3 rounded-lg border border-slate-100 bg-slate-50 p-3">
+                    {runEntries.length === 0 ? (
+                      <p className="text-sm text-gray-400">Rest</p>
+                    ) : (
+                      runEntries.map((entry, index) => {
+                        const actualMileage = entry.log?.actualMileage ?? 0;
+                        const draft = runDrafts[entry.runId] ?? createDefaultRunDraft(entry.plannedMileage);
+                        const isLastEntry = index === runEntries.length - 1;
+                        const editor = entry.workout
+                          ? (runEditors[entry.runId] ?? {
+                              title: entry.workout.title,
+                              totalDistance: entry.workout.totalDistance,
+                              estimatedDuration: entry.workout.estimatedDuration,
+                              targetDayOfWeek: day.dayOfWeek,
+                            })
+                          : null;
+
+                        return (
+                          <div key={entry.runId} className="rounded-xl border border-slate-200 bg-white p-3 shadow-sm">
+                            <div className="flex items-start justify-between gap-3">
+                              <button
+                                type="button"
+                                disabled={!entry.workout}
+                                onClick={() => entry.workout && initializeRunEditor(entry.runId, entry.workout, day.dayOfWeek)}
+                                className={`min-w-0 flex-1 text-left ${entry.workout ? "cursor-pointer" : "cursor-default"}`}
+                              >
+                                <div className="flex items-center gap-2">
+                                  <span className="text-lg">{entry.workout ? workoutEmoji[entry.workout.type] ?? "🏃" : "➕"}</span>
+                                  <div className="min-w-0">
+                                    <p className={`truncate text-sm font-medium ${entry.workout ? workoutColor[entry.workout.type] ?? "text-gray-700" : "text-gray-700"}`}>
+                                      {entry.title}
+                                    </p>
+                                    <p className="text-xs text-gray-500">
+                                      Planned {formatMiles(entry.plannedMileage)} mi
+                                      {entry.log ? ` · Actual ${formatMiles(actualMileage)} mi` : ""}
+                                    </p>
+                                  </div>
+                                </div>
+                              </button>
+                              {entry.workout && (
+                                <select
+                                  defaultValue=""
+                                  aria-label={`Swap workout for ${day.dayOfWeek}`}
+                                  className="rounded border border-gray-200 bg-gray-50 px-2 py-1 text-xs text-gray-600 focus:border-enduro-500 focus:outline-none focus:ring-1 focus:ring-enduro-500/20"
+                                  onChange={(e) => {
+                                    const selectedType = e.target.value as WorkoutType;
+                                    if (!selectedType) return;
+                                    window.dispatchEvent(
+                                      new CustomEvent("workout-swap", {
+                                        detail: { dayOfWeek: day.dayOfWeek, workoutType: selectedType },
+                                      })
+                                    );
+                                  }}
+                                >
+                                  <option value="" disabled>↻ Swap</option>
+                                  {swapOptions.map((opt) => (
+                                    <option key={opt.type} value={opt.type}>
+                                      {opt.emoji} {opt.label}
+                                    </option>
+                                  ))}
+                                </select>
+                              )}
+                            </div>
+
+                            {entry.workout && (
+                              <>
+                                <p className="mt-2 text-xs text-gray-500">
+                                  {entry.workout.totalDistance > 0 ? `${entry.workout.totalDistance} mi · ` : ""}
+                                  {Math.floor(entry.workout.estimatedDuration / 60)}h {entry.workout.estimatedDuration % 60}min
+                                </p>
+                                {renderWorkoutSegments(entry.workout)}
+                              </>
+                            )}
+
+                            {editingRunId === entry.runId && entry.workout && editor && (
+                              <div className="mt-3 grid gap-2 rounded-lg border border-enduro-100 bg-enduro-50 p-3 sm:grid-cols-2">
+                                <label className="block sm:col-span-2">
+                                  <span className="text-xs font-medium text-gray-600">Title</span>
+                                  <input
+                                    type="text"
+                                    value={editor.title}
+                                    onChange={(e) =>
+                                      setRunEditors((prev) => ({
+                                        ...prev,
+                                        [entry.runId]: { ...editor, title: e.target.value },
+                                      }))
+                                    }
+                                    className="mt-1 w-full rounded border border-gray-300 px-2 py-1 text-sm"
+                                  />
+                                </label>
+                                <label className="block">
+                                  <span className="text-xs font-medium text-gray-600">Distance</span>
+                                  <input
+                                    type="number"
+                                    min={0}
+                                    step={0.1}
+                                    value={editor.totalDistance}
+                                    onChange={(e) =>
+                                      setRunEditors((prev) => ({
+                                        ...prev,
+                                        [entry.runId]: { ...editor, totalDistance: Number(e.target.value) || 0 },
+                                      }))
+                                    }
+                                    className="mt-1 w-full rounded border border-gray-300 px-2 py-1 text-sm"
+                                  />
+                                </label>
+                                <label className="block">
+                                  <span className="text-xs font-medium text-gray-600">Duration (min)</span>
+                                  <input
+                                    type="number"
+                                    min={0}
+                                    step={5}
+                                    value={editor.estimatedDuration}
+                                    onChange={(e) =>
+                                      setRunEditors((prev) => ({
+                                        ...prev,
+                                        [entry.runId]: { ...editor, estimatedDuration: Number(e.target.value) || 0 },
+                                      }))
+                                    }
+                                    className="mt-1 w-full rounded border border-gray-300 px-2 py-1 text-sm"
+                                  />
+                                </label>
+                                <label className="block sm:col-span-2">
+                                  <span className="text-xs font-medium text-gray-600">Shift to day</span>
+                                  <select
+                                    value={editor.targetDayOfWeek}
+                                    onChange={(e) =>
+                                      setRunEditors((prev) => ({
+                                        ...prev,
+                                        [entry.runId]: { ...editor, targetDayOfWeek: e.target.value },
+                                      }))
+                                    }
+                                    className="mt-1 w-full rounded border border-gray-300 px-2 py-1 text-sm"
+                                  >
+                                    {availableTargetDays.map((dayOption) => (
+                                      <option key={dayOption} value={dayOption}>
+                                        {dayOption}
+                                      </option>
+                                    ))}
+                                  </select>
+                                </label>
+                                <div className="flex gap-2 sm:col-span-2">
+                                  <button
+                                    type="button"
+                                    onClick={() => saveRunEdit(entry.runId)}
+                                    className="rounded bg-enduro-600 px-3 py-1.5 text-xs font-medium text-white"
+                                  >
+                                    Save plan change
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => setEditingRunId(null)}
+                                    className="rounded border border-gray-200 bg-white px-3 py-1.5 text-xs font-medium text-gray-600"
+                                  >
+                                    Cancel
+                                  </button>
+                                </div>
+                              </div>
+                            )}
+
+                            {entry.log ? (
+                              <div className="mt-3 flex flex-wrap items-center gap-2 border-t border-gray-100 pt-3 text-xs text-gray-600">
+                                <span className="rounded bg-green-50 px-2 py-1 text-green-700">
+                                  Actual {formatMiles(entry.log.actualMileage)} mi
+                                </span>
+                                <span>Feel {entry.log.feelRating}/10</span>
+                                {entry.log.notes && <span className="text-gray-500">{entry.log.notes}</span>}
+                                <button
+                                  type="button"
+                                  onClick={() => removeRunLog(day, entry.runId)}
+                                  className="rounded border border-red-200 bg-white px-2 py-1 font-medium text-red-600 hover:bg-red-50"
+                                >
+                                  Remove
+                                </button>
+                                {isLastEntry && (
+                                  <button
+                                    type="button"
+                                    onClick={() => addAdditionalRun(day.dayOfWeek)}
+                                    className="rounded border border-enduro-200 bg-enduro-50 px-2 py-1 font-medium text-enduro-700 hover:bg-enduro-100"
+                                  >
+                                    Add actual run
+                                  </button>
+                                )}
+                              </div>
+                            ) : (
+                              <div className="mt-3">
+                                <DailyLogControls
+                                  draft={draft}
+                                  plannedMileage={entry.plannedMileage}
+                                  onDraftChange={(patch) => updateRunDraft(entry.runId, entry.plannedMileage, patch)}
+                                  onSave={() => saveRunLog(day, entry, draft)}
+                                  onCancel={entry.isAdditionalRun ? () => cancelAdditionalRun(day.dayOfWeek, entry.runId) : undefined}
+                                />
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })
+                    )}
+                    {!runEntries.some((entry) => entry.isAdditionalRun && !entry.log) && !runEntries.some((entry) => entry.log) && (
+                      <button
+                        type="button"
+                        onClick={() => addAdditionalRun(day.dayOfWeek)}
+                        className="rounded border border-enduro-200 bg-enduro-50 px-3 py-2 text-xs font-medium text-enduro-700 hover:bg-enduro-100"
+                      >
+                        Add actual run
+                      </button>
+                    )}
+                  </div>
+                </div>
               );
             })}
           </div>

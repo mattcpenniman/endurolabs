@@ -11,7 +11,7 @@
 import React from "react";
 import { useState, useEffect } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { RunnerProfile, MarathonPlan, DailyLog } from "@/lib/training/models";
+import { RunnerProfile, MarathonPlan, DailyLog, WeeklyPlan } from "@/lib/training/models";
 import OnboardingForm from "@/app/components/onboarding/OnboardingForm";
 import PlanOverviewCard from "@/app/components/plan/PlanOverviewCard";
 import PaceZonesCard from "@/app/components/plan/PaceZonesCard";
@@ -258,19 +258,38 @@ export default function PlanPage(): React.ReactNode {
 
   const getFocusDate = (targetPlan: MarathonPlan, logs: DailyLog[]): string | null => {
     const todayStr = new Date().toISOString().slice(0, 10);
-    const completedDates = new Set(
-      logs.filter((log) => log.completed).map((log) => toDateKey(log.date))
-    );
-    const allDays = targetPlan.weeks.flatMap((week) => week.days.map((day) => toDateKey(day.date)));
+    const allDays = targetPlan.weeks.flatMap((week) => week.days);
+    const dateKeys = allDays.map((day) => toDateKey(day.date));
+    const isDateComplete = (dateKey: string): boolean => {
+      const matchingDay = allDays.find((day) => toDateKey(day.date) === dateKey);
+      if (!matchingDay) return false;
 
-    if (allDays.includes(todayStr) && !completedDates.has(todayStr)) {
+      const plannedWorkoutIds = [
+        matchingDay.workout?.id,
+        matchingDay.secondaryWorkout?.id,
+      ].filter((id): id is string => Boolean(id));
+
+      if (plannedWorkoutIds.length === 0) {
+        return logs.some((log) => toDateKey(log.date) === dateKey && log.completed);
+      }
+
+      const completedRunIds = new Set(
+        logs
+          .filter((log) => toDateKey(log.date) === dateKey && log.completed)
+          .map((log) => log.plannedWorkoutId ?? log.runId)
+      );
+
+      return plannedWorkoutIds.every((runId) => completedRunIds.has(runId));
+    };
+
+    if (dateKeys.includes(todayStr) && !isDateComplete(todayStr)) {
       return todayStr;
     }
 
-    const nextUpcomingDay = allDays.find((dateKey) => dateKey > todayStr);
+    const nextUpcomingDay = dateKeys.find((dateKey) => dateKey > todayStr);
     if (nextUpcomingDay) return nextUpcomingDay;
 
-    return allDays[0] ?? null;
+    return dateKeys[0] ?? null;
   };
 
   const focusCurrentSchedule = (targetPlan: MarathonPlan, logs: DailyLog[]): void => {
@@ -853,6 +872,30 @@ export default function PlanPage(): React.ReactNode {
       // Silently fail
     } finally {
       setIsSaving(false);
+    }
+  };
+
+  const handleWeekUpdate = async (updatedWeek: WeeklyPlan): Promise<void> => {
+    if (!plan) return;
+
+    const updatedWeeks = plan.weeks.map((week) =>
+      week.weekNumber === updatedWeek.weekNumber ? updatedWeek : week
+    );
+    const updatedPlan: MarathonPlan = {
+      ...plan,
+      weeks: updatedWeeks,
+      peakWeeklyMileage: Math.max(...updatedWeeks.map((week) => week.totalMileage)),
+    };
+
+    setPlan(updatedPlan);
+
+    try {
+      const savedPlan = await persistPlan(updatedPlan, planName);
+      if (savedPlan) {
+        setPlan(savedPlan);
+      }
+    } catch {
+      // Silently fail while keeping in-session edits visible.
     }
   };
 
@@ -1538,6 +1581,7 @@ export default function PlanPage(): React.ReactNode {
                         onIntensityTargetChange={handleAdjustIntensityTarget}
                         highlightCurrentWeek={week.weekNumber === currentWeekNumber}
                         focusDate={focusDate}
+                        onWeekUpdate={handleWeekUpdate}
                       />
                     ))}
                   </section>
