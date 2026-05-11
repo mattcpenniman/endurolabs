@@ -11,7 +11,6 @@
 import React from "react";
 import { useState, useEffect, useMemo } from "react";
 import { DailyLog, WeeklyPlan, DailyPlan, Workout, WorkoutType, RunnerProfile, formatPace } from "@/lib/training/models";
-import { addDailyLog, removeDailyLog } from "@/lib/training/progress-tracker";
 
 interface WeeklyPlanCardProps {
   planId: string;
@@ -558,8 +557,8 @@ export default function WeeklyPlanCard({
     resetRunDraft(runId);
   };
 
-  const saveRunLog = (day: DailyPlan, entry: RunEntry, draft: RunLogDraft): void => {
-    addDailyLog(planId, {
+  const saveRunLog = async (day: DailyPlan, entry: RunEntry, draft: RunLogDraft): Promise<void> => {
+    const log: DailyLog = {
       weekNumber: week.weekNumber,
       date: day.date,
       dayOfWeek: day.dayOfWeek,
@@ -572,7 +571,13 @@ export default function WeeklyPlanCard({
       feelRating: draft.feelRating,
       notes: draft.notes,
       loggedAt: new Date().toISOString(),
+    };
+    const response = await fetch(`/api/plan/${planId}/logs`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(log),
     });
+    if (!response.ok) return;
     resetRunDraft(entry.runId);
     setPendingExtraRuns((prev) => ({
       ...prev,
@@ -581,8 +586,16 @@ export default function WeeklyPlanCard({
     onDailyLogSaved();
   };
 
-  const removeRunLog = (day: DailyPlan, runId: string): void => {
-    removeDailyLog(planId, week.weekNumber, day.dayOfWeek, runId);
+  const removeRunLog = async (day: DailyPlan, runId: string): Promise<void> => {
+    const params = new URLSearchParams({
+      weekNumber: String(week.weekNumber),
+      dayOfWeek: day.dayOfWeek,
+      runId,
+    });
+    const response = await fetch(`/api/plan/${planId}/logs?${params.toString()}`, {
+      method: "DELETE",
+    });
+    if (!response.ok) return;
     onDailyLogSaved();
   };
 

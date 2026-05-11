@@ -23,7 +23,7 @@ import LongRunProgressionChart from "@/app/components/charts/LongRunProgressionC
 import IntensityDistributionChart from "@/app/components/charts/IntensityDistributionChart";
 import { generateRaceDayPlan } from "@/lib/training/race-day-plan";
 import { calculatePaceZones, calculatePowerZones } from "@/lib/training/zone-calculator";
-import { analyzeProgress, dailyLogsToWeeklyLogs, loadDailyLogs } from "@/lib/training/progress-tracker";
+import { analyzeProgress, dailyLogsToWeeklyLogs } from "@/lib/training/progress-tracker";
 import { adjustWeeklyIntensityPercent } from "@/lib/training/intensity-adjustments";
 
 // Shape of a saved plan row from the database
@@ -172,6 +172,7 @@ export default function PlanPage(): React.ReactNode {
   const [planName, setPlanName] = useState("");
   const [activePlanTab, setActivePlanTab] = useState<PlanTab>("overview");
   const [dailyLogRefresh, setDailyLogRefresh] = useState(0);
+  const [dailyLogs, setDailyLogs] = useState<DailyLog[]>([]);
   const [shareToken, setShareToken] = useState<string | null>(null);
   const [shareLinkUrl, setShareLinkUrl] = useState<string | null>(null);
   const [shareStatus, setShareStatus] = useState<string | null>(null);
@@ -223,6 +224,31 @@ export default function PlanPage(): React.ReactNode {
       setSavedPlans(await listRes.json());
     }
   };
+
+  const loadPlanDailyLogs = async (planId: string): Promise<DailyLog[]> => {
+    const response = await fetch(`/api/plan/${planId}/logs`);
+    if (!response.ok) {
+      throw new Error("Failed to load logs");
+    }
+    return (await response.json()) as DailyLog[];
+  };
+
+  useEffect(() => {
+    if (!plan?.id) return;
+
+    let isMounted = true;
+    loadPlanDailyLogs(plan.id)
+      .then((logs) => {
+        if (isMounted) setDailyLogs(logs);
+      })
+      .catch(() => {
+        if (isMounted) setError("Failed to load logs");
+      });
+
+    return () => {
+      isMounted = false;
+    };
+  }, [plan?.id, dailyLogRefresh]);
 
   const persistCurrentPlan = async (planId: string | null): Promise<boolean> => {
     try {
@@ -368,6 +394,7 @@ export default function PlanPage(): React.ReactNode {
       const savedPlan = await persistPlan(generatedPlan, initialPlanName);
       const nextPlan = savedPlan ?? generatedPlan;
       setPlan(nextPlan);
+      setDailyLogs([]);
       await persistCurrentPlan(nextPlan.id);
       setShareToken(null);
       setShareLinkUrl(null);
@@ -415,6 +442,7 @@ export default function PlanPage(): React.ReactNode {
       const savedPlan = await persistPlan(plan, planName, { saveAsNew: true });
       if (savedPlan) {
         setPlan(savedPlan);
+        setDailyLogs([]);
         await persistCurrentPlan(savedPlan.id);
         router.replace("/plan");
       }
@@ -435,7 +463,9 @@ export default function PlanPage(): React.ReactNode {
       const res = await fetch(`/api/plan/${planId}`);
       if (!res.ok) throw new Error("Failed to load plan");
       const saved = await res.json();
+      const persistedLogs = await loadPlanDailyLogs(saved.id);
       setPlan(saved.planData);
+      setDailyLogs(persistedLogs);
       setPlanName(saved.raceName ?? saved.runnerProfile.raceName ?? "");
       setShareToken(saved.shareToken ?? null);
       setShareLinkUrl(saved.shareUrl ?? null);
@@ -452,7 +482,7 @@ export default function PlanPage(): React.ReactNode {
       setPacingStrategy(saved.runnerProfile.racePacingStrategy ?? "even");
       setExpectedTempF(saved.runnerProfile.expectedRaceTempF ?? 50);
       if (options.focusCurrentSchedule) {
-        focusCurrentSchedule(saved.planData, loadDailyLogs(saved.planData.id));
+        focusCurrentSchedule(saved.planData, persistedLogs);
       } else {
         setExpandedWeeks(new Set());
         setActivePlanTab("overview");
@@ -1033,7 +1063,7 @@ export default function PlanPage(): React.ReactNode {
     }
 
     if (plan?.id === activePlanId) {
-      focusCurrentSchedule(plan, loadDailyLogs(plan.id));
+      focusCurrentSchedule(plan, dailyLogs);
       setHasAttemptedCurrentPlanLoad(true);
       return;
     }
@@ -1042,7 +1072,7 @@ export default function PlanPage(): React.ReactNode {
     handleLoadPlan(activePlanId, { focusCurrentSchedule: true, updateRoute: false }).catch(() => {
       // Errors are handled inside handleLoadPlan.
     });
-  }, [activePlanId, currentPlanRequestCount, hasAttemptedCurrentPlanLoad, isCheckingAuth, isCurrentPlanView, isLoading, plan]);
+  }, [activePlanId, currentPlanRequestCount, dailyLogs, hasAttemptedCurrentPlanLoad, isCheckingAuth, isCurrentPlanView, isLoading, plan]);
 
   useEffect(() => {
     if (!pendingCurrentPlanFocus || !plan || activePlanTab !== "schedule") return;
@@ -1308,7 +1338,6 @@ export default function PlanPage(): React.ReactNode {
   if (!plan) return null;
   const currentPaceZones = calculatePaceZones(plan.runnerProfile);
   const currentPowerZones = calculatePowerZones(plan.runnerProfile, currentPaceZones);
-  const dailyLogs = loadDailyLogs(plan.id);
   const weeklyLogs = dailyLogsToWeeklyLogs(plan, dailyLogs);
   const progress = analyzeProgress(plan, weeklyLogs);
   const trainingDayCount = plan.runnerProfile.trainingDaysPerWeek;

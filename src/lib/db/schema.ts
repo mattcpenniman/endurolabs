@@ -55,3 +55,29 @@ export const plans = pgTable("plans", {
 }, (table) => [
   uniqueIndex("plans_share_token_unique").on(table.shareToken),
 ]);
+
+export const planRunLogs = pgTable("plan_run_logs", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  userId: uuid("user_id")
+    .notNull()
+    .references(() => users.id, { onDelete: "cascade" }),
+  planId: uuid("plan_id")
+    .notNull()
+    .references(() => plans.id, { onDelete: "cascade" }),
+  weekNumber: integer("week_number").notNull(),
+  date: varchar("date", { length: 32 }).notNull(),
+  dayOfWeek: varchar("day_of_week", { length: 16 }).notNull(),
+  runId: varchar("run_id", { length: 255 }).notNull(),
+  plannedWorkoutId: varchar("planned_workout_id", { length: 255 }),
+  runTitle: varchar("run_title", { length: 255 }),
+  isAdditionalRun: integer("is_additional_run").default(0).notNull(),
+  actualMileage: integer("actual_mileage_hundredths").notNull(),
+  completed: integer("completed").default(1).notNull(),
+  feelRating: integer("feel_rating").notNull(),
+  notes: text("notes").default("").notNull(),
+  loggedAt: timestamp("logged_at").notNull(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+}, (table) => [
+  uniqueIndex("plan_run_logs_unique_run").on(table.planId, table.weekNumber, table.dayOfWeek, table.runId),
+]);
