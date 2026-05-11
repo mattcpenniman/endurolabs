@@ -14,6 +14,8 @@ function makeProfile(overrides: Partial<RunnerProfile> = {}): RunnerProfile {
     currentHalfMarathonPR: 125, // 2:05 half marathon
     goalMarathonTime: 270,
     raceDate: "2026-09-01",
+    maxHeartRate: null,
+    restingHeartRate: null,
     trainingDaysPerWeek: 5,
     preferredRestDay: "Monday",
     recentInjuryHistory: "None",
@@ -42,6 +44,7 @@ describe("calculatePaceZones", () => {
     expect(zones).toHaveProperty("marathonEffort");
     expect(zones).toHaveProperty("thresholdEffort");
     expect(zones).toHaveProperty("vo2Effort");
+    expect(zones).toHaveProperty("heartRateZones");
   });
 
   it("produces zones where all values are positive numbers", () => {
@@ -127,6 +130,24 @@ describe("calculatePaceZones", () => {
     expect(zones.thresholdEffort).toContain("discomfort");
     expect(zones.vo2Effort).toContain("Hard");
     expect(zones.vo2MaxEstimate).toBeGreaterThan(20);
+  });
+
+  it("returns HR percentage bands even when HR anchors are missing", () => {
+    const zones = calculatePaceZones(makeProfile());
+
+    expect(zones.heartRateZones.easy.hrrPercent.min).toBeCloseTo(0.6, 2);
+    expect(zones.heartRateZones.easy.hrrPercent.max).toBeCloseTo(0.74, 2);
+    expect(zones.heartRateZones.marathon.hrMaxPercent.min).toBeCloseTo(0.8, 2);
+    expect(zones.heartRateZones.marathon.targetBpm).toBeNull();
+  });
+
+  it("calculates HR targets from resting and max heart rate", () => {
+    const zones = calculatePaceZones(makeProfile({ restingHeartRate: 50, maxHeartRate: 190 }));
+
+    expect(zones.heartRateZones.easy.targetBpm).toEqual({ min: 134, max: 154 });
+    expect(zones.heartRateZones.marathon.targetBpm).toEqual({ min: 155, max: 168 });
+    expect(zones.heartRateZones.threshold.targetBpm).toEqual({ min: 166, max: 173 });
+    expect(zones.heartRateZones.vo2.targetBpm).toEqual({ min: 183, max: 190 });
   });
 });
 

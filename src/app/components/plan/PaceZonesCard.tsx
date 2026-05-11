@@ -6,7 +6,7 @@ import React from "react";
 // coding and RPE effort descriptors.
 // ============================================================
 
-import { PaceZones, PowerZones, formatPace } from "@/lib/training/models";
+import { PaceZones, PowerZones, HeartRateZone, formatPace } from "@/lib/training/models";
 
 interface PaceZonesCardProps {
   paceZones: PaceZones;
@@ -22,36 +22,51 @@ const zoneColor: Record<string, string> = {
 };
 
 export default function PaceZonesCard({ paceZones, powerZones }: PaceZonesCardProps) {
+  const formatPercentRange = (range: HeartRateZone["hrrPercent"]): string =>
+    `${Math.round(range.min * 100)}-${Math.round(range.max * 100)}%`;
+  const formatHeartRateLine = (heartRateZone: HeartRateZone): string => {
+    if (heartRateZone.targetBpm) {
+      return `${heartRateZone.targetBpm.min}-${heartRateZone.targetBpm.max} bpm`;
+    }
+
+    return `${formatPercentRange(heartRateZone.hrrPercent)} HRR · ${formatPercentRange(heartRateZone.hrMaxPercent)} HRmax`;
+  };
+
   const zones = [
     {
       name: "Recovery",
       pace: formatPace(paceZones.recovery),
       effort: "Very easy",
       color: zoneColor.recovery,
+      heartRate: paceZones.heartRateZones.recovery,
     },
     {
       name: "Easy",
       pace: `${formatPace(paceZones.easy.max)}–${formatPace(paceZones.easy.min)}`,
       effort: paceZones.easyEffort,
       color: zoneColor.easy,
+      heartRate: paceZones.heartRateZones.easy,
     },
     {
       name: "Marathon",
       pace: formatPace(paceZones.marathon),
       effort: paceZones.marathonEffort,
       color: zoneColor.marathon,
+      heartRate: paceZones.heartRateZones.marathon,
     },
     {
       name: "Threshold",
       pace: formatPace(paceZones.threshold),
       effort: paceZones.thresholdEffort,
       color: zoneColor.threshold,
+      heartRate: paceZones.heartRateZones.threshold,
     },
     {
       name: "VO2 Max",
       pace: formatPace(paceZones.vo2),
       effort: paceZones.vo2Effort,
       color: zoneColor.vo2,
+      heartRate: paceZones.heartRateZones.vo2,
     },
   ];
 
@@ -82,6 +97,10 @@ export default function PaceZonesCard({ paceZones, powerZones }: PaceZonesCardPr
                   ? `${powerZones.easy.min}–${powerZones.easy.max} W`
                   : `${zone.name === "Recovery" ? powerZones.easy.min : zone.name === "Marathon" ? powerZones.marathon : zone.name === "Threshold" ? powerZones.threshold : powerZones.vo2} W`}
               </p>
+            )}
+            <p className="text-xs opacity-75">HR {formatHeartRateLine(zone.heartRate)}</p>
+            {zone.heartRate.note && (
+              <p className="text-xs opacity-75">{zone.heartRate.note}</p>
             )}
             <p className="text-xs opacity-75">{zone.effort}</p>
           </div>

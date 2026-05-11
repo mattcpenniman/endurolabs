@@ -110,6 +110,10 @@ function clampIntensityTarget(key: IntensityTargetKey, value: number): number {
   return Math.max(range.min, Math.min(range.max, Math.round(value * 2) / 2));
 }
 
+function clampHeartRate(value: number): number {
+  return Math.max(30, Math.min(240, Math.round(value)));
+}
+
 function formatRaceGoalInput(minutes: number): string {
   const totalSeconds = Math.max(0, Math.round(minutes * 60));
   const hours = Math.floor(totalSeconds / 3600);
@@ -813,6 +817,34 @@ export default function PlanPage(): React.ReactNode {
           raceName: planName.trim() || undefined,
           racePacingStrategy: pacingStrategy,
           expectedRaceTempF: clampedTemp,
+        },
+      };
+      const savedPlan = await persistPlan(updatedPlan, planName);
+      setPlan(savedPlan ?? updatedPlan);
+    } catch {
+      // Silently fail
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  const handleAdjustHeartRate = async (
+    key: "maxHeartRate" | "restingHeartRate",
+    value: number | null
+  ) => {
+    if (!plan) return;
+
+    const nextValue = value === null ? null : clampHeartRate(value);
+    if ((plan.runnerProfile[key] ?? null) === nextValue) return;
+
+    setIsSaving(true);
+    try {
+      const updatedPlan: MarathonPlan = {
+        ...plan,
+        runnerProfile: {
+          ...plan.runnerProfile,
+          raceName: planName.trim() || undefined,
+          [key]: nextValue,
         },
       };
       const savedPlan = await persistPlan(updatedPlan, planName);
@@ -1753,6 +1785,57 @@ export default function PlanPage(): React.ReactNode {
                       </label>
                     ))}
                   </div>
+                </div>
+              </div>
+
+              <div className="rounded-lg border border-gray-200 bg-white p-5">
+                <p className="block text-sm font-semibold text-gray-900">
+                  Heart rate anchors
+                </p>
+                <p className="mt-1 text-sm text-gray-500">
+                  Used to calculate heart-rate targets in the pace zones card with the HRR formula.
+                </p>
+                <div className="mt-4 grid gap-3 sm:grid-cols-2">
+                  <label className="block">
+                    <span className="text-xs font-medium uppercase tracking-wide text-gray-500">Resting HR</span>
+                    <input
+                      key={`resting-hr-${plan.runnerProfile.restingHeartRate ?? "unset"}`}
+                      type="number"
+                      min={30}
+                      max={120}
+                      defaultValue={plan.runnerProfile.restingHeartRate ?? ""}
+                      onBlur={(e) => {
+                        const value = e.target.value.trim();
+                        handleAdjustHeartRate("restingHeartRate", value ? Number(value) : null);
+                      }}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") e.currentTarget.blur();
+                      }}
+                      disabled={isSaving}
+                      placeholder="e.g. 50"
+                      className="mt-1 w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 focus:border-enduro-500 focus:outline-none focus:ring-2 focus:ring-enduro-500/20 disabled:opacity-60"
+                    />
+                  </label>
+                  <label className="block">
+                    <span className="text-xs font-medium uppercase tracking-wide text-gray-500">Max HR</span>
+                    <input
+                      key={`max-hr-${plan.runnerProfile.maxHeartRate ?? "unset"}`}
+                      type="number"
+                      min={100}
+                      max={240}
+                      defaultValue={plan.runnerProfile.maxHeartRate ?? ""}
+                      onBlur={(e) => {
+                        const value = e.target.value.trim();
+                        handleAdjustHeartRate("maxHeartRate", value ? Number(value) : null);
+                      }}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") e.currentTarget.blur();
+                      }}
+                      disabled={isSaving}
+                      placeholder="e.g. 190"
+                      className="mt-1 w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 focus:border-enduro-500 focus:outline-none focus:ring-2 focus:ring-enduro-500/20 disabled:opacity-60"
+                    />
+                  </label>
                 </div>
               </div>
 

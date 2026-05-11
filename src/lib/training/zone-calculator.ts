@@ -10,6 +10,7 @@ import {
   RunnerProfile,
   PaceZones,
   PowerZones,
+  HeartRateZone,
 } from "./models";
 
 // ─── VDOT Estimation ────────────────────────────────────────
@@ -104,6 +105,34 @@ function getVO2PaceFactor(vdot: number): number {
   return vdot > 55 ? 0.86 : vdot > 45 ? 0.87 : vdot > 35 ? 0.89 : 0.91;
 }
 
+function calculateHeartRateZone(
+  profile: RunnerProfile,
+  hrrPercent: HeartRateZone["hrrPercent"],
+  hrMaxPercent: HeartRateZone["hrMaxPercent"],
+  note?: string
+): HeartRateZone {
+  const maxHeartRate = profile.maxHeartRate ?? null;
+  const restingHeartRate = profile.restingHeartRate ?? null;
+  const canCalculateTarget =
+    maxHeartRate !== null &&
+    restingHeartRate !== null &&
+    maxHeartRate > restingHeartRate;
+
+  const targetBpm = canCalculateTarget
+    ? {
+        min: Math.round(restingHeartRate + hrrPercent.min * (maxHeartRate - restingHeartRate)),
+        max: Math.round(restingHeartRate + hrrPercent.max * (maxHeartRate - restingHeartRate)),
+      }
+    : null;
+
+  return {
+    hrrPercent,
+    hrMaxPercent,
+    targetBpm,
+    note,
+  };
+}
+
 // ─── Core Zone Calculation ──────────────────────────────────
 
 export function calculatePaceZones(profile: RunnerProfile): PaceZones {
@@ -144,6 +173,18 @@ export function calculatePaceZones(profile: RunnerProfile): PaceZones {
   const easyMax = profile.averageEasyPace
     ? profile.averageEasyPace - 0.25
     : easyPace - 0.25;
+  const heartRateZones = {
+    recovery: calculateHeartRateZone(
+      profile,
+      { min: 0.6, max: 0.67 },
+      { min: 0.65, max: 0.72 },
+      "Stay near the low end of easy effort."
+    ),
+    easy: calculateHeartRateZone(profile, { min: 0.6, max: 0.74 }, { min: 0.65, max: 0.79 }),
+    marathon: calculateHeartRateZone(profile, { min: 0.75, max: 0.84 }, { min: 0.8, max: 0.9 }),
+    threshold: calculateHeartRateZone(profile, { min: 0.83, max: 0.88 }, { min: 0.88, max: 0.92 }),
+    vo2: calculateHeartRateZone(profile, { min: 0.95, max: 1 }, { min: 0.98, max: 1 }),
+  };
 
   return {
     easy: { min: Math.max(easyMin, easyMax), max: Math.min(easyMin, easyMax) },
@@ -156,6 +197,7 @@ export function calculatePaceZones(profile: RunnerProfile): PaceZones {
     marathonEffort: "Comfortably hard — brief phrases only",
     thresholdEffort: "Sustainable discomfort — a few words at a time",
     vo2Effort: "Hard — one-word answers only",
+    heartRateZones,
   };
 }
 

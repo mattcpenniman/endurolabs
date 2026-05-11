@@ -49,6 +49,8 @@ export interface RunnerProfile {
   raceDistance?: "marathon" | "half_marathon" | "10k" | "5k";
   racePacingStrategy?: "even" | "negative" | "positive" | "progressive";
   expectedRaceTempF?: number;
+  maxHeartRate?: number | null;           // bpm
+  restingHeartRate?: number | null;       // bpm
   raceName?: string;                      // optional label for the race
   trainingDaysPerWeek: number;
   preferredRestDay: string;               // "Monday", "Tuesday", etc.
@@ -86,6 +88,18 @@ export interface RunnerProfile {
 
 // ─── Pace Zones ────────────────────────────────────────────
 
+export interface HeartRateRange {
+  min: number;
+  max: number;
+}
+
+export interface HeartRateZone {
+  hrrPercent: HeartRateRange;             // decimal, e.g. 0.6 = 60%
+  hrMaxPercent: HeartRateRange;           // decimal, e.g. 0.8 = 80%
+  targetBpm: HeartRateRange | null;       // null when HR anchors unavailable
+  note?: string;
+}
+
 export interface PaceZones {
   easy: { min: number; max: number };           // min/mile
   marathon: number;                              // min/mile
@@ -97,6 +111,13 @@ export interface PaceZones {
   marathonEffort: string;
   thresholdEffort: string;
   vo2Effort: string;
+  heartRateZones: {
+    recovery: HeartRateZone;
+    easy: HeartRateZone;
+    marathon: HeartRateZone;
+    threshold: HeartRateZone;
+    vo2: HeartRateZone;
+  };
 }
 
 export interface PowerZones {
