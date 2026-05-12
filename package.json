@@ -8,6 +8,8 @@
     "start": "next start -p ${PORT:-3000}",
     "db:push": "drizzle-kit push",
     "user:create": "node scripts/create-user.mjs",
+    "user:list": "node scripts/user-admin.mjs list",
+    "user:set-password": "node scripts/user-admin.mjs set-password",
     "lint": "next lint",
     "test": "vitest run",
     "test:watch": "vitest"

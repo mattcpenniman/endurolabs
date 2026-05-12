@@ -54,6 +54,18 @@ Create a login user inside the running Docker app container:
 docker compose exec app npm run user:create -- --email runner@example.com --password 'change-me-please' --name 'Runner Name'
 ```
 
+List users from inside the running Docker app container:
+
+```bash
+docker compose exec app npm run user:list
+```
+
+Reset a user's password from inside the running Docker app container:
+
+```bash
+docker compose exec app npm run user:set-password -- --email runner@example.com --password 'new-secret-pass'
+```
+
 Set `APP_URL` in `.env` to control the domain used for generated read-only share links:
 
 ```bash
@@ -99,6 +111,46 @@ The command uses `DATABASE_URL` when set. If it is not set, it defaults to:
 
 ```bash
 postgresql://enduro:endurodev@localhost:5432/endurolab
+```
+
+### List users
+
+List the current users from the backend:
+
+With Docker:
+
+```bash
+docker compose exec app npm run user:list
+```
+
+For a local Node process:
+
+```bash
+npm run user:list
+```
+
+Add `-- --json` if you want machine-readable output.
+
+### Update a user's password
+
+Reset a user's password from the backend by email or user id. This also revokes that user's active sessions so they need to log in again with the new password.
+
+With Docker:
+
+```bash
+docker compose exec app npm run user:set-password -- --email runner@example.com --password 'new-secret-pass'
+```
+
+For a local Node process:
+
+```bash
+npm run user:set-password -- --email runner@example.com --password 'new-secret-pass'
+```
+
+You can target by id instead of email:
+
+```bash
+npm run user:set-password -- --id 11111111-2222-3333-4444-555555555555 --password 'new-secret-pass'
 ```
 
 Training plans under `/plan` require login. Newly generated and saved plans are tied to the signed-in user.
@@ -176,7 +228,8 @@ src/
 │       ├── goal-assessment.ts  # Feasibility engine
 │       └── calendar-export.ts  # ICS calendar generation
 ├── scripts/
-│   └── create-user.mjs     # Backend user creation tool
+│   ├── create-user.mjs     # Backend user creation tool
+│   └── user-admin.mjs      # Backend user listing + password reset tool
 └── test/
     ├── zone-calculator.test.ts
     ├── goal-assessment.test.ts
