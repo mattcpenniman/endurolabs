@@ -111,6 +111,17 @@ function formatMileageValue(distance: number): string {
   return `${distance.toFixed(2).replace(/\.?0+$/, "")} mi`;
 }
 
+function formatMileageDelta(distance: number): string {
+  if (distance === 0) return "even";
+  return `${distance > 0 ? "+" : ""}${distance.toFixed(2).replace(/\.?0+$/, "")} mi`;
+}
+
+interface WeekToDateSummary {
+  plannedMileage: number;
+  actualMileage: number;
+  varianceMileage: number;
+}
+
 function segmentDistanceLabel(segment: Workout["segments"][number]): string {
   if (!segment.distance) {
     return segment.duration ? `${segment.duration} min` : "";
@@ -431,6 +442,7 @@ export default function WeeklyPlanCard({
   const [pendingExtraRuns, setPendingExtraRuns] = useState<Record<string, string[]>>({});
   const [editingRunId, setEditingRunId] = useState<string | null>(null);
   const [runEditors, setRunEditors] = useState<Record<string, RunEditorState>>({});
+  const [dayExpansionOverrides, setDayExpansionOverrides] = useState<Record<string, boolean>>({});
   const orderedDays = useMemo(
     () => [...localDays].sort((a, b) => dayDisplayOrder[a.dayOfWeek] - dayDisplayOrder[b.dayOfWeek]),
     [localDays]
@@ -439,6 +451,10 @@ export default function WeeklyPlanCard({
   useEffect(() => {
     setLocalDays([...week.days].sort((a, b) => dayDisplayOrder[a.dayOfWeek] - dayDisplayOrder[b.dayOfWeek]));
   }, [week.days]);
+
+  useEffect(() => {
+    setDayExpansionOverrides({});
+  }, [week.weekNumber]);
 
   // Listen for swap events from child renders
   useEffect(() => {
@@ -634,7 +650,7 @@ export default function WeeklyPlanCard({
     const nextDays = localDays.map((day) => ({ ...day }));
     nextDays[location.dayIndex] = { ...nextDays[location.dayIndex] };
     if (location.slot === "workout") {
-      nextDays[location.dayIndex].workout = nextDays[location.dayIndex].secondaryWorkout;
+      nextDays[location.dayIndex].workout = nextDays[location.dayIndex].secondaryWorkout ?? null;
       nextDays[location.dayIndex].secondaryWorkout = null;
       nextDays[location.dayIndex].isRestDay = !nextDays[location.dayIndex].workout;
     } else {
@@ -810,6 +826,80 @@ export default function WeeklyPlanCard({
     return [...plannedEntries, ...additionalEntries, ...pendingEntries];
   };
 
+  const getDayKey = (day: DailyPlan): string => toDateKey(day.date);
+
+  const getDayLogs = (day: DailyPlan): DailyLog[] =>
+    dailyLogs.filter((entry) => entry.weekNumber === week.weekNumber && entry.dayOfWeek === day.dayOfWeek);
+
+  const isDayFullyLogged = (day: DailyPlan): boolean => {
+    const dayLogs = getDayLogs(day);
+    const completedRunIds = new Set(
+      dayLogs
+        .filter((entry) => entry.completed)
+        .map((entry) => entry.plannedWorkoutId ?? entry.runId)
+    );
+    const plannedWorkoutIds = [day.workout?.id, day.secondaryWorkout?.id].filter(
+      (id): id is string => Boolean(id)
+    );
+
+    if (plannedWorkoutIds.length === 0) {
+      return dayLogs.some((entry) => entry.completed);
+    }
+
+    return plannedWorkoutIds.every((runId) => completedRunIds.has(runId));
+  };
+
+  const latestCompletedLog = useMemo(() => {
+    const completedLogs = dailyLogs.filter((entry) => entry.completed);
+    if (completedLogs.length === 0) return null;
+
+    return completedLogs.reduce((latest, entry) => {
+      const entryTimestamp = new Date(entry.loggedAt).getTime();
+      const latestTimestamp = latest ? new Date(latest.loggedAt).getTime() : -Infinity;
+      return entryTimestamp > latestTimestamp ? entry : latest;
+    }, completedLogs[0]);
+  }, [dailyLogs]);
+
+  const latestLoggedRunId = latestCompletedLog?.runId ?? null;
+  const latestLoggedDayKey = latestCompletedLog?.date ? toDateKey(latestCompletedLog.date) : null;
+
+  const getWeekToDateSummaryForRun = (targetDay: DailyPlan, targetRunId: string): WeekToDateSummary | null => {
+    let plannedMileage = 0;
+    let actualMileage = 0;
+    let foundTargetRun = false;
+
+    for (const candidateDay of orderedDays) {
+      const candidateRunEntries = buildRunEntries(candidateDay);
+
+      for (const entry of candidateRunEntries) {
+        plannedMileage += entry.plannedMileage;
+        actualMileage += entry.log?.actualMileage ?? 0;
+
+        if (candidateDay.dayOfWeek === targetDay.dayOfWeek && entry.runId === targetRunId) {
+          foundTargetRun = true;
+          break;
+        }
+      }
+
+      if (foundTargetRun) break;
+    }
+
+    if (!foundTargetRun) return null;
+
+    return {
+      plannedMileage: Math.round(plannedMileage * 10) / 10,
+      actualMileage: Math.round(actualMileage * 10) / 10,
+      varianceMileage: Math.round((actualMileage - plannedMileage) * 10) / 10,
+    };
+  };
+
+  const toggleDayExpansion = (dayKey: string, currentlyExpanded: boolean): void => {
+    setDayExpansionOverrides((prev) => ({
+      ...prev,
+      [dayKey]: !currentlyExpanded,
+    }));
+  };
+
   return (
     <div
       data-current-week-card={highlightCurrentWeek ? "true" : undefined}
@@ -940,6 +1030,14 @@ export default function WeeklyPlanCard({
               const runEntries = buildRunEntries(day);
               const dayActualMileage = runEntries.reduce((sum, entry) => sum + (entry.log?.actualMileage ?? 0), 0);
               const dayPlannedMileage = (day.workout?.weeklyMileageContribution ?? 0) + (day.secondaryWorkout?.weeklyMileageContribution ?? 0);
+              const dayKey = getDayKey(day);
+              const dayIsFullyLogged = isDayFullyLogged(day);
+              const dayIsExpanded = dayExpansionOverrides[dayKey] ?? !dayIsFullyLogged;
+              const latestLoggedRunOnThisDay = runEntries.find((entry) => entry.runId === latestLoggedRunId) ?? null;
+              const collapsedWeekToDateSummary =
+                !dayIsExpanded && dayIsFullyLogged && latestLoggedDayKey === dayKey && latestLoggedRunOnThisDay
+                  ? getWeekToDateSummaryForRun(day, latestLoggedRunOnThisDay.runId)
+                  : null;
               const availableTargetDays = orderedDays
                 .filter((candidate) => {
                   if (candidate.dayOfWeek === day.dayOfWeek) return true;
@@ -956,34 +1054,75 @@ export default function WeeklyPlanCard({
                   data-focus-day={Boolean(focusDate && toDateKey(day.date) === focusDate) ? "true" : undefined}
                   className="grid scroll-mt-24 gap-3 rounded-xl border border-slate-200 bg-white p-3 shadow-sm shadow-slate-100 lg:grid-cols-[6.5rem_1fr]"
                 >
-                  <div className="rounded-lg bg-slate-50 px-3 py-2">
-                    {isToday(day.dayOfWeek) && (
-                      <span className="mb-1 inline-block rounded-full bg-green-600 px-2 py-0.5 text-[10px] font-bold text-white">
-                        Today
-                      </span>
-                    )}
-                    {isTomorrow(day.dayOfWeek) && (
-                      <span className="mb-1 inline-block rounded-full bg-sky-600 px-2 py-0.5 text-[10px] font-bold text-white">
-                        Tomorrow
-                      </span>
-                    )}
-                    <p className="text-xs font-medium text-gray-500">{day.dayOfWeek.slice(0, 3)}</p>
-                    <p className="text-xs text-gray-400">{formatShortDate(day.date)}</p>
-                    <p className="mt-3 text-[11px] text-gray-500">
-                      Planned {formatMiles(dayPlannedMileage)} mi
-                    </p>
-                    <p className="text-[11px] text-gray-500">
-                      Actual {formatMiles(dayActualMileage)} mi
-                    </p>
-                  </div>
-                  <div className="space-y-3 rounded-lg border border-slate-100 bg-slate-50 p-3">
-                    {runEntries.length === 0 ? (
-                      <p className="text-sm text-gray-400">Rest</p>
-                    ) : (
-                      runEntries.map((entry, index) => {
+                  <button
+                    type="button"
+                    onClick={() => toggleDayExpansion(dayKey, dayIsExpanded)}
+                    className={`lg:col-span-2 flex w-full items-start justify-between gap-3 rounded-xl border px-3 py-3 text-left transition hover:border-slate-300 hover:bg-slate-50 ${
+                      dayIsFullyLogged ? "border-emerald-200 bg-emerald-50/50" : "border-slate-200 bg-white"
+                    }`}
+                  >
+                    <div className="min-w-0 flex-1">
+                      <div className="flex flex-wrap items-center gap-2">
+                        {isToday(day.dayOfWeek) && (
+                          <span className="rounded-full bg-green-600 px-2 py-0.5 text-[10px] font-bold text-white">
+                            Today
+                          </span>
+                        )}
+                        {isTomorrow(day.dayOfWeek) && (
+                          <span className="rounded-full bg-sky-600 px-2 py-0.5 text-[10px] font-bold text-white">
+                            Tomorrow
+                          </span>
+                        )}
+                        {dayIsFullyLogged && (
+                          <span className="rounded-full bg-emerald-600 px-2 py-0.5 text-[10px] font-bold text-white">
+                            Logged
+                          </span>
+                        )}
+                        <span className="text-sm font-semibold text-slate-900">
+                          {day.dayOfWeek}
+                        </span>
+                        <span className="text-xs text-slate-500">{formatShortDate(day.date)}</span>
+                      </div>
+                      <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-slate-600">
+                        <span className="rounded bg-slate-100 px-2 py-1">
+                          Planned {formatMiles(dayPlannedMileage)} mi
+                        </span>
+                        <span className="rounded bg-slate-100 px-2 py-1">
+                          Actual {formatMiles(dayActualMileage)} mi
+                        </span>
+                        {collapsedWeekToDateSummary && (
+                          <>
+                            <span className="rounded bg-blue-50 px-2 py-1 text-blue-700">
+                              WTD plan {formatMiles(collapsedWeekToDateSummary.plannedMileage)} mi
+                            </span>
+                            <span className="rounded bg-blue-50 px-2 py-1 text-blue-700">
+                              WTD actual {formatMiles(collapsedWeekToDateSummary.actualMileage)} mi
+                            </span>
+                            <span className={`rounded px-2 py-1 ${collapsedWeekToDateSummary.varianceMileage === 0 ? "bg-slate-100 text-slate-700" : collapsedWeekToDateSummary.varianceMileage > 0 ? "bg-green-50 text-green-700" : "bg-amber-50 text-amber-700"}`}>
+                              WTD variance {formatMileageDelta(collapsedWeekToDateSummary.varianceMileage)}
+                            </span>
+                          </>
+                        )}
+                      </div>
+                    </div>
+                    <span className={`shrink-0 text-gray-400 transition-transform ${dayIsExpanded ? "rotate-180" : ""}`}>▼</span>
+                  </button>
+                  {dayIsExpanded && (
+                    <div className="lg:col-span-2 space-y-3 rounded-lg border border-slate-100 bg-slate-50 p-3">
+                      {runEntries.length === 0 ? (
+                        <p className="text-sm text-gray-400">Rest</p>
+                      ) : (
+                        runEntries.map((entry, index) => {
                         const actualMileage = entry.log?.actualMileage ?? 0;
                         const draft = runDrafts[entry.runId] ?? createDefaultRunDraft(entry.plannedMileage);
                         const isLastEntry = index === runEntries.length - 1;
+                        const showWeekToDateSummary =
+                          entry.log?.completed &&
+                          entry.runId === latestLoggedRunId &&
+                          (!dayIsFullyLogged || dayIsExpanded);
+                        const weekToDateSummary = showWeekToDateSummary
+                          ? getWeekToDateSummaryForRun(day, entry.runId)
+                          : null;
                         const editor = entry.workout
                           ? (runEditors[entry.runId] ?? {
                               title: entry.workout.title,
@@ -994,7 +1133,11 @@ export default function WeeklyPlanCard({
                           : null;
 
                         return (
-                          <div key={entry.runId} className="rounded-xl border border-slate-200 bg-white p-3 shadow-sm">
+                          <div
+                            key={entry.runId}
+                            className="rounded-xl border border-slate-200 bg-white p-3 shadow-sm"
+                            onClick={(event) => event.stopPropagation()}
+                          >
                             <div className="flex items-start justify-between gap-3">
                               <button
                                 type="button"
@@ -1143,6 +1286,19 @@ export default function WeeklyPlanCard({
                                 </span>
                                 <span>Feel {entry.log.feelRating}/10</span>
                                 {entry.log.notes && <span className="text-gray-500">{entry.log.notes}</span>}
+                                {weekToDateSummary && (
+                                  <>
+                                    <span className="rounded bg-blue-50 px-2 py-1 text-blue-700">
+                                      WTD plan {formatMiles(weekToDateSummary.plannedMileage)} mi
+                                    </span>
+                                    <span className="rounded bg-blue-50 px-2 py-1 text-blue-700">
+                                      WTD actual {formatMiles(weekToDateSummary.actualMileage)} mi
+                                    </span>
+                                    <span className={`rounded px-2 py-1 ${weekToDateSummary.varianceMileage === 0 ? "bg-slate-100 text-slate-700" : weekToDateSummary.varianceMileage > 0 ? "bg-green-50 text-green-700" : "bg-amber-50 text-amber-700"}`}>
+                                      WTD variance {formatMileageDelta(weekToDateSummary.varianceMileage)}
+                                    </span>
+                                  </>
+                                )}
                                 <button
                                   type="button"
                                   onClick={() => removeRunLog(day, entry.runId)}
@@ -1174,17 +1330,18 @@ export default function WeeklyPlanCard({
                           </div>
                         );
                       })
-                    )}
-                    {!runEntries.some((entry) => entry.isAdditionalRun && !entry.log) && !runEntries.some((entry) => entry.log) && (
-                      <button
-                        type="button"
-                        onClick={() => addAdditionalRun(day.dayOfWeek)}
-                        className="rounded border border-enduro-200 bg-enduro-50 px-3 py-2 text-xs font-medium text-enduro-700 hover:bg-enduro-100"
-                      >
-                        Add actual run
-                      </button>
-                    )}
-                  </div>
+                      )}
+                      {!runEntries.some((entry) => entry.isAdditionalRun && !entry.log) && !runEntries.some((entry) => entry.log) && (
+                        <button
+                          type="button"
+                          onClick={() => addAdditionalRun(day.dayOfWeek)}
+                          className="rounded border border-enduro-200 bg-enduro-50 px-3 py-2 text-xs font-medium text-enduro-700 hover:bg-enduro-100"
+                        >
+                          Add actual run
+                        </button>
+                      )}
+                    </div>
+                  )}
                 </div>
               );
             })}
