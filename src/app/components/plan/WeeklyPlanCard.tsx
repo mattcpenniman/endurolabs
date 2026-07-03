@@ -1101,6 +1101,9 @@ export default function WeeklyPlanCard({
                             <span className={`rounded px-2 py-1 ${collapsedWeekToDateSummary.varianceMileage === 0 ? "bg-slate-100 text-slate-700" : collapsedWeekToDateSummary.varianceMileage > 0 ? "bg-green-50 text-green-700" : "bg-amber-50 text-amber-700"}`}>
                               WTD variance {formatMileageDelta(collapsedWeekToDateSummary.varianceMileage)}
                             </span>
+                            <span className="rounded bg-indigo-50 px-2 py-1 text-indigo-700">
+                              Miles to go {formatMiles(Math.max(0, collapsedWeekToDateSummary.plannedMileage - collapsedWeekToDateSummary.actualMileage))} mi
+                            </span>
                           </>
                         )}
                       </div>
@@ -1296,6 +1299,9 @@ export default function WeeklyPlanCard({
                                     </span>
                                     <span className={`rounded px-2 py-1 ${weekToDateSummary.varianceMileage === 0 ? "bg-slate-100 text-slate-700" : weekToDateSummary.varianceMileage > 0 ? "bg-green-50 text-green-700" : "bg-amber-50 text-amber-700"}`}>
                                       WTD variance {formatMileageDelta(weekToDateSummary.varianceMileage)}
+                                    </span>
+                                    <span className="rounded bg-indigo-50 px-2 py-1 text-indigo-700">
+                                      Miles to go {formatMiles(Math.max(0, weekToDateSummary.plannedMileage - weekToDateSummary.actualMileage))} mi
                                     </span>
                                   </>
                                 )}
