@@ -89,6 +89,79 @@ export function removeDailyLog(
   return logs;
 }
 
+function planDayKey(weekNumber: number, dayOfWeek: string): string {
+  return String(weekNumber) + ":" + dayOfWeek;
+}
+
+function dateKey(date: string): string {
+  return date.slice(0, 10);
+}
+
+/**
+ * Keeps the original planned day wherever an actual has been logged while
+ * accepting recalculated workouts for every other day.
+ */
+export function preserveLoggedPlanDays(
+  currentPlan: MarathonPlan,
+  recalculatedPlan: MarathonPlan,
+  dailyLogs: Array<Pick<DailyLog, "weekNumber" | "dayOfWeek" | "date">>
+): MarathonPlan {
+  if (dailyLogs.length === 0) return recalculatedPlan;
+
+  const lockedSlots = new Set(dailyLogs.map((log) => planDayKey(log.weekNumber, log.dayOfWeek)));
+  const lockedDates = new Set(dailyLogs.map((log) => dateKey(log.date)));
+  const currentDaysBySlot = new Map(
+    currentPlan.weeks.flatMap((week) =>
+      week.days.map((day) => [planDayKey(week.weekNumber, day.dayOfWeek), day] as const)
+    )
+  );
+  const currentDaysByDate = new Map(
+    currentPlan.weeks.flatMap((week) => week.days.map((day) => [dateKey(day.date), day] as const))
+  );
+
+  const weeks = recalculatedPlan.weeks.map((week) => {
+    let preservedADay = false;
+    const days = week.days.map((day) => {
+      const currentDay = lockedDates.has(dateKey(day.date))
+        ? currentDaysByDate.get(dateKey(day.date))
+        : lockedSlots.has(planDayKey(week.weekNumber, day.dayOfWeek))
+          ? currentDaysBySlot.get(planDayKey(week.weekNumber, day.dayOfWeek))
+          : undefined;
+
+      if (!currentDay) return day;
+      preservedADay = true;
+      return currentDay;
+    });
+
+    if (!preservedADay) return week;
+
+    const workouts = days
+      .flatMap((day) => [day.workout, day.secondaryWorkout])
+      .filter((workout) => workout !== null && workout !== undefined);
+    const intensityDistribution = { easy: 0, threshold: 0, marathon: 0, vo2: 0 };
+    let longRunDistance = 0;
+
+    workouts.forEach((workout) => {
+      const mileage = workout.weeklyMileageContribution ?? 0;
+      if (workout.type === "threshold") intensityDistribution.threshold += mileage;
+      else if (workout.type === "marathon_pace") intensityDistribution.marathon += mileage;
+      else if (workout.type === "vo2") intensityDistribution.vo2 += mileage;
+      else intensityDistribution.easy += mileage;
+      if (workout.type === "long") longRunDistance = Math.max(longRunDistance, workout.totalDistance);
+    });
+
+    return {
+      ...week,
+      days,
+      totalMileage: Math.round(days.reduce((sum, day) => sum + day.plannedMileage, 0) * 100) / 100,
+      longRunDistance,
+      intensityDistribution,
+    };
+  });
+
+  return { ...recalculatedPlan, weeks };
+}
+
 export function dailyLogsToWeeklyLogs(plan: MarathonPlan, dailyLogs: DailyLog[]): WeeklyLog[] {
   return plan.weeks
     .map((week) => {

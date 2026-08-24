@@ -460,7 +460,8 @@ export default function WeeklyPlanCard({
   useEffect(() => {
     const handler = (e: Event) => {
       const customEvent = e as CustomEvent;
-      const { dayOfWeek, workoutType } = customEvent.detail as { dayOfWeek: string; workoutType: WorkoutType };
+      const { dayOfWeek, workoutType, weekNumber } = customEvent.detail as { dayOfWeek: string; workoutType: WorkoutType; weekNumber: number };
+      if (weekNumber !== week.weekNumber) return;
 
       setLocalDays((prev) => {
         let replacement: Workout | null = null;
@@ -536,7 +537,7 @@ export default function WeeklyPlanCard({
 
     window.addEventListener("workout-swap", handler);
     return () => window.removeEventListener("workout-swap", handler);
-  }, []);
+  }, [week.weekNumber]);
 
   const updateRunDraft = (runId: string, plannedMileage: number, patch: Partial<RunLogDraft>) => {
     setRunDrafts((prev) => ({
@@ -1032,6 +1033,7 @@ export default function WeeklyPlanCard({
               const dayPlannedMileage = (day.workout?.weeklyMileageContribution ?? 0) + (day.secondaryWorkout?.weeklyMileageContribution ?? 0);
               const dayKey = getDayKey(day);
               const dayIsFullyLogged = isDayFullyLogged(day);
+              const dayHasActuals = runEntries.some((entry) => Boolean(entry.log));
               const dayIsExpanded = dayExpansionOverrides[dayKey] ?? !dayIsFullyLogged;
               const latestLoggedRunOnThisDay = runEntries.find((entry) => entry.runId === latestLoggedRunId) ?? null;
               const collapsedWeekToDateSummary =
@@ -1040,6 +1042,11 @@ export default function WeeklyPlanCard({
                   : null;
               const availableTargetDays = orderedDays
                 .filter((candidate) => {
+                  const candidateHasActuals = dailyLogs.some(
+                    (log) => log.weekNumber === week.weekNumber &&
+                      (toDateKey(log.date) === toDateKey(candidate.date) || log.dayOfWeek === candidate.dayOfWeek)
+                  );
+                  if (candidateHasActuals) return false;
                   if (candidate.dayOfWeek === day.dayOfWeek) return true;
                   const occupiedSlots = [candidate.workout, candidate.secondaryWorkout].filter(Boolean).length;
                   return occupiedSlots < 2;
@@ -1076,6 +1083,11 @@ export default function WeeklyPlanCard({
                         {dayIsFullyLogged && (
                           <span className="rounded-full bg-emerald-600 px-2 py-0.5 text-[10px] font-bold text-white">
                             Logged
+                          </span>
+                        )}
+                        {dayHasActuals && !dayIsFullyLogged && (
+                          <span className="rounded-full bg-amber-500 px-2 py-0.5 text-[10px] font-bold text-white">
+                            Plan fixed
                           </span>
                         )}
                         <span className="text-sm font-semibold text-slate-900">
@@ -1144,7 +1156,7 @@ export default function WeeklyPlanCard({
                             <div className="flex items-start justify-between gap-3">
                               <button
                                 type="button"
-                                disabled={!entry.workout}
+                                disabled={!entry.workout || dayHasActuals}
                                 onClick={() => entry.workout && initializeRunEditor(entry.runId, entry.workout, day.dayOfWeek)}
                                 className={`min-w-0 flex-1 text-left ${entry.workout ? "cursor-pointer" : "cursor-default"}`}
                               >
@@ -1165,13 +1177,14 @@ export default function WeeklyPlanCard({
                                 <select
                                   defaultValue=""
                                   aria-label={`Swap workout for ${day.dayOfWeek}`}
+                                  disabled={dayHasActuals}
                                   className="rounded border border-gray-200 bg-gray-50 px-2 py-1 text-xs text-gray-600 focus:border-enduro-500 focus:outline-none focus:ring-1 focus:ring-enduro-500/20"
                                   onChange={(e) => {
                                     const selectedType = e.target.value as WorkoutType;
                                     if (!selectedType) return;
                                     window.dispatchEvent(
                                       new CustomEvent("workout-swap", {
-                                        detail: { dayOfWeek: day.dayOfWeek, workoutType: selectedType },
+                                        detail: { dayOfWeek: day.dayOfWeek, workoutType: selectedType, weekNumber: week.weekNumber },
                                       })
                                     );
                                   }}

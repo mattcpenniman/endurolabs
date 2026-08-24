@@ -6,11 +6,13 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db/client";
-import { plans } from "@/lib/db/schema";
+import { planRunLogs, plans } from "@/lib/db/schema";
 import { randomUUID } from "crypto";
 import { calculatePaceZones, calculatePowerZones } from "@/lib/training/zone-calculator";
 import { getCurrentUser } from "@/lib/auth";
 import { and, eq } from "drizzle-orm";
+import { MarathonPlan } from "@/lib/training/models";
+import { preserveLoggedPlanDays } from "@/lib/training/progress-tracker";
 
 const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -32,10 +34,11 @@ export async function POST(request: NextRequest) {
     const { id, runnerProfile, planData, peakMileageOverride, weeksOverride, raceName } = body;
     const persistedId = isPersistedPlanId(id) ? id : randomUUID();
     let isUpdatingExistingPlan = false;
+    let existingPlanData: MarathonPlan | null = null;
 
     if (isPersistedPlanId(id)) {
       const [existingPlan] = await db
-        .select({ id: plans.id })
+        .select({ id: plans.id, planData: plans.planData })
         .from(plans)
         .where(and(eq(plans.id, persistedId), eq(plans.userId, user.id)))
         .limit(1);
@@ -53,6 +56,7 @@ export async function POST(request: NextRequest) {
       }
 
       isUpdatingExistingPlan = !!existingPlan;
+      existingPlanData = existingPlan ? existingPlan.planData as MarathonPlan : null;
     }
 
     const normalizedRunnerProfile = {
@@ -60,13 +64,26 @@ export async function POST(request: NextRequest) {
       raceName: raceName || runnerProfile.raceName || undefined,
     };
     const paceZones = calculatePaceZones(normalizedRunnerProfile);
-    const persistedPlanData = {
+    let persistedPlanData: MarathonPlan = {
       ...planData,
       id: persistedId,
       runnerProfile: normalizedRunnerProfile,
       paceZones,
       powerZones: calculatePowerZones(normalizedRunnerProfile, paceZones),
     };
+
+    if (existingPlanData) {
+      const loggedDays = await db
+        .select({
+          weekNumber: planRunLogs.weekNumber,
+          date: planRunLogs.date,
+          dayOfWeek: planRunLogs.dayOfWeek,
+        })
+        .from(planRunLogs)
+        .where(and(eq(planRunLogs.planId, persistedId), eq(planRunLogs.userId, user.id)));
+
+      persistedPlanData = preserveLoggedPlanDays(existingPlanData, persistedPlanData, loggedDays);
+    }
 
     if (isUpdatingExistingPlan) {
       await db

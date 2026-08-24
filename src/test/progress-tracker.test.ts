@@ -8,6 +8,7 @@ import {
   analyzeProgress,
   dailyLogsToWeeklyLogs,
   getMileageTrend,
+  preserveLoggedPlanDays,
   removeDailyLog,
 } from "@/lib/training/progress-tracker";
 import { DailyLog, MarathonPlan, WeeklyLog } from "@/lib/training/models";
@@ -262,6 +263,48 @@ describe("analyzeProgress", () => {
     ];
     const result = analyzeProgress(plan, logs);
     expect(result.adjustmentSuggestions.some((s) => s.toLowerCase().includes("track"))).toBe(true);
+  });
+});
+
+describe("preserveLoggedPlanDays", () => {
+  it("preserves only days with actuals and accepts recalculated future days", () => {
+    const current = makePlan();
+    const recalculated = structuredClone(current);
+    const recalculatedTuesday = recalculated.weeks[0].days[1];
+    const recalculatedSunday = recalculated.weeks[0].days[2];
+
+    recalculatedTuesday.workout = {
+      ...recalculatedTuesday.workout!,
+      title: "Recalculated Tuesday",
+      totalDistance: 8,
+      weeklyMileageContribution: 8,
+    };
+    recalculatedTuesday.plannedMileage = 8;
+    recalculatedSunday.workout = {
+      ...recalculatedSunday.workout!,
+      title: "Recalculated Sunday",
+      totalDistance: 12,
+      weeklyMileageContribution: 12,
+    };
+    recalculatedSunday.plannedMileage = 12;
+
+    const result = preserveLoggedPlanDays(current, recalculated, [{
+      weekNumber: 1,
+      date: "2026-05-05",
+      dayOfWeek: "Tuesday",
+    }]);
+
+    expect(result.weeks[0].days[1]).toEqual(current.weeks[0].days[1]);
+    expect(result.weeks[0].days[2].workout?.title).toBe("Recalculated Sunday");
+    expect(result.weeks[0].totalMileage).toBe(16);
+    expect(result.weeks[0].longRunDistance).toBe(12);
+  });
+
+  it("returns the recalculated plan unchanged when there are no actuals", () => {
+    const current = makePlan();
+    const recalculated = structuredClone(current);
+
+    expect(preserveLoggedPlanDays(current, recalculated, [])).toBe(recalculated);
   });
 });
 
