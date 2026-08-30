@@ -27,11 +27,12 @@ export default function MileageTrendChart({ plan, dailyLogs = [] }: MileageTrend
       week: week.weekNumber,
       weekLabel: `W${week.weekNumber} · ${formatPlanDate(week.endDate)}`,
       weekEndDate: formatPlanDate(week.endDate),
-      mileage: week.totalMileage,
+      mileage: week.calculatedMileage ?? week.totalMileage,
       actualMileage,
       isDownWeek: week.isDownWeek,
     };
   });
+  const calculatedPeakMileage = Math.max(...data.map((week) => week.mileage));
 
   return (
     <div className="rounded-xl border border-gray-200 bg-white p-6 shadow-sm">
@@ -55,7 +56,7 @@ export default function MileageTrendChart({ plan, dailyLogs = [] }: MileageTrend
               contentStyle={{ borderRadius: "8px", border: "1px solid #e5e7eb", fontSize: 13 }}
               formatter={(value: number, name: string) => [
                 `${value} mi`,
-                name === "actualMileage" ? "Actual" : "Planned",
+                name === "actualMileage" ? "Actual" : "Calculated plan",
               ]}
               labelFormatter={(_, payload) => {
                 const point = payload?.[0]?.payload as { week: number; weekEndDate: string } | undefined;
@@ -64,15 +65,15 @@ export default function MileageTrendChart({ plan, dailyLogs = [] }: MileageTrend
             />
             <Legend verticalAlign="top" height={28} />
             <ReferenceLine
-              y={plan.peakWeeklyMileage}
+              y={calculatedPeakMileage}
               stroke="#3da16a"
               strokeDasharray="4 4"
-              label={{ value: `Peak: ${plan.peakWeeklyMileage} mi`, position: "top", fontSize: 11, fill: "#3da16a" }}
+              label={{ value: `Peak: ${calculatedPeakMileage} mi`, position: "top", fontSize: 11, fill: "#3da16a" }}
             />
             <Line
               type="monotone"
               dataKey="mileage"
-              name="Planned"
+              name="Calculated plan"
               stroke="#3da16a"
               strokeWidth={2}
               dot={{ fill: "#3da16a", stroke: "#fff", strokeWidth: 2, r: 3 }}
