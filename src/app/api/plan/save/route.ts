@@ -12,7 +12,7 @@ import { calculatePaceZones, calculatePowerZones } from "@/lib/training/zone-cal
 import { getCurrentUser } from "@/lib/auth";
 import { and, eq } from "drizzle-orm";
 import { MarathonPlan } from "@/lib/training/models";
-import { preserveLoggedPlanDays } from "@/lib/training/progress-tracker";
+import { preserveFullyLoggedWeeks, preserveLoggedPlanDays } from "@/lib/training/progress-tracker";
 
 const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -78,11 +78,24 @@ export async function POST(request: NextRequest) {
           weekNumber: planRunLogs.weekNumber,
           date: planRunLogs.date,
           dayOfWeek: planRunLogs.dayOfWeek,
+          runId: planRunLogs.runId,
+          plannedWorkoutId: planRunLogs.plannedWorkoutId,
+          completed: planRunLogs.completed,
+          isAdditionalRun: planRunLogs.isAdditionalRun,
         })
         .from(planRunLogs)
         .where(and(eq(planRunLogs.planId, persistedId), eq(planRunLogs.userId, user.id)));
 
       persistedPlanData = preserveLoggedPlanDays(existingPlanData, persistedPlanData, loggedDays);
+      persistedPlanData = preserveFullyLoggedWeeks(
+        existingPlanData,
+        persistedPlanData,
+        loggedDays.map((log) => ({
+          ...log,
+          completed: log.completed === 1,
+          isAdditionalRun: log.isAdditionalRun === 1,
+        }))
+      );
     }
 
     if (isUpdatingExistingPlan) {

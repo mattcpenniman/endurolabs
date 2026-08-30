@@ -7,7 +7,8 @@ import { and, asc, eq } from "drizzle-orm";
 import { db } from "@/lib/db/client";
 import { planRunLogs, plans } from "@/lib/db/schema";
 import { getCurrentUser } from "@/lib/auth";
-import { DailyLog } from "@/lib/training/models";
+import { DailyLog, MarathonPlan } from "@/lib/training/models";
+import { isWeekFullyLogged } from "@/lib/training/progress-tracker";
 
 function serializeLog(row: typeof planRunLogs.$inferSelect): DailyLog {
   return {
@@ -34,6 +35,29 @@ async function verifyPlanAccess(planId: string, userId: string): Promise<boolean
     .limit(1);
 
   return Boolean(plan);
+}
+
+async function isLockedWeek(planId: string, userId: string, weekNumber: number): Promise<boolean> {
+  const [plan] = await db
+    .select({ planData: plans.planData })
+    .from(plans)
+    .where(and(eq(plans.id, planId), eq(plans.userId, userId)))
+    .limit(1);
+  const week = (plan?.planData as MarathonPlan | undefined)?.weeks.find(
+    (candidate) => candidate.weekNumber === weekNumber
+  );
+  if (!week) return false;
+
+  const rows = await db
+    .select()
+    .from(planRunLogs)
+    .where(and(
+      eq(planRunLogs.planId, planId),
+      eq(planRunLogs.userId, userId),
+      eq(planRunLogs.weekNumber, weekNumber)
+    ));
+
+  return isWeekFullyLogged(week, rows.map(serializeLog));
 }
 
 export async function GET(
@@ -80,6 +104,12 @@ export async function POST(
     }
 
     const log = (await request.json()) as DailyLog;
+    if (!Number.isFinite(log.weekNumber)) {
+      return NextResponse.json({ error: "Invalid week number" }, { status: 400 });
+    }
+    if (await isLockedWeek(id, user.id, log.weekNumber)) {
+      return NextResponse.json({ error: "Week is fully logged and locked" }, { status: 409 });
+    }
     const actualMileage = Math.max(0, Math.round(log.actualMileage * 100));
     const timestamp = new Date(log.loggedAt);
 
@@ -145,6 +175,10 @@ export async function DELETE(
 
     if (!runId || !dayOfWeek || !Number.isFinite(weekNumber)) {
       return NextResponse.json({ error: "Missing log identifiers" }, { status: 400 });
+    }
+
+    if (await isLockedWeek(id, user.id, weekNumber)) {
+      return NextResponse.json({ error: "Week is fully logged and locked" }, { status: 409 });
     }
 
     await db

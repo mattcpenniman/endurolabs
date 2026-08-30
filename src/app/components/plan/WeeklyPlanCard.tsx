@@ -11,6 +11,7 @@
 import React from "react";
 import { useState, useEffect, useMemo } from "react";
 import { DailyLog, WeeklyPlan, DailyPlan, Workout, WorkoutType, RunnerProfile, formatPace } from "@/lib/training/models";
+import { isWeekFullyLogged } from "@/lib/training/progress-tracker";
 
 interface WeeklyPlanCardProps {
   planId: string;
@@ -447,6 +448,7 @@ export default function WeeklyPlanCard({
     () => [...localDays].sort((a, b) => dayDisplayOrder[a.dayOfWeek] - dayDisplayOrder[b.dayOfWeek]),
     [localDays]
   );
+  const weekIsFullyLogged = isWeekFullyLogged(week, dailyLogs);
 
   useEffect(() => {
     setLocalDays([...week.days].sort((a, b) => dayDisplayOrder[a.dayOfWeek] - dayDisplayOrder[b.dayOfWeek]));
@@ -456,12 +458,18 @@ export default function WeeklyPlanCard({
     setDayExpansionOverrides({});
   }, [week.weekNumber]);
 
+  useEffect(() => {
+    if (!weekIsFullyLogged) return;
+    setPendingExtraRuns({});
+    setEditingRunId(null);
+  }, [weekIsFullyLogged]);
+
   // Listen for swap events from child renders
   useEffect(() => {
     const handler = (e: Event) => {
       const customEvent = e as CustomEvent;
       const { dayOfWeek, workoutType, weekNumber } = customEvent.detail as { dayOfWeek: string; workoutType: WorkoutType; weekNumber: number };
-      if (weekNumber !== week.weekNumber) return;
+      if (weekNumber !== week.weekNumber || weekIsFullyLogged) return;
 
       setLocalDays((prev) => {
         let replacement: Workout | null = null;
@@ -537,7 +545,7 @@ export default function WeeklyPlanCard({
 
     window.addEventListener("workout-swap", handler);
     return () => window.removeEventListener("workout-swap", handler);
-  }, [week.weekNumber]);
+  }, [week.weekNumber, weekIsFullyLogged]);
 
   const updateRunDraft = (runId: string, plannedMileage: number, patch: Partial<RunLogDraft>) => {
     setRunDrafts((prev) => ({
@@ -558,6 +566,7 @@ export default function WeeklyPlanCard({
   };
 
   const addAdditionalRun = (dayOfWeek: string): void => {
+    if (weekIsFullyLogged) return;
     const runId = `manual-${dayOfWeek}-${Date.now()}`;
     setPendingExtraRuns((prev) => ({
       ...prev,
@@ -575,6 +584,7 @@ export default function WeeklyPlanCard({
   };
 
   const saveRunLog = async (day: DailyPlan, entry: RunEntry, draft: RunLogDraft): Promise<void> => {
+    if (weekIsFullyLogged) return;
     const log: DailyLog = {
       weekNumber: week.weekNumber,
       date: day.date,
@@ -604,6 +614,7 @@ export default function WeeklyPlanCard({
   };
 
   const removeRunLog = async (day: DailyPlan, runId: string): Promise<void> => {
+    if (weekIsFullyLogged) return;
     const params = new URLSearchParams({
       weekNumber: String(week.weekNumber),
       dayOfWeek: day.dayOfWeek,
@@ -617,6 +628,7 @@ export default function WeeklyPlanCard({
   };
 
   const initializeRunEditor = (runId: string, workout: Workout, dayOfWeek: string): void => {
+    if (weekIsFullyLogged) return;
     setRunEditors((prev) => ({
       ...prev,
       [runId]: prev[runId] ?? {
@@ -630,6 +642,7 @@ export default function WeeklyPlanCard({
   };
 
   const saveRunEdit = async (runId: string): Promise<void> => {
+    if (weekIsFullyLogged) return;
     const editor = runEditors[runId];
     if (!editor) return;
 
@@ -941,6 +954,9 @@ export default function WeeklyPlanCard({
             {week.isDownWeek && (
               <span className="text-xs text-green-600">Recovery Week</span>
             )}
+            {weekIsFullyLogged && (
+              <span className="rounded-full bg-slate-700 px-2 py-1 text-xs font-bold text-white">Locked</span>
+            )}
           </div>
           <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-gray-600">
             <span className="font-medium">
@@ -1012,12 +1028,13 @@ export default function WeeklyPlanCard({
                       min={0}
                       max={30}
                       step={0.5}
+                      disabled={weekIsFullyLogged}
                       defaultValue={Math.round(actualPercent * 2) / 2}
                       onBlur={(e) => onIntensityTargetChange(row.key, Number(e.target.value), week.weekNumber)}
                       onKeyDown={(e) => {
                         if (e.key === "Enter") e.currentTarget.blur();
                       }}
-                      className="mt-2 w-full rounded border border-gray-300 px-2 py-1 text-sm focus:border-enduro-500 focus:outline-none focus:ring-1 focus:ring-enduro-500/20"
+                      className="mt-2 w-full rounded border border-gray-300 px-2 py-1 text-sm disabled:cursor-not-allowed disabled:bg-gray-100 disabled:text-gray-400 focus:border-enduro-500 focus:outline-none focus:ring-1 focus:ring-enduro-500/20"
                     />
                   </label>
                 );
@@ -1156,7 +1173,7 @@ export default function WeeklyPlanCard({
                             <div className="flex items-start justify-between gap-3">
                               <button
                                 type="button"
-                                disabled={!entry.workout || dayHasActuals}
+                                disabled={!entry.workout || dayHasActuals || weekIsFullyLogged}
                                 onClick={() => entry.workout && initializeRunEditor(entry.runId, entry.workout, day.dayOfWeek)}
                                 className={`min-w-0 flex-1 text-left ${entry.workout ? "cursor-pointer" : "cursor-default"}`}
                               >
@@ -1177,7 +1194,7 @@ export default function WeeklyPlanCard({
                                 <select
                                   defaultValue=""
                                   aria-label={`Swap workout for ${day.dayOfWeek}`}
-                                  disabled={dayHasActuals}
+                                  disabled={dayHasActuals || weekIsFullyLogged}
                                   className="rounded border border-gray-200 bg-gray-50 px-2 py-1 text-xs text-gray-600 focus:border-enduro-500 focus:outline-none focus:ring-1 focus:ring-enduro-500/20"
                                   onChange={(e) => {
                                     const selectedType = e.target.value as WorkoutType;
@@ -1209,7 +1226,7 @@ export default function WeeklyPlanCard({
                               </>
                             )}
 
-                            {editingRunId === entry.runId && entry.workout && editor && (
+                            {!weekIsFullyLogged && editingRunId === entry.runId && entry.workout && editor && (
                               <div className="mt-3 grid gap-2 rounded-lg border border-enduro-100 bg-enduro-50 p-3 sm:grid-cols-2">
                                 <label className="block sm:col-span-2">
                                   <span className="text-xs font-medium text-gray-600">Title</span>
@@ -1318,14 +1335,16 @@ export default function WeeklyPlanCard({
                                     </span>
                                   </>
                                 )}
-                                <button
-                                  type="button"
-                                  onClick={() => removeRunLog(day, entry.runId)}
-                                  className="rounded border border-red-200 bg-white px-2 py-1 font-medium text-red-600 hover:bg-red-50"
-                                >
-                                  Remove
-                                </button>
-                                {isLastEntry && (
+                                {!weekIsFullyLogged && (
+                                  <button
+                                    type="button"
+                                    onClick={() => removeRunLog(day, entry.runId)}
+                                    className="rounded border border-red-200 bg-white px-2 py-1 font-medium text-red-600 hover:bg-red-50"
+                                  >
+                                    Remove
+                                  </button>
+                                )}
+                                {isLastEntry && !weekIsFullyLogged && (
                                   <button
                                     type="button"
                                     onClick={() => addAdditionalRun(day.dayOfWeek)}
@@ -1335,6 +1354,10 @@ export default function WeeklyPlanCard({
                                   </button>
                                 )}
                               </div>
+                            ) : weekIsFullyLogged ? (
+                              <p className="mt-3 border-t border-gray-100 pt-3 text-xs font-medium text-slate-500">
+                                Week locked
+                              </p>
                             ) : (
                               <div className="mt-3">
                                 <DailyLogControls
@@ -1350,7 +1373,7 @@ export default function WeeklyPlanCard({
                         );
                       })
                       )}
-                      {!runEntries.some((entry) => entry.isAdditionalRun && !entry.log) && !runEntries.some((entry) => entry.log) && (
+                      {!weekIsFullyLogged && !runEntries.some((entry) => entry.isAdditionalRun && !entry.log) && !runEntries.some((entry) => entry.log) && (
                         <button
                           type="button"
                           onClick={() => addAdditionalRun(day.dayOfWeek)}

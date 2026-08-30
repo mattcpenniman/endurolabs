@@ -9,6 +9,8 @@ import {
   areAllPhaseRunsLogged,
   dailyLogsToWeeklyLogs,
   getMileageTrend,
+  isWeekFullyLogged,
+  preserveFullyLoggedWeeks,
   preserveLoggedPlanDays,
   removeDailyLog,
 } from "@/lib/training/progress-tracker";
@@ -408,6 +410,48 @@ describe("areAllPhaseRunsLogged", () => {
       makeDailyLog("long-1", { isAdditionalRun: true }),
     ])).toBe(false);
     expect(areAllPhaseRunsLogged([makePlan().weeks[1]], [])).toBe(false);
+  });
+});
+
+describe("isWeekFullyLogged", () => {
+  it("only considers completed planned runs from the matching week", () => {
+    const week = structuredClone(makePlan().weeks[0]);
+    week.days[1].secondaryWorkout = {
+      ...week.days[1].workout!,
+      id: "recovery-1",
+      title: "Recovery",
+    };
+
+    expect(isWeekFullyLogged(week, [
+      makeDailyLog("easy-1"),
+      makeDailyLog("recovery-1", { weekNumber: 2 }),
+      makeDailyLog("recovery-1", { isAdditionalRun: true }),
+      makeDailyLog("long-1", { completed: false }),
+    ])).toBe(false);
+    expect(isWeekFullyLogged(week, [
+      makeDailyLog("easy-1"),
+      makeDailyLog("easy-1"),
+      makeDailyLog("recovery-1"),
+      makeDailyLog("long-1"),
+    ])).toBe(true);
+    expect(isWeekFullyLogged(makePlan().weeks[1], [])).toBe(false);
+  });
+});
+
+describe("preserveFullyLoggedWeeks", () => {
+  it("keeps completed weeks unchanged while accepting changes to incomplete weeks", () => {
+    const currentPlan = makePlan();
+    const recalculatedPlan = structuredClone(currentPlan);
+    recalculatedPlan.weeks[0].totalMileage = 99;
+    recalculatedPlan.weeks[1].totalMileage = 88;
+
+    const result = preserveFullyLoggedWeeks(currentPlan, recalculatedPlan, [
+      makeDailyLog("easy-1"),
+      makeDailyLog("long-1"),
+    ]);
+
+    expect(result.weeks[0]).toEqual(currentPlan.weeks[0]);
+    expect(result.weeks[1].totalMileage).toBe(88);
   });
 });
 

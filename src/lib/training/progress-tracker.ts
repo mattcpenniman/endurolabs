@@ -169,24 +169,48 @@ export function preserveLoggedPlanDays(
   return { ...recalculatedPlan, weeks };
 }
 
-export function areAllPhaseRunsLogged(weeks: WeeklyPlan[], dailyLogs: DailyLog[]): boolean {
-  const plannedRuns = weeks.flatMap((week) =>
-    week.days.flatMap((day) =>
-      [day.workout, day.secondaryWorkout]
-        .filter((workout) => workout !== null && workout !== undefined)
-        .map((workout) => `${week.weekNumber}:${workout.id}`)
-    )
+type RunCompletionLog = Pick<
+  DailyLog,
+  "weekNumber" | "runId" | "plannedWorkoutId" | "completed" | "isAdditionalRun"
+>;
+
+export function isWeekFullyLogged(week: WeeklyPlan, dailyLogs: RunCompletionLog[]): boolean {
+  const plannedRunIds = week.days.flatMap((day) =>
+    [day.workout, day.secondaryWorkout]
+      .filter((workout) => workout !== null && workout !== undefined)
+      .map((workout) => workout.id)
   );
 
-  if (plannedRuns.length === 0) return false;
+  if (plannedRunIds.length === 0) return false;
 
-  const completedRuns = new Set(
+  const completedRunIds = new Set(
     dailyLogs
-      .filter((log) => log.completed && !log.isAdditionalRun)
-      .map((log) => `${log.weekNumber}:${log.plannedWorkoutId ?? log.runId}`)
+      .filter((log) => log.weekNumber === week.weekNumber && log.completed && !log.isAdditionalRun)
+      .map((log) => log.plannedWorkoutId ?? log.runId)
   );
 
-  return plannedRuns.every((run) => completedRuns.has(run));
+  return plannedRunIds.every((runId) => completedRunIds.has(runId));
+}
+
+export function areAllPhaseRunsLogged(weeks: WeeklyPlan[], dailyLogs: DailyLog[]): boolean {
+  const weeksWithRuns = weeks.filter((week) =>
+    week.days.some((day) => day.workout || day.secondaryWorkout)
+  );
+  return weeksWithRuns.length > 0 && weeksWithRuns.every((week) => isWeekFullyLogged(week, dailyLogs));
+}
+
+export function preserveFullyLoggedWeeks(
+  currentPlan: MarathonPlan,
+  recalculatedPlan: MarathonPlan,
+  dailyLogs: RunCompletionLog[]
+): MarathonPlan {
+  const currentWeeks = new Map(currentPlan.weeks.map((week) => [week.weekNumber, week]));
+  const weeks = recalculatedPlan.weeks.map((week) => {
+    const currentWeek = currentWeeks.get(week.weekNumber);
+    return currentWeek && isWeekFullyLogged(currentWeek, dailyLogs) ? currentWeek : week;
+  });
+
+  return { ...recalculatedPlan, weeks };
 }
 
 export function dailyLogsToWeeklyLogs(plan: MarathonPlan, dailyLogs: DailyLog[]): WeeklyLog[] {
