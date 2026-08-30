@@ -9,6 +9,7 @@
 
 import dayjs from "dayjs";
 import isoWeek from "dayjs/plugin/isoWeek";
+import utc from "dayjs/plugin/utc";
 import {
   RunnerProfile,
   MarathonPlan,
@@ -27,6 +28,7 @@ import { WorkoutLibrary } from "./workout-library";
 import { assessGoal } from "./goal-assessment";
 
 dayjs.extend(isoWeek);
+dayjs.extend(utc);
 
 // ─── Constants ───────────────────────────────────────────────
 
@@ -78,7 +80,7 @@ function calculateWeeks(raceDate: string, weeksOverride?: number | null): number
   if (weeksOverride) {
     return Math.max(MIN_WEEKS, Math.min(MAX_WEEKS, weeksOverride));
   }
-  const weeks = dayjs(raceDate).diff(dayjs(), "week", true);
+  const weeks = dayjs.utc(raceDate).diff(dayjs.utc(), "week", true);
   return Math.max(MIN_WEEKS, Math.min(MAX_WEEKS, Math.floor(weeks)));
 }
 
@@ -902,7 +904,7 @@ export function generatePlan(profile: RunnerProfile): MarathonPlan {
   const runsPerWeek = profile.runsPerWeekOverride
     ? Math.max(3, Math.min(10, profile.runsPerWeekOverride))
     : profile.trainingDaysPerWeek;
-  const planStart = dayjs(profile.raceDate).subtract(totalWeeks, "week").startOf("isoWeek");
+  const planStart = dayjs.utc(profile.raceDate).subtract(totalWeeks, "week").startOf("isoWeek");
 
   // Generate weeks
   const weeks: WeeklyPlan[] = [];

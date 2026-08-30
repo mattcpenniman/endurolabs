@@ -8,16 +8,10 @@ import React from "react";
 
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend, LabelList } from "recharts";
 import { MarathonPlan } from "@/lib/training/models";
+import { formatPlanDate } from "@/lib/training/date-utils";
 
 interface IntensityDistributionChartProps {
   plan: MarathonPlan;
-}
-
-function formatWeekEndDate(date: string): string {
-  return new Intl.DateTimeFormat("en-US", {
-    month: "short",
-    day: "numeric",
-  }).format(new Date(date));
 }
 
 export default function IntensityDistributionChart({ plan }: IntensityDistributionChartProps) {
@@ -30,8 +24,8 @@ export default function IntensityDistributionChart({ plan }: IntensityDistributi
 
     return {
       week: week.weekNumber,
-      weekLabel: `W${week.weekNumber} · ${formatWeekEndDate(week.endDate)}`,
-      weekEndDate: formatWeekEndDate(week.endDate),
+      weekLabel: `W${week.weekNumber} · ${formatPlanDate(week.endDate)}`,
+      weekEndDate: formatPlanDate(week.endDate),
       easyMiles,
       thresholdMiles,
       marathonMiles,

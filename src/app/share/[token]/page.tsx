@@ -13,13 +13,7 @@ import PlanOverviewCard from "@/app/components/plan/PlanOverviewCard";
 import PaceZonesCard from "@/app/components/plan/PaceZonesCard";
 import { calculatePaceZones, calculatePowerZones } from "@/lib/training/zone-calculator";
 import { MarathonPlan, RunnerProfile, Workout, formatPace } from "@/lib/training/models";
-
-function formatShortDate(date: string): string {
-  return new Intl.DateTimeFormat("en-US", {
-    month: "short",
-    day: "numeric",
-  }).format(new Date(date));
-}
+import { formatPlanDate } from "@/lib/training/date-utils";
 
 function formatMiles(distance: number): string {
   return Number.isInteger(distance) ? `${distance}` : `${distance.toFixed(2).replace(/0$/, "")}`;
@@ -97,7 +91,7 @@ export default async function SharedPlanPage({
           <p className="text-xs font-semibold uppercase tracking-wide text-enduro-700">Read-only shared plan</p>
           <h1 className="mt-1 text-3xl font-bold text-gray-900">{planTitle}</h1>
           <p className="mt-2 text-gray-600">
-            {plan.totalWeeks} weeks · Peak {plan.peakWeeklyMileage} mi/week · Race day {formatShortDate(plan.raceDay)}
+            {plan.totalWeeks} weeks · Peak {plan.peakWeeklyMileage} mi/week · Race day {formatPlanDate(plan.raceDay)}
           </p>
         </div>
 
@@ -129,7 +123,7 @@ export default async function SharedPlanPage({
                           </span>
                         )}
                         <span className="text-sm font-medium text-gray-800">
-                          Starts {formatShortDate(week.startDate)}
+                          Starts {formatPlanDate(week.startDate)}
                         </span>
                       </div>
                       <p className="mt-2 text-sm text-gray-600">
@@ -158,7 +152,7 @@ export default async function SharedPlanPage({
                     <div key={`${week.weekNumber}-${day.dayOfWeek}`} className="grid gap-3 py-3 md:grid-cols-[6rem_1fr]">
                       <div>
                         <p className="text-xs font-medium text-gray-500">{day.dayOfWeek.slice(0, 3)}</p>
-                        <p className="text-xs text-gray-400">{formatShortDate(day.date)}</p>
+                        <p className="text-xs text-gray-400">{formatPlanDate(day.date)}</p>
                       </div>
                       {day.workout || day.secondaryWorkout ? (
                         <div>

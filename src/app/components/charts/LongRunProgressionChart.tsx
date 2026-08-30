@@ -8,23 +8,17 @@ import React from "react";
 
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, ReferenceLine } from "recharts";
 import { MarathonPlan } from "@/lib/training/models";
+import { formatPlanDate } from "@/lib/training/date-utils";
 
 interface LongRunProgressionChartProps {
   plan: MarathonPlan;
 }
 
-function formatWeekEndDate(date: string): string {
-  return new Intl.DateTimeFormat("en-US", {
-    month: "short",
-    day: "numeric",
-  }).format(new Date(date));
-}
-
 export default function LongRunProgressionChart({ plan }: LongRunProgressionChartProps) {
   const data = plan.weeks.map((week) => ({
     week: week.weekNumber,
-    weekLabel: `W${week.weekNumber} · ${formatWeekEndDate(week.endDate)}`,
-    weekEndDate: formatWeekEndDate(week.endDate),
+    weekLabel: `W${week.weekNumber} · ${formatPlanDate(week.endDate)}`,
+    weekEndDate: formatPlanDate(week.endDate),
     distance: week.longRunDistance,
   }));
 

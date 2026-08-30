@@ -12,6 +12,7 @@ import React from "react";
 import { useState, useEffect, useMemo } from "react";
 import { DailyLog, WeeklyPlan, DailyPlan, Workout, WorkoutType, RunnerProfile, formatPace } from "@/lib/training/models";
 import { isWeekFullyLogged } from "@/lib/training/progress-tracker";
+import { formatPlanDate } from "@/lib/training/date-utils";
 
 interface WeeklyPlanCardProps {
   planId: string;
@@ -88,13 +89,6 @@ const phaseDetails: Record<WeeklyPlan["phase"], { shortLabel: string; fullLabel:
     fullLabel: "Phase 3: Peak + Taper",
   },
 };
-
-function formatShortDate(date: string): string {
-  return new Intl.DateTimeFormat("en-US", {
-    month: "short",
-    day: "numeric",
-  }).format(new Date(date));
-}
 
 function formatMiles(distance: number): string {
   return Number.isInteger(distance) ? `${distance}` : `${distance.toFixed(2).replace(/0$/, "")}`;
@@ -948,7 +942,7 @@ export default function WeeklyPlanCard({
               </span>
             )}
             <span className="text-sm font-medium text-gray-800">
-              Starts {formatShortDate(week.startDate)}
+              Starts {formatPlanDate(week.startDate)}
             </span>
             <span className="text-xs font-semibold text-enduro-700">{phaseDetail.shortLabel}</span>
             {week.isDownWeek && (
@@ -1110,7 +1104,7 @@ export default function WeeklyPlanCard({
                         <span className="text-sm font-semibold text-slate-900">
                           {day.dayOfWeek}
                         </span>
-                        <span className="text-xs text-slate-500">{formatShortDate(day.date)}</span>
+                        <span className="text-xs text-slate-500">{formatPlanDate(day.date)}</span>
                       </div>
                       <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-slate-600">
                         <span className="rounded bg-slate-100 px-2 py-1">

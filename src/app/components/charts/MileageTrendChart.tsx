@@ -8,17 +8,11 @@ import React from "react";
 
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, ReferenceLine, Legend } from "recharts";
 import { DailyLog, MarathonPlan } from "@/lib/training/models";
+import { formatPlanDate } from "@/lib/training/date-utils";
 
 interface MileageTrendChartProps {
   plan: MarathonPlan;
   dailyLogs?: DailyLog[];
-}
-
-function formatWeekEndDate(date: string): string {
-  return new Intl.DateTimeFormat("en-US", {
-    month: "short",
-    day: "numeric",
-  }).format(new Date(date));
 }
 
 export default function MileageTrendChart({ plan, dailyLogs = [] }: MileageTrendChartProps) {
@@ -31,8 +25,8 @@ export default function MileageTrendChart({ plan, dailyLogs = [] }: MileageTrend
 
     return {
       week: week.weekNumber,
-      weekLabel: `W${week.weekNumber} · ${formatWeekEndDate(week.endDate)}`,
-      weekEndDate: formatWeekEndDate(week.endDate),
+      weekLabel: `W${week.weekNumber} · ${formatPlanDate(week.endDate)}`,
+      weekEndDate: formatPlanDate(week.endDate),
       mileage: week.totalMileage,
       actualMileage,
       isDownWeek: week.isDownWeek,
