@@ -911,7 +911,11 @@ export function generatePlan(profile: RunnerProfile): MarathonPlan {
 
   for (let week = 1; week <= totalWeeks; week++) {
     const phase = getPhaseForWeek(week, phases);
-    const weeklyMileage = mileageProgression(week, totalWeeks, profile.currentWeeklyMileage, peakMileage, phase);
+    const progressionMileage = mileageProgression(week, totalWeeks, profile.currentWeeklyMileage, peakMileage, phase);
+    const mileageOverride = profile.weeklyMileageOverrides?.[week];
+    const weeklyMileage = mileageOverride === undefined
+      ? progressionMileage
+      : roundMiles(Math.max(5, Math.min(120, mileageOverride)));
     const calculatedLongRunMiles = roundMiles(weeklyMileage * 0.25);
     const longRunMiles = maxLongRunOverride
       ? Math.min(calculatedLongRunMiles, maxLongRunOverride)
@@ -988,6 +992,8 @@ export function generatePlan(profile: RunnerProfile): MarathonPlan {
   const riskWarnings = generateRiskWarnings(profile, assessment, peakMileage);
   const adjustmentRules = generateAdjustmentRules(profile);
 
+  const actualPeakMileage = Math.max(...weeks.map((week) => week.totalMileage));
+
   return {
     id: `plan-${Date.now()}`,
     runnerProfile: profile,
@@ -996,7 +1002,7 @@ export function generatePlan(profile: RunnerProfile): MarathonPlan {
     phases,
     weeks,
     totalWeeks,
-    peakWeeklyMileage: peakMileage,
+    peakWeeklyMileage: actualPeakMileage,
     raceDay: raceDate,
     generatedAt: new Date().toISOString(),
     goalAssessment: assessment,

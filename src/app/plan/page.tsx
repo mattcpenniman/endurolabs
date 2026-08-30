@@ -941,6 +941,42 @@ export default function PlanPage(): React.ReactNode {
     }
   };
 
+  const handleAdjustWeeklyMileage = async (weekNumber: number, mileage: number): Promise<void> => {
+    if (!plan) return;
+
+    const targetMileage = Math.max(5, Math.min(120, Math.round(mileage * 4) / 4));
+    const currentWeek = plan.weeks.find((week) => week.weekNumber === weekNumber);
+    if (!currentWeek || currentWeek.totalMileage === targetMileage) return;
+
+    setIsSaving(true);
+    try {
+      const profile: RunnerProfile = {
+        ...plan.runnerProfile,
+        raceName: planName.trim() || undefined,
+        weeklyMileageOverrides: {
+          ...(plan.runnerProfile.weeklyMileageOverrides ?? {}),
+          [weekNumber]: targetMileage,
+        },
+      };
+      const response = await fetch("/api/plan/generate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(profile),
+      });
+      if (!response.ok) throw new Error("Failed to recalculate week");
+
+      const regenerated = await response.json() as MarathonPlan;
+      regenerated.id = plan.id;
+      const savedPlan = await persistPlan(regenerated, planName);
+      setPlan(savedPlan ?? regenerated);
+    } catch (error) {
+      setError(error instanceof Error ? error.message : "Failed to recalculate week");
+      throw error;
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
   const handleAdjustRestDay = async (newRestDay: string) => {
     if (!plan || newRestDay === plan.runnerProfile.preferredRestDay) return;
     setIsLoading(true);
@@ -1646,6 +1682,7 @@ export default function PlanPage(): React.ReactNode {
                               highlightCurrentWeek={week.weekNumber === currentWeekNumber}
                               focusDate={focusDate}
                               onWeekUpdate={handleWeekUpdate}
+                              onMileageChange={handleAdjustWeeklyMileage}
                             />
                           ))}
                         </div>

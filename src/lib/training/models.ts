@@ -82,6 +82,7 @@ export interface RunnerProfile {
     threshold?: number;
     vo2?: number;
   }>;
+  weeklyMileageOverrides?: Record<number, number>; // target mileage for individual weeks
   runsPerWeekOverride?: number | null;    // runs per week (3–10) — >trainingDays creates double-days
   preferredDoubleUpDays?: string[];       // days that should receive secondary runs first
 }

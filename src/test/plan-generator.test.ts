@@ -170,6 +170,25 @@ describe("generatePlan", () => {
     }
   });
 
+  it("recalculates an individual week from its mileage override", () => {
+    const baseline = generatePlan(makeProfile({ weeksOverride: 18, peakMileageOverride: 70 }));
+    const weekNumber = baseline.weeks.find((week) => week.totalMileage >= 60)?.weekNumber;
+    expect(weekNumber).toBeDefined();
+    if (weekNumber === undefined) throw new Error("Expected a week at or above 60 miles");
+
+    const plan = generatePlan(makeProfile({
+      weeksOverride: 18,
+      peakMileageOverride: 70,
+      weeklyMileageOverrides: { [weekNumber]: 60 },
+    }));
+    const adjustedWeek = plan.weeks[weekNumber - 1];
+
+    expect(adjustedWeek.totalMileage).toBe(60);
+    expect(scheduledMileage(adjustedWeek)).toBeCloseTo(60, 1);
+    expect(adjustedWeek.longRunDistance).toBe(15);
+    expect(adjustedWeek.intensityTargetDistribution?.easy).toBeGreaterThan(0);
+  });
+
   it("caps long runs and redistributes weekly mileage to other days", () => {
     const plan = generatePlan(makeProfile({
       weeksOverride: 24,

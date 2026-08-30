@@ -26,6 +26,7 @@ interface WeeklyPlanCardProps {
   highlightCurrentWeek?: boolean;
   focusDate?: string | null;
   onWeekUpdate?: (updatedWeek: WeeklyPlan) => Promise<void> | void;
+  onMileageChange: (weekNumber: number, mileage: number) => Promise<void>;
 }
 
 type IntensityTargetKey = keyof NonNullable<RunnerProfile["intensityTargetPercents"]>;
@@ -429,6 +430,7 @@ export default function WeeklyPlanCard({
   highlightCurrentWeek = false,
   focusDate = null,
   onWeekUpdate,
+  onMileageChange,
 }: WeeklyPlanCardProps) {
   const [localDays, setLocalDays] = useState<DailyPlan[]>(
     [...week.days].sort((a, b) => dayDisplayOrder[a.dayOfWeek] - dayDisplayOrder[b.dayOfWeek])
@@ -438,6 +440,9 @@ export default function WeeklyPlanCard({
   const [editingRunId, setEditingRunId] = useState<string | null>(null);
   const [runEditors, setRunEditors] = useState<Record<string, RunEditorState>>({});
   const [dayExpansionOverrides, setDayExpansionOverrides] = useState<Record<string, boolean>>({});
+  const [mileageDraft, setMileageDraft] = useState(String(week.totalMileage));
+  const [isAdjustingMileage, setIsAdjustingMileage] = useState(false);
+  const [mileageError, setMileageError] = useState<string | null>(null);
   const orderedDays = useMemo(
     () => [...localDays].sort((a, b) => dayDisplayOrder[a.dayOfWeek] - dayDisplayOrder[b.dayOfWeek]),
     [localDays]
@@ -447,6 +452,10 @@ export default function WeeklyPlanCard({
   useEffect(() => {
     setLocalDays([...week.days].sort((a, b) => dayDisplayOrder[a.dayOfWeek] - dayDisplayOrder[b.dayOfWeek]));
   }, [week.days]);
+
+  useEffect(() => {
+    setMileageDraft(String(week.totalMileage));
+  }, [week.totalMileage]);
 
   useEffect(() => {
     setDayExpansionOverrides({});
@@ -908,6 +917,31 @@ export default function WeeklyPlanCard({
     }));
   };
 
+  const submitMileageAdjustment = async (event: React.FormEvent<HTMLFormElement>): Promise<void> => {
+    event.preventDefault();
+    const targetMileage = Number(mileageDraft);
+    if (!Number.isFinite(targetMileage) || targetMileage < 5 || targetMileage > 120) {
+      setMileageError("Enter a weekly total between 5 and 120 miles.");
+      return;
+    }
+
+    const roundedMileage = Math.round(targetMileage * 4) / 4;
+    if (roundedMileage === week.totalMileage) {
+      setMileageDraft(String(week.totalMileage));
+      return;
+    }
+
+    setMileageError(null);
+    setIsAdjustingMileage(true);
+    try {
+      await onMileageChange(week.weekNumber, roundedMileage);
+    } catch {
+      setMileageError("Unable to recalculate this week. Please try again.");
+    } finally {
+      setIsAdjustingMileage(false);
+    }
+  };
+
   return (
     <div
       data-current-week-card={highlightCurrentWeek ? "true" : undefined}
@@ -921,7 +955,9 @@ export default function WeeklyPlanCard({
     >
       {/* Header */}
       <button
+        type="button"
         onClick={onToggle}
+        aria-expanded={isExpanded}
         className="flex w-full items-center justify-between gap-4 p-4 text-left hover:bg-gray-50"
       >
         <div className="min-w-0 flex-1">
@@ -990,6 +1026,56 @@ export default function WeeklyPlanCard({
       {/* Expanded content */}
       {isExpanded && (
         <div className="border-t border-gray-100 px-4 pb-4">
+          <form
+            onSubmit={submitMileageAdjustment}
+            className="mt-4 rounded-xl border border-enduro-200 bg-enduro-50 p-4"
+          >
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+              <div>
+                <label htmlFor={`week-${week.weekNumber}-mileage`} className="text-sm font-semibold text-gray-900">
+                  Weekly mileage target
+                </label>
+                <p className="mt-1 text-xs text-gray-600">
+                  Change the total and the week&apos;s runs, long run, and intensity mileage will recalculate.
+                </p>
+              </div>
+              <div className="flex items-center gap-2">
+                <div className="relative">
+                  <input
+                    id={`week-${week.weekNumber}-mileage`}
+                    type="number"
+                    min={5}
+                    max={120}
+                    step={0.25}
+                    value={mileageDraft}
+                    disabled={weekIsFullyLogged || isAdjustingMileage}
+                    onChange={(event) => {
+                      setMileageDraft(event.target.value);
+                      setMileageError(null);
+                    }}
+                    className="w-28 rounded-lg border border-gray-300 bg-white px-3 py-2 pr-9 text-right text-sm font-semibold text-gray-900 focus:border-enduro-500 focus:outline-none focus:ring-2 focus:ring-enduro-500/20 disabled:cursor-not-allowed disabled:bg-gray-100 disabled:text-gray-400"
+                  />
+                  <span className="pointer-events-none absolute inset-y-0 right-3 flex items-center text-xs text-gray-500">mi</span>
+                </div>
+                <button
+                  type="submit"
+                  disabled={
+                    weekIsFullyLogged ||
+                    isAdjustingMileage ||
+                    Math.round(Number(mileageDraft) * 4) / 4 === week.totalMileage
+                  }
+                  className="rounded-lg bg-enduro-600 px-4 py-2 text-sm font-semibold text-white hover:bg-enduro-700 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  {isAdjustingMileage ? "Recalculating..." : "Recalculate week"}
+                </button>
+              </div>
+            </div>
+            {weekIsFullyLogged && (
+              <p className="mt-2 text-xs font-medium text-slate-600">Completed weeks are locked and cannot be recalculated.</p>
+            )}
+            {mileageError && <p className="mt-2 text-xs font-medium text-red-600">{mileageError}</p>}
+          </form>
+
           {/* Phase badge */}
           <div className="mt-3 mb-2">
             <span className="rounded-full bg-enduro-100 px-2 py-1 text-xs font-medium text-enduro-700">
