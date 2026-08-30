@@ -172,7 +172,7 @@ describe("generatePlan", () => {
 
   it("recalculates an individual week from its mileage override", () => {
     const baseline = generatePlan(makeProfile({ weeksOverride: 18, peakMileageOverride: 70 }));
-    const weekNumber = baseline.weeks.find((week) => week.totalMileage >= 60)?.weekNumber;
+    const weekNumber = baseline.weeks.find((week) => week.totalMileage > 60)?.weekNumber;
     expect(weekNumber).toBeDefined();
     if (weekNumber === undefined) throw new Error("Expected a week at or above 60 miles");
 
@@ -182,8 +182,11 @@ describe("generatePlan", () => {
       weeklyMileageOverrides: { [weekNumber]: 60 },
     }));
     const adjustedWeek = plan.weeks[weekNumber - 1];
+    const baselineWeek = baseline.weeks[weekNumber - 1];
 
     expect(adjustedWeek.totalMileage).toBe(60);
+    expect(adjustedWeek.calculatedMileage).toBe(baselineWeek.totalMileage);
+    expect(adjustedWeek.calculatedMileage).not.toBe(adjustedWeek.totalMileage);
     expect(scheduledMileage(adjustedWeek)).toBeCloseTo(60, 1);
     expect(adjustedWeek.longRunDistance).toBe(15);
     expect(adjustedWeek.intensityTargetDistribution?.easy).toBeGreaterThan(0);

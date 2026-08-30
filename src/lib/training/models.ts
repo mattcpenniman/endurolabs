@@ -186,6 +186,7 @@ export interface WeeklyPlan {
   phase: TrainingPhase;
   days: DailyPlan[];
   totalMileage: number;
+  calculatedMileage?: number; // planner baseline before a per-week mileage adjustment
   isDownWeek: boolean;
   longRunDistance: number;
   intensityDistribution: {

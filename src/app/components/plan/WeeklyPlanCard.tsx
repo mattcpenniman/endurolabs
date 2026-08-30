@@ -705,6 +705,8 @@ export default function WeeklyPlanCard({
       (day.secondaryWorkout?.weeklyMileageContribution ?? 0),
     0
   );
+  const calculatedMileage = week.calculatedMileage ?? week.totalMileage;
+  const mileageAdjustment = Math.round((week.totalMileage - calculatedMileage) * 100) / 100;
   const phaseDetail = phaseDetails[week.phase];
   const qualityTotals = [
     { label: "T", value: week.intensityDistribution.threshold, className: "bg-amber-50 text-amber-700" },
@@ -992,6 +994,13 @@ export default function WeeklyPlanCard({
             <span className="font-medium">
               {formatMiles(adjustedMileage)} mi total
             </span>
+            {mileageAdjustment !== 0 && (
+              <span className={`rounded px-2 py-1 font-medium ${
+                mileageAdjustment < 0 ? "bg-amber-50 text-amber-700" : "bg-blue-50 text-blue-700"
+              }`}>
+                {mileageAdjustment > 0 ? "+" : ""}{formatMiles(mileageAdjustment)} mi adjusted
+              </span>
+            )}
             <span>Long {formatMiles(week.longRunDistance)} mi</span>
             <span className="rounded bg-green-50 px-2 py-1 text-green-700">
               Easy {formatMiles(week.intensityDistribution.easy)} mi
@@ -1037,6 +1046,14 @@ export default function WeeklyPlanCard({
                 </label>
                 <p className="mt-1 text-xs text-gray-600">
                   Change the total and the week&apos;s runs, long run, and intensity mileage will recalculate.
+                </p>
+                <p className="mt-2 text-xs font-medium text-gray-700">
+                  Calculated plan: {formatMiles(calculatedMileage)} mi
+                  {mileageAdjustment !== 0 && (
+                    <span className={mileageAdjustment < 0 ? "text-amber-700" : "text-blue-700"}>
+                      {" "}&middot; Adjustment: {mileageAdjustment > 0 ? "+" : ""}{formatMiles(mileageAdjustment)} mi
+                    </span>
+                  )}
                 </p>
               </div>
               <div className="flex items-center gap-2">

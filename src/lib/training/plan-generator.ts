@@ -975,6 +975,7 @@ export function generatePlan(profile: RunnerProfile): MarathonPlan {
       phase,
       days,
       totalMileage: weeklyMileage,
+      calculatedMileage: progressionMileage,
       isDownWeek,
       longRunDistance: longRunMiles,
       intensityDistribution: intensityDist,
