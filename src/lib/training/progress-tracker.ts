@@ -110,6 +110,10 @@ export function preserveLoggedPlanDays(
 
   const lockedSlots = new Set(dailyLogs.map((log) => planDayKey(log.weekNumber, log.dayOfWeek)));
   const lockedDates = new Set(dailyLogs.map((log) => dateKey(log.date)));
+  const latestLoggedDate = dailyLogs.reduce(
+    (latest, log) => dateKey(log.date) > latest ? dateKey(log.date) : latest,
+    ""
+  );
   const currentDaysBySlot = new Map(
     currentPlan.weeks.flatMap((week) =>
       week.days.map((day) => [planDayKey(week.weekNumber, day.dayOfWeek), day] as const)
@@ -122,8 +126,11 @@ export function preserveLoggedPlanDays(
   const weeks = recalculatedPlan.weeks.map((week) => {
     let preservedADay = false;
     const days = week.days.map((day) => {
-      const currentDay = lockedDates.has(dateKey(day.date))
-        ? currentDaysByDate.get(dateKey(day.date))
+      const dayDate = dateKey(day.date);
+      const currentDay = dayDate <= latestLoggedDate
+        ? currentDaysByDate.get(dayDate)
+        : lockedDates.has(dayDate)
+          ? currentDaysByDate.get(dayDate)
         : lockedSlots.has(planDayKey(week.weekNumber, day.dayOfWeek))
           ? currentDaysBySlot.get(planDayKey(week.weekNumber, day.dayOfWeek))
           : undefined;

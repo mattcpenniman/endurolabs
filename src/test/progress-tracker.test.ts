@@ -267,12 +267,22 @@ describe("analyzeProgress", () => {
 });
 
 describe("preserveLoggedPlanDays", () => {
-  it("preserves only days with actuals and accepts recalculated future days", () => {
+  it("preserves historical dates through the latest actual and accepts recalculated future days", () => {
     const current = makePlan();
     const recalculated = structuredClone(current);
+    const recalculatedMonday = recalculated.weeks[0].days[0];
     const recalculatedTuesday = recalculated.weeks[0].days[1];
     const recalculatedSunday = recalculated.weeks[0].days[2];
 
+    recalculatedMonday.workout = {
+      ...recalculatedTuesday.workout!,
+      id: "easy-monday",
+      title: "Recalculated Monday",
+      totalDistance: 8,
+      weeklyMileageContribution: 8,
+    };
+    recalculatedMonday.isRestDay = false;
+    recalculatedMonday.plannedMileage = 8;
     recalculatedTuesday.workout = {
       ...recalculatedTuesday.workout!,
       title: "Recalculated Tuesday",
@@ -294,6 +304,7 @@ describe("preserveLoggedPlanDays", () => {
       dayOfWeek: "Tuesday",
     }]);
 
+    expect(result.weeks[0].days[0]).toEqual(current.weeks[0].days[0]);
     expect(result.weeks[0].days[1]).toEqual(current.weeks[0].days[1]);
     expect(result.weeks[0].days[2].workout?.title).toBe("Recalculated Sunday");
     expect(result.weeks[0].totalMileage).toBe(16);

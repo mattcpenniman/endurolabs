@@ -423,6 +423,85 @@ function selectKeyWorkoutDay(runDays: string[], longRunDay: string): string | un
     })[0];
 }
 
+function resizeSimpleRun(workout: Workout, distance: number, paceZones: PaceZones): void {
+  const nextDistance = roundMiles(Math.max(1, distance));
+  const pace = workout.type === "recovery"
+    ? paceZones.recovery
+    : (paceZones.easy.min + paceZones.easy.max) / 2;
+
+  workout.totalDistance = nextDistance;
+  workout.weeklyMileageContribution = nextDistance;
+  workout.estimatedDuration = Math.round(nextDistance * pace);
+  workout.title = workout.type === "recovery"
+    ? `${nextDistance} mi Recovery Run`
+    : `${nextDistance} mi Easy Run`;
+
+  if (workout.segments.length === 1) {
+    workout.segments[0].distance = nextDistance;
+    workout.segments[0].description = workout.type === "recovery"
+      ? `Recovery jog — ${nextDistance} miles, very relaxed effort`
+      : `Easy run — ${nextDistance} miles at conversational pace`;
+  }
+}
+
+function rebalanceDailyMileage(
+  days: DailyPlan[],
+  weeklyMileage: number,
+  longRunDay: string,
+  paceZones: PaceZones
+): void {
+  const ordinaryDayCap = roundMiles(Math.max(8, weeklyMileage * 0.18));
+  const adjacentLongRunCap = roundMiles(Math.max(6, weeklyMileage * 0.12));
+  const dayMileage = (day: DailyPlan): number => roundMiles(
+    (day.workout?.weeklyMileageContribution ?? 0) +
+    (day.secondaryWorkout?.weeklyMileageContribution ?? 0)
+  );
+  const capForDay = (day: DailyPlan): number => {
+    const isAdjacentToLongRun = shortestDistanceToLongRun(day.dayOfWeek, longRunDay) === 1;
+    return isAdjacentToLongRun ? adjacentLongRunCap : ordinaryDayCap;
+  };
+  const movableRuns = (day: DailyPlan): Workout[] =>
+    [day.secondaryWorkout, day.workout].filter(
+      (workout): workout is Workout => workout?.type === "easy" || workout?.type === "recovery"
+    );
+
+  const overloadedDays = days
+    .filter((day) => day.dayOfWeek !== longRunDay && dayMileage(day) > capForDay(day))
+    .sort((a, b) => dayMileage(b) - capForDay(b) - (dayMileage(a) - capForDay(a)));
+
+  for (const sourceDay of overloadedDays) {
+    let excess = roundMiles(dayMileage(sourceDay) - capForDay(sourceDay));
+    if (excess <= 0) continue;
+
+    const recipientDays = days
+      .filter((day) => day !== sourceDay && day.dayOfWeek !== longRunDay && movableRuns(day).length > 0)
+      .sort((a, b) => {
+        const headroomDifference = (capForDay(b) - dayMileage(b)) - (capForDay(a) - dayMileage(a));
+        if (headroomDifference !== 0) return headroomDifference;
+        return shortestDistanceToLongRun(b.dayOfWeek, longRunDay) - shortestDistanceToLongRun(a.dayOfWeek, longRunDay);
+      });
+
+    for (const recipientDay of recipientDays) {
+      if (excess <= 0) break;
+      const headroom = roundMiles(capForDay(recipientDay) - dayMileage(recipientDay));
+      if (headroom <= 0) continue;
+
+      const sourceWorkout = movableRuns(sourceDay).find((workout) => workout.totalDistance > 1);
+      const recipientWorkout = movableRuns(recipientDay)[0];
+      if (!sourceWorkout || !recipientWorkout) break;
+
+      const transferable = roundMiles(Math.min(excess, headroom, sourceWorkout.totalDistance - 1));
+      if (transferable <= 0) continue;
+
+      resizeSimpleRun(sourceWorkout, sourceWorkout.totalDistance - transferable, paceZones);
+      resizeSimpleRun(recipientWorkout, recipientWorkout.totalDistance + transferable, paceZones);
+      sourceDay.plannedMileage = dayMileage(sourceDay);
+      recipientDay.plannedMileage = dayMileage(recipientDay);
+      excess = roundMiles(excess - transferable);
+    }
+  }
+}
+
 // ─── Workout Assignment ────────────────────────────────────
 
 function assignWorkoutsForWeek(
@@ -600,9 +679,10 @@ function assignWorkoutsForWeek(
     // Recovery day after hard workout
     const dayIdx = DAY_INDEX[day];
     const isAfterKeyWorkout = keyWorkoutDay && dayIdx === DAY_INDEX[keyWorkoutDay] + 1;
+    const isAfterLongRun = daysAfterLongRun(day, longRunDay) === 1;
     const runMileage = Math.max(mileage > 0 ? 1 : 0, mileage);
 
-    if (isAfterKeyWorkout) {
+    if (isAfterKeyWorkout || isAfterLongRun) {
       const recovery = WorkoutLibrary.createRecoveryRun(week, workoutIndex++, runMileage, paceZones, powerZones);
       days.push({
         date: "",
@@ -678,6 +758,10 @@ function assignWorkoutsForWeek(
       adjustableDay.plannedMileage = roundMiles(adjustableDay.plannedMileage + contributionDelta);
     }
   }
+
+  // Avoid concentrating too much mileage on an ordinary day, especially
+  // immediately before or after the long run.
+  rebalanceDailyMileage(days, weeklyMileage, longRunDay, paceZones);
 
   // 5. Fill in rest days
   for (const day of allDays) {
