@@ -5,7 +5,7 @@
 // and generates adjustment suggestions based on trends.
 // ============================================================
 
-import { DailyLog, WeeklyLog, WeeklyProgress, MarathonPlan } from "./models";
+import { DailyLog, WeeklyLog, WeeklyProgress, MarathonPlan, WeeklyPlan } from "./models";
 
 // ─── Storage Keys ─────────────────────────────────────────
 
@@ -167,6 +167,26 @@ export function preserveLoggedPlanDays(
   });
 
   return { ...recalculatedPlan, weeks };
+}
+
+export function areAllPhaseRunsLogged(weeks: WeeklyPlan[], dailyLogs: DailyLog[]): boolean {
+  const plannedRuns = weeks.flatMap((week) =>
+    week.days.flatMap((day) =>
+      [day.workout, day.secondaryWorkout]
+        .filter((workout) => workout !== null && workout !== undefined)
+        .map((workout) => `${week.weekNumber}:${workout.id}`)
+    )
+  );
+
+  if (plannedRuns.length === 0) return false;
+
+  const completedRuns = new Set(
+    dailyLogs
+      .filter((log) => log.completed && !log.isAdditionalRun)
+      .map((log) => `${log.weekNumber}:${log.plannedWorkoutId ?? log.runId}`)
+  );
+
+  return plannedRuns.every((run) => completedRuns.has(run));
 }
 
 export function dailyLogsToWeeklyLogs(plan: MarathonPlan, dailyLogs: DailyLog[]): WeeklyLog[] {

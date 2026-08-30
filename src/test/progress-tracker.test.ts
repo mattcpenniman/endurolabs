@@ -6,6 +6,7 @@ import { describe, it, expect } from "vitest";
 import {
   addDailyLog,
   analyzeProgress,
+  areAllPhaseRunsLogged,
   dailyLogsToWeeklyLogs,
   getMileageTrend,
   preserveLoggedPlanDays,
@@ -157,6 +158,22 @@ function makeLog(overrides: Partial<WeeklyLog> = {}): WeeklyLog {
     adherence: 90,
     notes: "",
     loggedAt: new Date().toISOString(),
+    ...overrides,
+  };
+}
+
+function makeDailyLog(runId: string, overrides: Partial<DailyLog> = {}): DailyLog {
+  return {
+    weekNumber: 1,
+    date: "2026-05-05",
+    dayOfWeek: "Tuesday",
+    runId,
+    plannedWorkoutId: runId,
+    actualMileage: 4,
+    completed: true,
+    feelRating: 7,
+    notes: "",
+    loggedAt: "2026-05-05T12:00:00.000Z",
     ...overrides,
   };
 }
@@ -359,6 +376,38 @@ describe("dailyLogsToWeeklyLogs", () => {
     expect(weeklyLogs[0].adherence).toBe(50);
     expect(weeklyLogs[0].notes).toContain("smooth");
     expect(weeklyLogs[0].notes).toContain("cut short");
+  });
+});
+
+describe("areAllPhaseRunsLogged", () => {
+  it("requires completed logs for every primary and secondary run", () => {
+    const week = structuredClone(makePlan().weeks[0]);
+    week.days[1].secondaryWorkout = {
+      ...week.days[1].workout!,
+      id: "recovery-1",
+      title: "Recovery",
+    };
+
+    expect(areAllPhaseRunsLogged([week], [
+      makeDailyLog("easy-1"),
+      makeDailyLog("long-1", { date: "2026-05-10", dayOfWeek: "Sunday" }),
+    ])).toBe(false);
+    expect(areAllPhaseRunsLogged([week], [
+      makeDailyLog("easy-1"),
+      makeDailyLog("recovery-1"),
+      makeDailyLog("long-1", { date: "2026-05-10", dayOfWeek: "Sunday" }),
+    ])).toBe(true);
+  });
+
+  it("ignores incomplete and additional runs and does not complete an empty phase", () => {
+    const week = makePlan().weeks[0];
+
+    expect(areAllPhaseRunsLogged([week], [
+      makeDailyLog("easy-1"),
+      makeDailyLog("long-1", { completed: false }),
+      makeDailyLog("long-1", { isAdditionalRun: true }),
+    ])).toBe(false);
+    expect(areAllPhaseRunsLogged([makePlan().weeks[1]], [])).toBe(false);
   });
 });
 

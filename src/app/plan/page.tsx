@@ -23,7 +23,7 @@ import LongRunProgressionChart from "@/app/components/charts/LongRunProgressionC
 import IntensityDistributionChart from "@/app/components/charts/IntensityDistributionChart";
 import { generateRaceDayPlan } from "@/lib/training/race-day-plan";
 import { calculatePaceZones, calculatePowerZones } from "@/lib/training/zone-calculator";
-import { analyzeProgress, dailyLogsToWeeklyLogs } from "@/lib/training/progress-tracker";
+import { analyzeProgress, areAllPhaseRunsLogged, dailyLogsToWeeklyLogs } from "@/lib/training/progress-tracker";
 import { adjustWeeklyIntensityPercent } from "@/lib/training/intensity-adjustments";
 
 // Shape of a saved plan row from the database
@@ -155,6 +155,10 @@ function toDateKey(date: string): string {
   return new Date(date).toISOString().slice(0, 10);
 }
 
+function phaseExpansionKey(planId: string, firstWeek: number): string {
+  return `${planId}:${firstWeek}`;
+}
+
 export default function PlanPage(): React.ReactNode {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -162,6 +166,7 @@ export default function PlanPage(): React.ReactNode {
   const [isCheckingAuth, setIsCheckingAuth] = useState(true);
   const [isLoading, setIsLoading] = useState(false);
   const [expandedWeeks, setExpandedWeeks] = useState<Set<number>>(new Set());
+  const [phaseExpansionOverrides, setPhaseExpansionOverrides] = useState<Record<string, boolean>>({});
   const [error, setError] = useState<string | null>(null);
   const [pacingStrategy, setPacingStrategy] = useState<PacingStrategy>("even");
   const [expectedTempF, setExpectedTempF] = useState(50);
@@ -324,6 +329,13 @@ export default function PlanPage(): React.ReactNode {
 
     if (focusWeekNumber !== null) {
       setExpandedWeeks(new Set([focusWeekNumber]));
+      const phase = targetPlan.phases.find(
+        ({ weekRange }) => focusWeekNumber >= weekRange[0] && focusWeekNumber <= weekRange[1]
+      );
+      if (phase) {
+        const phaseKey = phaseExpansionKey(targetPlan.id, phase.weekRange[0]);
+        setPhaseExpansionOverrides((current) => ({ ...current, [phaseKey]: true }));
+      }
     }
 
     setActivePlanTab("schedule");
@@ -1151,6 +1163,10 @@ export default function PlanPage(): React.ReactNode {
     });
   };
 
+  const togglePhase = (phaseKey: string, isExpanded: boolean) => {
+    setPhaseExpansionOverrides((current) => ({ ...current, [phaseKey]: !isExpanded }));
+  };
+
   if (isCheckingAuth) {
     return (
       <div className="flex items-center justify-center py-32">
@@ -1574,47 +1590,69 @@ export default function PlanPage(): React.ReactNode {
                 </div>
               )}
               <div className="space-y-6">
-                {phaseSections.map(({ phase, weeks }) => (
-                  <section key={phase.name} aria-labelledby={`phase-${phase.weekRange[0]}`} className="space-y-3">
-                    <div className="rounded-xl border border-enduro-100 bg-enduro-50 p-4">
-                      <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
-                        <div>
-                          <p className="text-xs font-semibold uppercase tracking-wide text-enduro-700">
-                            Weeks {phase.weekRange[0]}&ndash;{phase.weekRange[1]}
-                          </p>
-                          <h3 id={`phase-${phase.weekRange[0]}`} className="mt-1 text-lg font-bold text-gray-900">
-                            {phase.name}
-                          </h3>
-                          <p className="mt-1 max-w-3xl text-sm text-gray-700">{phase.description}</p>
+                {phaseSections.map(({ phase, weeks }) => {
+                  const phaseKey = phaseExpansionKey(plan.id, phase.weekRange[0]);
+                  const isPhaseExpanded = phaseExpansionOverrides[phaseKey] ?? !areAllPhaseRunsLogged(weeks, dailyLogs);
+                  const phaseHeadingId = `phase-${phase.weekRange[0]}`;
+                  const phaseWeeksId = `phase-weeks-${phase.weekRange[0]}`;
+
+                  return (
+                    <section key={phase.name} aria-labelledby={phaseHeadingId} className="space-y-3">
+                      <button
+                        type="button"
+                        onClick={() => togglePhase(phaseKey, isPhaseExpanded)}
+                        aria-expanded={isPhaseExpanded}
+                        aria-controls={phaseWeeksId}
+                        className="w-full rounded-xl border border-enduro-100 bg-enduro-50 p-4 text-left transition-colors hover:border-enduro-200 hover:bg-enduro-100/70"
+                      >
+                        <div className="flex items-start gap-3">
+                          <div className="flex min-w-0 flex-1 flex-col gap-3 md:flex-row md:justify-between">
+                            <div>
+                              <p className="text-xs font-semibold uppercase tracking-wide text-enduro-700">
+                                Weeks {phase.weekRange[0]}&ndash;{phase.weekRange[1]}
+                              </p>
+                              <h3 id={phaseHeadingId} className="mt-1 text-lg font-bold text-gray-900">
+                                {phase.name}
+                              </h3>
+                              <p className="mt-1 max-w-3xl text-sm text-gray-700">{phase.description}</p>
+                            </div>
+                            <div className="grid gap-2 text-xs text-gray-700 sm:grid-cols-2 md:min-w-72 md:grid-cols-1">
+                              {phase.targetMileage && (
+                                <span className="rounded-lg bg-white px-3 py-2 shadow-sm">Mileage: {phase.targetMileage}</span>
+                              )}
+                              {phase.longRunRange && (
+                                <span className="rounded-lg bg-white px-3 py-2 shadow-sm">Long runs: {phase.longRunRange}</span>
+                              )}
+                            </div>
+                          </div>
+                          <span className={`mt-1 shrink-0 text-gray-500 transition-transform ${isPhaseExpanded ? "rotate-180" : ""}`} aria-hidden="true">
+                            ▼
+                          </span>
                         </div>
-                        <div className="grid gap-2 text-xs text-gray-700 sm:grid-cols-2 md:min-w-72 md:grid-cols-1">
-                          {phase.targetMileage && (
-                            <span className="rounded-lg bg-white px-3 py-2 shadow-sm">Mileage: {phase.targetMileage}</span>
-                          )}
-                          {phase.longRunRange && (
-                            <span className="rounded-lg bg-white px-3 py-2 shadow-sm">Long runs: {phase.longRunRange}</span>
-                          )}
+                      </button>
+                      {isPhaseExpanded && (
+                        <div id={phaseWeeksId} className="space-y-3">
+                          {weeks.map((week) => (
+                            <WeeklyPlanCard
+                              key={week.weekNumber}
+                              planId={plan.id}
+                              week={week}
+                              isExpanded={expandedWeeks.has(week.weekNumber)}
+                              onToggle={() => toggleWeek(week.weekNumber)}
+                              dailyLogs={dailyLogs}
+                              onDailyLogSaved={() => setDailyLogRefresh((value) => value + 1)}
+                              intensityTargetPercents={currentIntensityTargetPercents}
+                              onIntensityTargetChange={handleAdjustIntensityTarget}
+                              highlightCurrentWeek={week.weekNumber === currentWeekNumber}
+                              focusDate={focusDate}
+                              onWeekUpdate={handleWeekUpdate}
+                            />
+                          ))}
                         </div>
-                      </div>
-                    </div>
-                    {weeks.map((week) => (
-                      <WeeklyPlanCard
-                        key={week.weekNumber}
-                        planId={plan.id}
-                        week={week}
-                        isExpanded={expandedWeeks.has(week.weekNumber)}
-                        onToggle={() => toggleWeek(week.weekNumber)}
-                        dailyLogs={dailyLogs}
-                        onDailyLogSaved={() => setDailyLogRefresh((value) => value + 1)}
-                        intensityTargetPercents={currentIntensityTargetPercents}
-                        onIntensityTargetChange={handleAdjustIntensityTarget}
-                        highlightCurrentWeek={week.weekNumber === currentWeekNumber}
-                        focusDate={focusDate}
-                        onWeekUpdate={handleWeekUpdate}
-                      />
-                    ))}
-                  </section>
-                ))}
+                      )}
+                    </section>
+                  );
+                })}
               </div>
             </div>
 
