@@ -380,6 +380,29 @@ describe("generatePlan", () => {
     }
   });
 
+  it("scales the minimum secondary run distance with weekly mileage", () => {
+    const plan = generatePlan(
+      makeProfile({
+        trainingDaysPerWeek: 5,
+        runsPerWeekOverride: 7,
+        weeksOverride: 18,
+        peakMileageOverride: 55,
+      })
+    );
+
+    for (const week of plan.weeks) {
+      const expectedMinimum = roundQuarter(Math.max(3, Math.min(6, week.totalMileage * 0.06)));
+      const secondaryRuns = week.days.flatMap((day) =>
+        day.secondaryWorkout ? [day.secondaryWorkout] : []
+      );
+
+      expect(secondaryRuns.length).toBe(2);
+      for (const run of secondaryRuns) {
+        expect(run.totalDistance).toBeGreaterThanOrEqual(expectedMinimum);
+      }
+    }
+  });
+
   it("places secondary runs on preferred double-up days first", () => {
     const plan = generatePlan(
       makeProfile({

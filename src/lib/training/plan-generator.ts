@@ -34,6 +34,8 @@ dayjs.extend(utc);
 
 const MIN_WEEKS = 14;
 const MAX_WEEKS = 28;
+const MIN_SECONDARY_RUN_MILES = 3;
+const MAX_SECONDARY_RUN_MILES = 6;
 
 // Day-of-week index mapping (0=Sunday for JS date math)
 const DAY_INDEX: Record<string, number> = {
@@ -282,6 +284,13 @@ function roundMiles(distance: number): number {
   return Math.round(distance * 4) / 4;
 }
 
+function minimumSecondaryRunMiles(weeklyMileage: number): number {
+  return roundMiles(Math.max(
+    MIN_SECONDARY_RUN_MILES,
+    Math.min(MAX_SECONDARY_RUN_MILES, weeklyMileage * 0.06)
+  ));
+}
+
 function workoutDistanceByType(workout: Workout | null | undefined, type: Workout["type"]): number {
   if (!workout) return 0;
   return workout.segments.reduce((sum, segment) => {
@@ -333,11 +342,18 @@ function calculateIntensityTargets(
   };
 }
 
-function distributeVariedMileage(totalMileage: number, dayCount: number, week: number): number[] {
+function distributeVariedMileage(
+  totalMileage: number,
+  dayCount: number,
+  week: number,
+  minimumMileage = 1
+): number[] {
   if (dayCount <= 0) return [];
   if (dayCount === 1) return [roundMiles(totalMileage)];
 
-  const minimum = totalMileage >= dayCount ? 1 : 0;
+  const minimum = totalMileage >= dayCount * minimumMileage
+    ? minimumMileage
+    : totalMileage >= dayCount ? 1 : 0;
   const baseMileage = minimum * dayCount;
   const variableMileage = Math.max(0, totalMileage - baseMileage);
   const pattern = [1.25, 0.8, 1.1, 0.9, 1.35, 0.75, 1.05];
@@ -454,6 +470,7 @@ function rebalanceDailyMileage(
 ): void {
   const ordinaryDayCap = roundMiles(Math.max(8, weeklyMileage * 0.18));
   const adjacentLongRunCap = roundMiles(Math.max(6, weeklyMileage * 0.12));
+  const secondaryRunMinimum = minimumSecondaryRunMiles(weeklyMileage);
   const dayMileage = (day: DailyPlan): number => roundMiles(
     (day.workout?.weeklyMileageContribution ?? 0) +
     (day.secondaryWorkout?.weeklyMileageContribution ?? 0)
@@ -482,24 +499,32 @@ function rebalanceDailyMileage(
         if (headroomDifference !== 0) return headroomDifference;
         return shortestDistanceToLongRun(b.dayOfWeek, longRunDay) - shortestDistanceToLongRun(a.dayOfWeek, longRunDay);
       });
-
     for (const recipientDay of recipientDays) {
       if (excess <= 0) break;
-      const headroom = roundMiles(capForDay(recipientDay) - dayMileage(recipientDay));
+      let headroom = roundMiles(capForDay(recipientDay) - dayMileage(recipientDay));
       if (headroom <= 0) continue;
 
-      const sourceWorkout = movableRuns(sourceDay).find((workout) => workout.totalDistance > 1);
       const recipientWorkout = movableRuns(recipientDay)[0];
-      if (!sourceWorkout || !recipientWorkout) break;
+      if (!recipientWorkout) continue;
 
-      const transferable = roundMiles(Math.min(excess, headroom, sourceWorkout.totalDistance - 1));
-      if (transferable <= 0) continue;
+      while (excess > 0 && headroom > 0) {
+        const sourceWorkout = movableRuns(sourceDay).find((workout) => {
+          const minimumDistance = workout === sourceDay.secondaryWorkout ? secondaryRunMinimum : 1;
+          return workout.totalDistance > minimumDistance;
+        });
+        if (!sourceWorkout) break;
 
-      resizeSimpleRun(sourceWorkout, sourceWorkout.totalDistance - transferable, paceZones);
-      resizeSimpleRun(recipientWorkout, recipientWorkout.totalDistance + transferable, paceZones);
-      sourceDay.plannedMileage = dayMileage(sourceDay);
-      recipientDay.plannedMileage = dayMileage(recipientDay);
-      excess = roundMiles(excess - transferable);
+        const minimumDistance = sourceWorkout === sourceDay.secondaryWorkout ? secondaryRunMinimum : 1;
+        const transferable = roundMiles(Math.min(excess, headroom, sourceWorkout.totalDistance - minimumDistance));
+        if (transferable <= 0) break;
+
+        resizeSimpleRun(sourceWorkout, sourceWorkout.totalDistance - transferable, paceZones);
+        resizeSimpleRun(recipientWorkout, recipientWorkout.totalDistance + transferable, paceZones);
+        sourceDay.plannedMileage = dayMileage(sourceDay);
+        recipientDay.plannedMileage = dayMileage(recipientDay);
+        excess = roundMiles(excess - transferable);
+        headroom = roundMiles(headroom - transferable);
+      }
     }
   }
 }
@@ -539,6 +564,7 @@ function assignWorkoutsForWeek(
 
   // How many double-days? (runs exceeding training days)
   const doubleDayCount = Math.max(0, targetRunCount - primaryRunCount);
+  const secondaryRunMinimum = minimumSecondaryRunMiles(weeklyMileage);
 
   // Distribute workouts across training days
   let workoutIndex = 0;
@@ -672,7 +698,13 @@ function assignWorkoutsForWeek(
   // 3. Fill remaining training days with easy runs and recovery
   const easyRunDays = runDays.filter((day) => day !== longRunDay && day !== keyWorkoutDay);
   remainingMileage = Math.max(0, weeklyMileage - assignedMileage);
-  const doubleDayReserve = doubleDayCount > 0 ? Math.min(4 * doubleDayCount, Math.max(0, remainingMileage - easyRunDays.length * 3)) : 0;
+  const doubleDayReserve = doubleDayCount > 0
+    ? Math.min(
+        remainingMileage,
+        Math.max(4, secondaryRunMinimum) * doubleDayCount,
+        Math.max(secondaryRunMinimum * doubleDayCount, remainingMileage - easyRunDays.length * 3)
+      )
+    : 0;
   const primaryEasyMileage = Math.max(0, remainingMileage - doubleDayReserve);
   const easyMileageTargets = distributeVariedMileage(primaryEasyMileage, easyRunDays.length, week);
   const easyDayMileagePairs = pairEasyDaysWithMileage(easyRunDays, easyMileageTargets, longRunDay);
@@ -720,12 +752,13 @@ function assignWorkoutsForWeek(
     const doubleDayTargets = distributeVariedMileage(
       secondaryMileageRemaining,
       Math.min(doubleDayCount, orderedCandidateDays.length),
-      week + 2
+      week + 2,
+      secondaryRunMinimum
     );
 
     for (let i = 0; i < Math.min(doubleDayCount, orderedCandidateDays.length); i++) {
       const doubleDayMiles = Math.max(
-        1,
+        secondaryRunMinimum,
         doubleDayTargets[i] ?? roundMiles(secondaryMileageRemaining)
       );
       const secondary = WorkoutLibrary.createEasyRun(
