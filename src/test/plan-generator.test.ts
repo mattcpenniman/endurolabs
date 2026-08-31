@@ -94,24 +94,33 @@ describe("generatePlan", () => {
   it("starts the plan on the Monday of the calculated start week", () => {
     const plan = generatePlan(makeProfile({ raceDate: "2026-12-01", weeksOverride: 18 }));
 
-    expect(new Date(plan.weeks[0].startDate).toISOString().slice(0, 10)).toBe("2026-07-27");
+    expect(new Date(plan.weeks[0].startDate).toISOString().slice(0, 10)).toBe("2026-08-03");
     expect(plan.weeks[0].days.map((day) => new Date(day.date).toISOString().slice(0, 10))).toEqual([
-      "2026-07-27",
-      "2026-07-28",
-      "2026-07-29",
-      "2026-07-30",
-      "2026-07-31",
-      "2026-08-01",
-      "2026-08-02",
+      "2026-08-03",
+      "2026-08-04",
+      "2026-08-05",
+      "2026-08-06",
+      "2026-08-07",
+      "2026-08-08",
+      "2026-08-09",
     ]);
   });
 
-  it("aligns a May 18, 2026 plan start to Monday", () => {
+  it("aligns a May 25, 2026 plan start to Monday", () => {
     const plan = generatePlan(makeProfile({ raceDate: "2026-09-21", weeksOverride: 18 }));
 
-    expect(new Date(plan.weeks[0].startDate).toISOString().slice(0, 10)).toBe("2026-05-18");
+    expect(new Date(plan.weeks[0].startDate).toISOString().slice(0, 10)).toBe("2026-05-25");
     expect(plan.weeks[0].days[0].dayOfWeek).toBe("Monday");
-    expect(new Date(plan.weeks[0].days[0].date).toISOString().slice(0, 10)).toBe("2026-05-18");
+    expect(new Date(plan.weeks[0].days[0].date).toISOString().slice(0, 10)).toBe("2026-05-25");
+  });
+
+  it("includes the full race week for the September 27 German race", () => {
+    const plan = generatePlan(makeProfile({ raceDate: "2026-09-27", weeksOverride: 19 }));
+    const finalWeek = plan.weeks.at(-1);
+
+    expect(new Date(finalWeek!.startDate).toISOString().slice(0, 10)).toBe("2026-09-21");
+    expect(new Date(finalWeek!.endDate).toISOString().slice(0, 10)).toBe("2026-09-27");
+    expect(finalWeek!.days.map((day) => new Date(day.date).toISOString().slice(0, 10))).toContain("2026-09-27");
   });
 
   it("generates at least 14 weeks for a typical plan", () => {
@@ -439,23 +448,23 @@ describe("generatePlan", () => {
         preferredDoubleUpDays: ["Monday", "Tuesday"],
       })
     );
-    const august24Week = plan.weeks.find((week) =>
-      week.days.some((day) => new Date(day.date).toISOString().slice(0, 10) === "2026-08-24")
+    const august31Week = plan.weeks.find((week) =>
+      week.days.some((day) => new Date(day.date).toISOString().slice(0, 10) === "2026-08-31")
     );
 
-    expect(august24Week?.totalMileage).toBe(90);
-    for (const day of august24Week?.days ?? []) {
+    expect(august31Week?.totalMileage).toBe(90);
+    for (const day of august31Week?.days ?? []) {
       if (day.dayOfWeek !== "Saturday") {
         expect(day.plannedMileage).toBeLessThanOrEqual(16.25);
       }
     }
 
-    const monday = august24Week?.days.find((day) => day.dayOfWeek === "Monday");
-    const sunday = august24Week?.days.find((day) => day.dayOfWeek === "Sunday");
+    const monday = august31Week?.days.find((day) => day.dayOfWeek === "Monday");
+    const sunday = august31Week?.days.find((day) => day.dayOfWeek === "Sunday");
     expect(monday?.plannedMileage).toBeLessThanOrEqual(16.25);
     expect(sunday?.plannedMileage).toBeLessThanOrEqual(11);
     expect(sunday?.workout?.type).toBe("recovery");
-    expect(scheduledMileage(august24Week!)).toBeCloseTo(august24Week!.totalMileage, 1);
+    expect(scheduledMileage(august31Week!)).toBeCloseTo(august31Week!.totalMileage, 1);
   });
 
   it("varies quality workout formats across the plan", () => {

@@ -937,7 +937,9 @@ export function generatePlan(profile: RunnerProfile): MarathonPlan {
   const runsPerWeek = profile.runsPerWeekOverride
     ? Math.max(3, Math.min(10, profile.runsPerWeekOverride))
     : profile.trainingDaysPerWeek;
-  const planStart = dayjs.utc(profile.raceDate).subtract(totalWeeks, "week").startOf("isoWeek");
+  const planStart = dayjs.utc(profile.raceDate)
+    .startOf("isoWeek")
+    .subtract(totalWeeks - 1, "week");
 
   // Generate weeks
   const weeks: WeeklyPlan[] = [];
