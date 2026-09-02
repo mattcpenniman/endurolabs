@@ -65,8 +65,17 @@ export function restoreGarminClient(auth: StoredGarminAuth): GarminConnectClient
   return createFromSession(auth.session);
 }
 
-export async function fetchRecentRuns(client: GarminConnectClient, limit = 200): Promise<Activity[]> {
-  const activities = await client.getActivities(0, Math.min(Math.max(limit, 1), 200));
+export async function fetchRecentRuns(client: GarminConnectClient, limit = 400): Promise<Activity[]> {
+  const requested = Math.min(Math.max(limit, 1), 1000);
+  const activities: Activity[] = [];
+
+  while (activities.length < requested) {
+    const pageSize = Math.min(200, requested - activities.length);
+    const page = await client.getActivities(activities.length, pageSize);
+    activities.push(...page);
+    if (page.length < pageSize) break;
+  }
+
   return activities.filter((activity) => {
     const type = activity.activityType?.typeKey?.toLowerCase() ?? "";
     return type.includes("running") || type.includes("run");

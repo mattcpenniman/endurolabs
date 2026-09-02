@@ -3,7 +3,7 @@
 // ============================================================
 
 import { NextRequest, NextResponse } from "next/server";
-import { and, eq, notInArray } from "drizzle-orm";
+import { and, eq, inArray, notInArray } from "drizzle-orm";
 import { getCurrentUser } from "@/lib/auth";
 import { db } from "@/lib/db/client";
 import { garminConnections, plans, runActivities } from "@/lib/db/schema";
@@ -42,9 +42,27 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
 
     const auth = decryptGarminTokens<StoredGarminAuth>(connection.encryptedTokens);
     const client = restoreGarminClient(auth);
-    const fetched = await fetchRecentRuns(client, body.limit ?? 200);
+    const fetched = await fetchRecentRuns(client, body.limit ?? 400);
     const normalized = fetched.map((activity) => normalizeGarminActivity(activity as GarminActivityPayload));
     const fetchedIds = normalized.map((activity) => activity.providerActivityId);
+    const existingActivities = fetchedIds.length > 0
+      ? await db.select({
+          providerActivityId: runActivities.providerActivityId,
+          planId: runActivities.planId,
+          weekNumber: runActivities.weekNumber,
+          dayOfWeek: runActivities.dayOfWeek,
+          plannedWorkoutId: runActivities.plannedWorkoutId,
+          matchConfidence: runActivities.matchConfidence,
+        })
+          .from(runActivities)
+          .where(and(
+            eq(runActivities.userId, user.id),
+            inArray(runActivities.providerActivityId, fetchedIds)
+          ))
+      : [];
+    const existingByProviderId = new Map(
+      existingActivities.map((activity) => [activity.providerActivityId, activity])
+    );
     const preexistingClaims = planId
       ? await db.select({ plannedWorkoutId: runActivities.plannedWorkoutId })
           .from(runActivities)
@@ -65,26 +83,29 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
         claimedWorkoutIds.add(match.plannedWorkoutId);
         matched += 1;
       }
+      const existing = existingByProviderId.get(activity.providerActivityId);
+      const retained = !match && existing?.planId && existing.planId !== planId ? existing : null;
+      const assignment = match ?? retained;
       const now = new Date();
       await db.insert(runActivities).values({
         userId: user.id,
         ...activity,
-        planId: match?.planId ?? null,
-        weekNumber: match?.weekNumber ?? null,
-        dayOfWeek: match?.dayOfWeek ?? null,
-        plannedWorkoutId: match?.plannedWorkoutId ?? null,
-        matchConfidence: match?.matchConfidence ?? null,
+        planId: assignment?.planId ?? null,
+        weekNumber: assignment?.weekNumber ?? null,
+        dayOfWeek: assignment?.dayOfWeek ?? null,
+        plannedWorkoutId: assignment?.plannedWorkoutId ?? null,
+        matchConfidence: assignment?.matchConfidence ?? null,
         syncedAt: now,
         updatedAt: now,
       }).onConflictDoUpdate({
         target: [runActivities.userId, runActivities.providerActivityId],
         set: {
           ...activity,
-          planId: match?.planId ?? null,
-          weekNumber: match?.weekNumber ?? null,
-          dayOfWeek: match?.dayOfWeek ?? null,
-          plannedWorkoutId: match?.plannedWorkoutId ?? null,
-          matchConfidence: match?.matchConfidence ?? null,
+          planId: assignment?.planId ?? null,
+          weekNumber: assignment?.weekNumber ?? null,
+          dayOfWeek: assignment?.dayOfWeek ?? null,
+          plannedWorkoutId: assignment?.plannedWorkoutId ?? null,
+          matchConfidence: assignment?.matchConfidence ?? null,
           syncedAt: now,
           updatedAt: now,
         },

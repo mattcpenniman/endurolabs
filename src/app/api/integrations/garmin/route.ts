@@ -70,7 +70,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
         ? and(eq(runActivities.userId, user.id), eq(runActivities.planId, planId))
         : eq(runActivities.userId, user.id))
       .orderBy(desc(runActivities.startTimeGmt))
-      .limit(200);
+      .limit(1000);
 
     return NextResponse.json({
       connected: connection?.status === "connected",
