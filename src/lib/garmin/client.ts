@@ -65,7 +65,7 @@ export function restoreGarminClient(auth: StoredGarminAuth): GarminConnectClient
   return createFromSession(auth.session);
 }
 
-export async function fetchRecentRuns(client: GarminConnectClient, limit = 100): Promise<Activity[]> {
+export async function fetchRecentRuns(client: GarminConnectClient, limit = 200): Promise<Activity[]> {
   const activities = await client.getActivities(0, Math.min(Math.max(limit, 1), 200));
   return activities.filter((activity) => {
     const type = activity.activityType?.typeKey?.toLowerCase() ?? "";

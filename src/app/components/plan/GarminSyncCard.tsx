@@ -96,7 +96,7 @@ export default function GarminSyncCard({ planId, connection, onChanged }: Garmin
               onClick={() => runRequest("/api/integrations/garmin/sync", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ planId, limit: 100 }),
+                body: JSON.stringify({ planId, limit: 200 }),
               })}
               className="rounded-lg bg-sky-950 px-4 py-2 text-sm font-semibold text-white hover:bg-sky-900 disabled:opacity-50"
             >

@@ -10,6 +10,7 @@
     "user:create": "node scripts/create-user.mjs",
     "user:list": "node scripts/user-admin.mjs list",
     "user:set-password": "node scripts/user-admin.mjs set-password",
+    "plan:align-garmin": "node scripts/align-plan-to-garmin.mjs",
     "lint": "next lint",
     "test": "vitest run",
     "test:watch": "vitest"

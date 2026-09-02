@@ -42,7 +42,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
 
     const auth = decryptGarminTokens<StoredGarminAuth>(connection.encryptedTokens);
     const client = restoreGarminClient(auth);
-    const fetched = await fetchRecentRuns(client, body.limit ?? 100);
+    const fetched = await fetchRecentRuns(client, body.limit ?? 200);
     const normalized = fetched.map((activity) => normalizeGarminActivity(activity as GarminActivityPayload));
     const fetchedIds = normalized.map((activity) => activity.providerActivityId);
     const preexistingClaims = planId
