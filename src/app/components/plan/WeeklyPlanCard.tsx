@@ -13,6 +13,7 @@ import { useState, useEffect, useMemo } from "react";
 import { DailyLog, WeeklyPlan, DailyPlan, Workout, WorkoutType, RunnerProfile, formatPace } from "@/lib/training/models";
 import { isWeekFullyLogged } from "@/lib/training/progress-tracker";
 import { formatPlanDate } from "@/lib/training/date-utils";
+import { RunActivity } from "@/lib/activities/models";
 
 interface WeeklyPlanCardProps {
   planId: string;
@@ -20,6 +21,7 @@ interface WeeklyPlanCardProps {
   isExpanded: boolean;
   onToggle: () => void;
   dailyLogs: DailyLog[];
+  activities?: RunActivity[];
   onDailyLogSaved: () => void;
   intensityTargetPercents: NonNullable<RunnerProfile["intensityTargetPercents"]>;
   onIntensityTargetChange: (key: keyof NonNullable<RunnerProfile["intensityTargetPercents"]>, value: number, weekNumber?: number) => void;
@@ -110,6 +112,15 @@ function formatMileageValue(distance: number): string {
 function formatMileageDelta(distance: number): string {
   if (distance === 0) return "even";
   return `${distance > 0 ? "+" : ""}${distance.toFixed(2).replace(/\.?0+$/, "")} mi`;
+}
+
+function formatRunDuration(seconds: number): string {
+  const hours = Math.floor(seconds / 3600);
+  const minutes = Math.floor((seconds % 3600) / 60);
+  const remainingSeconds = seconds % 60;
+  return hours > 0
+    ? `${hours}:${String(minutes).padStart(2, "0")}:${String(remainingSeconds).padStart(2, "0")}`
+    : `${minutes}:${String(remainingSeconds).padStart(2, "0")}`;
 }
 
 interface WeekToDateSummary {
@@ -424,6 +435,7 @@ export default function WeeklyPlanCard({
   isExpanded,
   onToggle,
   dailyLogs,
+  activities = [],
   onDailyLogSaved,
   intensityTargetPercents,
   onIntensityTargetChange,
@@ -752,9 +764,14 @@ export default function WeeklyPlanCard({
   ];
   const activeIntensityRows = intensityRows.filter((row) => row.targetMiles > 0 || row.actualMiles > 0 || (isExpanded && (row.key === "marathon" || row.key === "threshold" || row.key === "vo2")));
   const weekLogs = dailyLogs.filter((log) => log.weekNumber === week.weekNumber);
+  const weekActivities = activities.filter((activity) => activity.weekNumber === week.weekNumber);
+  const syncedWorkoutIds = new Set(weekActivities.map((activity) => activity.plannedWorkoutId).filter(Boolean));
+  const manualMileage = weekLogs
+    .filter((log) => !log.plannedWorkoutId || !syncedWorkoutIds.has(log.plannedWorkoutId))
+    .reduce((sum, log) => sum + log.actualMileage, 0);
   const actualMileage =
-    weekLogs.length > 0
-      ? Math.round(weekLogs.reduce((sum, log) => sum + log.actualMileage, 0) * 10) / 10
+    weekLogs.length > 0 || weekActivities.length > 0
+      ? Math.round((manualMileage + weekActivities.reduce((sum, activity) => sum + activity.distanceMiles, 0)) * 10) / 10
       : null;
   const variancePct =
     actualMileage !== null && adjustedMileage > 0
@@ -1143,7 +1160,12 @@ export default function WeeklyPlanCard({
           <div className="space-y-3 pt-3">
             {orderedDays.map((day) => {
               const runEntries = buildRunEntries(day);
-              const dayActualMileage = runEntries.reduce((sum, entry) => sum + (entry.log?.actualMileage ?? 0), 0);
+              const dayActivities = activities.filter((activity) => activity.localDate === day.date.slice(0, 10));
+              const daySyncedWorkoutIds = new Set(dayActivities.map((activity) => activity.plannedWorkoutId).filter(Boolean));
+              const dayManualMileage = runEntries
+                .filter((entry) => !entry.plannedWorkoutId || !daySyncedWorkoutIds.has(entry.plannedWorkoutId))
+                .reduce((sum, entry) => sum + (entry.log?.actualMileage ?? 0), 0);
+              const dayActualMileage = dayManualMileage + dayActivities.reduce((sum, activity) => sum + activity.distanceMiles, 0);
               const dayPlannedMileage = (day.workout?.weeklyMileageContribution ?? 0) + (day.secondaryWorkout?.weeklyMileageContribution ?? 0);
               const dayKey = getDayKey(day);
               const dayIsFullyLogged = isDayFullyLogged(day);
@@ -1243,6 +1265,7 @@ export default function WeeklyPlanCard({
                       ) : (
                         runEntries.map((entry, index) => {
                         const actualMileage = entry.log?.actualMileage ?? 0;
+                        const syncedActivity = activities.find((activity) => activity.plannedWorkoutId === entry.plannedWorkoutId);
                         const draft = runDrafts[entry.runId] ?? createDefaultRunDraft(entry.plannedMileage);
                         const isLastEntry = index === runEntries.length - 1;
                         const showWeekToDateSummary =
@@ -1282,7 +1305,9 @@ export default function WeeklyPlanCard({
                                     </p>
                                     <p className="text-xs text-gray-500">
                                       Planned {formatMiles(entry.plannedMileage)} mi
-                                      {entry.log ? ` · Actual ${formatMiles(actualMileage)} mi` : ""}
+                                      {syncedActivity
+                                        ? ` · Garmin ${formatMiles(syncedActivity.distanceMiles)} mi`
+                                        : entry.log ? ` · Actual ${formatMiles(actualMileage)} mi` : ""}
                                     </p>
                                   </div>
                                 </div>
@@ -1321,6 +1346,24 @@ export default function WeeklyPlanCard({
                                 </p>
                                 {renderWorkoutSegments(entry.workout)}
                               </>
+                            )}
+
+                            {syncedActivity && (
+                              <div className="mt-3 rounded-lg border border-sky-100 bg-sky-50 p-3">
+                                <div className="flex flex-wrap items-center gap-2">
+                                  <span className="rounded-full bg-sky-950 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-white">Garmin synced</span>
+                                  <span className="text-xs font-semibold text-sky-950">{syncedActivity.activityName}</span>
+                                  <span className="text-[10px] uppercase tracking-wide text-sky-700">{syncedActivity.matchConfidence} match</span>
+                                </div>
+                                <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs text-sky-900">
+                                  <span>{formatMiles(syncedActivity.distanceMiles)} mi</span>
+                                  <span>{formatRunDuration(syncedActivity.durationSeconds)}</span>
+                                  {syncedActivity.averagePaceMinutesPerMile && <span>{formatPace(syncedActivity.averagePaceMinutesPerMile)}/mi</span>}
+                                  {syncedActivity.averageHeartRate && <span>{syncedActivity.averageHeartRate} bpm avg</span>}
+                                  {syncedActivity.averagePower && <span>{syncedActivity.averagePower} W avg</span>}
+                                  {syncedActivity.elevationGainMeters !== null && <span>{syncedActivity.elevationGainMeters} m gain</span>}
+                                </div>
+                              </div>
                             )}
 
                             {!weekIsFullyLogged && editingRunId === entry.runId && entry.workout && editor && (

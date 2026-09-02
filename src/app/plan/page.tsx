@@ -21,6 +21,9 @@ import Sub3Scorecard from "@/app/components/plan/Sub3Scorecard";
 import MileageTrendChart from "@/app/components/charts/MileageTrendChart";
 import LongRunProgressionChart from "@/app/components/charts/LongRunProgressionChart";
 import IntensityDistributionChart from "@/app/components/charts/IntensityDistributionChart";
+import RunTrendChart from "@/app/components/charts/RunTrendChart";
+import GarminSyncCard from "@/app/components/plan/GarminSyncCard";
+import { GarminConnectionStatus } from "@/lib/activities/models";
 import { generateRaceDayPlan } from "@/lib/training/race-day-plan";
 import { calculatePaceZones, calculatePowerZones } from "@/lib/training/zone-calculator";
 import { analyzeProgress, areAllPhaseRunsLogged, dailyLogsToWeeklyLogs } from "@/lib/training/progress-tracker";
@@ -59,6 +62,7 @@ type PlanTab = "overview" | "schedule" | "race" | "scorecard" | "settings";
 type RaceDistanceKey = NonNullable<RunnerProfile["raceDistance"]>;
 type IntensityTargetKey = keyof NonNullable<RunnerProfile["intensityTargetPercents"]>;
 const OPEN_CURRENT_PLAN_EVENT = "endurlab-open-current-plan";
+const EMPTY_GARMIN_STATUS: GarminConnectionStatus = { connected: false, activities: [] };
 
 const DAYS_OF_WEEK = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
 const RACE_DISTANCES: Array<{ key: RaceDistanceKey; label: string; miles: number }> = [
@@ -160,6 +164,14 @@ function phaseExpansionKey(planId: string, firstWeek: number): string {
 }
 
 export default function PlanPage(): React.ReactNode {
+  return (
+    <React.Suspense fallback={<div className="section-padding text-center text-sm text-gray-500">Loading plan...</div>}>
+      <PlanPageContent />
+    </React.Suspense>
+  );
+}
+
+function PlanPageContent(): React.ReactNode {
   const router = useRouter();
   const searchParams = useSearchParams();
   const [plan, setPlan] = useState<MarathonPlan | null>(null);
@@ -178,6 +190,7 @@ export default function PlanPage(): React.ReactNode {
   const [activePlanTab, setActivePlanTab] = useState<PlanTab>("overview");
   const [dailyLogRefresh, setDailyLogRefresh] = useState(0);
   const [dailyLogs, setDailyLogs] = useState<DailyLog[]>([]);
+  const [garminConnection, setGarminConnection] = useState<GarminConnectionStatus>(EMPTY_GARMIN_STATUS);
   const [shareToken, setShareToken] = useState<string | null>(null);
   const [shareLinkUrl, setShareLinkUrl] = useState<string | null>(null);
   const [shareStatus, setShareStatus] = useState<string | null>(null);
@@ -238,6 +251,16 @@ export default function PlanPage(): React.ReactNode {
     return (await response.json()) as DailyLog[];
   };
 
+  const loadGarminConnection = async (): Promise<GarminConnectionStatus> => {
+    const response = await fetch("/api/integrations/garmin");
+    if (!response.ok) throw new Error("Failed to load Garmin connection");
+    return (await response.json()) as GarminConnectionStatus;
+  };
+
+  const refreshGarminConnection = async (): Promise<void> => {
+    setGarminConnection(await loadGarminConnection());
+  };
+
   useEffect(() => {
     if (!plan?.id) return;
 
@@ -254,6 +277,21 @@ export default function PlanPage(): React.ReactNode {
       isMounted = false;
     };
   }, [plan?.id, dailyLogRefresh]);
+
+  useEffect(() => {
+    if (!plan?.id) return;
+    let isMounted = true;
+    loadGarminConnection()
+      .then((status) => {
+        if (isMounted) setGarminConnection(status);
+      })
+      .catch(() => {
+        if (isMounted) setGarminConnection(EMPTY_GARMIN_STATUS);
+      });
+    return () => {
+      isMounted = false;
+    };
+  }, [plan?.id]);
 
   const persistCurrentPlan = async (planId: string | null): Promise<boolean> => {
     try {
@@ -1581,11 +1619,12 @@ export default function PlanPage(): React.ReactNode {
 
             {/* Charts */}
             <div className="mb-8 grid gap-6 lg:grid-cols-2">
-              <MileageTrendChart plan={plan} dailyLogs={dailyLogs} />
+              <MileageTrendChart plan={plan} dailyLogs={dailyLogs} activities={garminConnection.activities} />
               <LongRunProgressionChart plan={plan} />
             </div>
-            <div className="mb-8">
+            <div className="mb-8 grid gap-6 lg:grid-cols-2">
               <IntensityDistributionChart plan={plan} />
+              <RunTrendChart plan={plan} activities={garminConnection.activities} />
             </div>
           </>
         ) : activePlanTab === "schedule" ? (
@@ -1676,6 +1715,7 @@ export default function PlanPage(): React.ReactNode {
                               isExpanded={expandedWeeks.has(week.weekNumber)}
                               onToggle={() => toggleWeek(week.weekNumber)}
                               dailyLogs={dailyLogs}
+                              activities={garminConnection.activities.filter((activity) => activity.planId === plan.id)}
                               onDailyLogSaved={() => setDailyLogRefresh((value) => value + 1)}
                               intensityTargetPercents={currentIntensityTargetPercents}
                               onIntensityTargetChange={handleAdjustIntensityTarget}
@@ -1818,6 +1858,11 @@ export default function PlanPage(): React.ReactNode {
             </div>
 
             <div className="grid gap-4 md:grid-cols-2">
+              <GarminSyncCard
+                planId={plan.id}
+                connection={garminConnection}
+                onChanged={refreshGarminConnection}
+              />
               <div className="rounded-lg border border-gray-200 bg-white p-5 md:col-span-2">
                 <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
                   <div>

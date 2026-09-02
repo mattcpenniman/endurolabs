@@ -9,18 +9,28 @@ import React from "react";
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, ReferenceLine, Legend } from "recharts";
 import { DailyLog, MarathonPlan } from "@/lib/training/models";
 import { formatPlanDate } from "@/lib/training/date-utils";
+import { RunActivity } from "@/lib/activities/models";
 
 interface MileageTrendChartProps {
   plan: MarathonPlan;
   dailyLogs?: DailyLog[];
+  activities?: RunActivity[];
 }
 
-export default function MileageTrendChart({ plan, dailyLogs = [] }: MileageTrendChartProps) {
+export default function MileageTrendChart({ plan, dailyLogs = [], activities = [] }: MileageTrendChartProps) {
   const data = plan.weeks.map((week) => {
     const weekLogs = dailyLogs.filter((log) => log.weekNumber === week.weekNumber);
+    const startDate = week.startDate.slice(0, 10);
+    const endDate = week.endDate.slice(0, 10);
+    const weekActivities = activities.filter((activity) => activity.localDate >= startDate && activity.localDate <= endDate);
+    const syncedWorkoutIds = new Set(weekActivities.map((activity) => activity.plannedWorkoutId).filter(Boolean));
+    const manualMileage = weekLogs
+      .filter((log) => !log.plannedWorkoutId || !syncedWorkoutIds.has(log.plannedWorkoutId))
+      .reduce((sum, log) => sum + log.actualMileage, 0);
+    const syncedMileage = weekActivities.reduce((sum, activity) => sum + activity.distanceMiles, 0);
     const actualMileage =
-      weekLogs.length > 0
-        ? Math.round(weekLogs.reduce((sum, log) => sum + log.actualMileage, 0) * 10) / 10
+      weekLogs.length > 0 || weekActivities.length > 0
+        ? Math.round((manualMileage + syncedMileage) * 10) / 10
         : undefined;
 
     return {

@@ -11,6 +11,7 @@ services:
       APP_URL: ${APP_URL:-http://localhost:3000}
       NEXT_PUBLIC_APP_URL: ${APP_URL:-http://localhost:3000}
       DATABASE_URL: postgresql://${POSTGRES_USER:-enduro}:${POSTGRES_PASSWORD:-endurodev}@db:5432/${POSTGRES_DB:-endurolab}
+      GARMIN_TOKEN_ENCRYPTION_KEY: ${GARMIN_TOKEN_ENCRYPTION_KEY:-}
     ports:
       - "${PORT:-3000}:${PORT:-3000}"
     volumes:
