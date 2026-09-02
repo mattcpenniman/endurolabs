@@ -69,6 +69,9 @@ export default function Header() {
           <a href="/plan?view=list" className="hover:text-enduro-600">
             My Plans
           </a>
+          <a href="/stats" className="hover:text-enduro-600">
+            Stats
+          </a>
           {user ? (
             <button onClick={handleLogout} className="hover:text-enduro-600">
               Sign out

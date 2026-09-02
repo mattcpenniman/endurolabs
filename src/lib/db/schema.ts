@@ -13,6 +13,8 @@ import {
   timestamp,
   varchar,
   text,
+  boolean,
+  doublePrecision,
   uniqueIndex,
   index,
 } from "drizzle-orm/pg-core";
@@ -106,6 +108,8 @@ export const runActivities = pgTable("run_activities", {
     .notNull()
     .references(() => users.id, { onDelete: "cascade" }),
   providerActivityId: varchar("provider_activity_id", { length: 64 }).notNull(),
+  source: varchar("source", { length: 32 }).default("garmin").notNull(),
+  powerSource: varchar("power_source", { length: 32 }).default("garmin").notNull(),
   activityName: varchar("activity_name", { length: 255 }).notNull(),
   activityType: varchar("activity_type", { length: 64 }).notNull(),
   localDate: varchar("local_date", { length: 10 }).notNull(),
@@ -126,6 +130,8 @@ export const runActivities = pgTable("run_activities", {
   dayOfWeek: varchar("day_of_week", { length: 16 }),
   plannedWorkoutId: varchar("planned_workout_id", { length: 255 }),
   matchConfidence: varchar("match_confidence", { length: 16 }),
+  qualityScore: integer("quality_score"),
+  excludedFromAnalytics: boolean("excluded_from_analytics").default(false).notNull(),
   syncedAt: timestamp("synced_at").defaultNow().notNull(),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
@@ -133,4 +139,54 @@ export const runActivities = pgTable("run_activities", {
   uniqueIndex("run_activities_provider_unique").on(table.userId, table.providerActivityId),
   index("run_activities_user_date_idx").on(table.userId, table.localDate),
   index("run_activities_plan_idx").on(table.planId),
+]);
+
+export const activitySamples = pgTable("activity_samples", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  activityId: uuid("activity_id")
+    .notNull()
+    .references(() => runActivities.id, { onDelete: "cascade" }),
+  timestamp: timestamp("timestamp").notNull(),
+  elapsedSeconds: integer("elapsed_seconds").notNull(),
+  distanceMeters: doublePrecision("distance_meters"),
+  heartRate: integer("heart_rate"),
+  power: integer("power"),
+  speedMetersPerSecond: doublePrecision("speed_meters_per_second"),
+  elevationMeters: doublePrecision("elevation_meters"),
+  grade: doublePrecision("grade"),
+  cadence: integer("cadence"),
+  latitude: doublePrecision("latitude"),
+  longitude: doublePrecision("longitude"),
+  temperatureCelsius: doublePrecision("temperature_celsius"),
+}, (table) => [
+  uniqueIndex("activity_samples_activity_elapsed_unique").on(table.activityId, table.elapsedSeconds),
+  index("activity_samples_activity_idx").on(table.activityId),
+]);
+
+export const weightMeasurements = pgTable("weight_measurements", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  userId: uuid("user_id")
+    .notNull()
+    .references(() => users.id, { onDelete: "cascade" }),
+  measuredAt: timestamp("measured_at").notNull(),
+  weightKg: doublePrecision("weight_kg").notNull(),
+  source: varchar("source", { length: 32 }).notNull(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (table) => [
+  index("weight_measurements_user_date_idx").on(table.userId, table.measuredAt),
+]);
+
+export const fitnessSnapshots = pgTable("fitness_snapshots", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  userId: uuid("user_id")
+    .notNull()
+    .references(() => users.id, { onDelete: "cascade" }),
+  windowStart: timestamp("window_start").notNull(),
+  windowEnd: timestamp("window_end").notNull(),
+  powerSource: varchar("power_source", { length: 32 }).notNull(),
+  algorithmVersion: varchar("algorithm_version", { length: 32 }).notNull(),
+  metrics: jsonb("metrics").notNull(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (table) => [
+  index("fitness_snapshots_user_window_idx").on(table.userId, table.windowEnd),
 ]);

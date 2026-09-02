@@ -12,6 +12,7 @@
     "user:set-password": "node scripts/user-admin.mjs set-password",
     "plan:align-garmin": "node scripts/align-plan-to-garmin.mjs",
     "plan:create-from-garmin": "node scripts/create-plan-from-garmin.mjs",
+    "seed:dev": "node scripts/seed-dev.mjs",
     "lint": "next lint",
     "test": "vitest run",
     "test:watch": "vitest"
