@@ -141,9 +141,9 @@ try {
   if (bodyWeight === null) {
     await sql`
       insert into weight_measurements (user_id, measured_at, weight_kg, source)
-      values (${user.id}, now(), 74.5, 'scale')
+      values (${user.id}, now(), ${165 * 0.45359237}, 'profile')
     `;
-    bodyWeight = 74.5;
+    bodyWeight = 165 * 0.45359237;
   }
 
   console.log(JSON.stringify({

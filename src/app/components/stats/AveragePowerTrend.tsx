@@ -39,7 +39,7 @@ export default function AveragePowerTrend({ weeks }: { weeks: AveragePowerPoint[
       {populated.length === 0 ? (
         <p className="py-12 text-center text-sm text-gray-500">No average-power summaries are available.</p>
       ) : (
-        <div className="mt-3 h-72">
+        <div className="mt-3 h-80">
           <ResponsiveContainer width="100%" height="100%">
             <LineChart
               data={populated.map((week) => ({
@@ -50,13 +50,14 @@ export default function AveragePowerTrend({ weeks }: { weeks: AveragePowerPoint[
                 currentEstimated: week.currentEstimated,
                 priorEstimated: week.priorEstimated,
               }))}
-              margin={{ top: 4, right: 8, left: -8, bottom: 0 }}
+              margin={{ top: 8, right: 12, left: 8, bottom: 8 }}
             >
               <CartesianGrid strokeDasharray="3 3" stroke="#f3f4f6" />
               <XAxis dataKey="name" tick={{ fontSize: 11, fill: "#9ca3af" }} />
               <YAxis
                 tick={{ fontSize: 11, fill: "#9ca3af" }}
-                unit=" W"
+                tickFormatter={(value: number) => `${Math.round(value)} W`}
+                width={58}
                 domain={["dataMin - 15", "dataMax + 15"]}
               />
               <Tooltip
@@ -66,7 +67,7 @@ export default function AveragePowerTrend({ weeks }: { weeks: AveragePowerPoint[
                   return [`${estimated ? "~" : ""}${Math.round(Number(value))} W`, name];
                 }}
               />
-              <Legend verticalAlign="top" height={28} />
+              <Legend verticalAlign="bottom" height={36} />
               <Line
                 type="monotone"
                 dataKey="current"

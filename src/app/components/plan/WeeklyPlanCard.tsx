@@ -1369,7 +1369,7 @@ export default function WeeklyPlanCard({
                                   {syncedActivity.averagePaceMinutesPerMile && <span>{formatPace(syncedActivity.averagePaceMinutesPerMile)}/mi</span>}
                                   {syncedActivity.averageHeartRate && <span>{syncedActivity.averageHeartRate} bpm avg</span>}
                                   {syncedActivity.averagePower && <span>{syncedActivity.averagePower} W avg</span>}
-                                  {syncedActivity.elevationGainMeters !== null && <span>{syncedActivity.elevationGainMeters} m gain</span>}
+                                  {syncedActivity.elevationGainMeters !== null && <span>{Math.round(syncedActivity.elevationGainMeters * 3.28084).toLocaleString()} ft gain</span>}
                                 </div>
                               </div>
                             )}

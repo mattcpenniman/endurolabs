@@ -15,6 +15,7 @@ import {
   plans,
   planRunLogs,
   runActivities,
+  weightMeasurements,
 } from "@/lib/db/schema";
 import { getCurrentUser } from "@/lib/auth";
 import { MarathonPlan } from "@/lib/training/models";
@@ -210,7 +211,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     const priorPowerSource = primaryPowerSource(priorActivityRows);
     const currentSpeedPowerModel = fitSpeedPowerModel(currentActivityRows);
     const priorSpeedPowerModel = fitSpeedPowerModel(priorActivityRows);
-    const [currentWindowData, priorWindowData, currentModeledWindowData, priorModeledWindowData] = await Promise.all([
+    const [currentWindowData, priorWindowData, currentModeledWindowData, priorModeledWindowData, latestWeight] = await Promise.all([
       loadFitnessWindowData(user.id, currentWindow, currentPowerSource),
       priorWindow ? loadFitnessWindowData(user.id, priorWindow, priorPowerSource) : Promise.resolve(null),
       currentSpeedPowerModel
@@ -219,7 +220,13 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
       priorWindow && priorSpeedPowerModel
         ? loadModeledFitnessWindowData(user.id, priorWindow, priorSpeedPowerModel)
         : Promise.resolve(null),
+      db.select({ weightKg: weightMeasurements.weightKg })
+        .from(weightMeasurements)
+        .where(eq(weightMeasurements.userId, user.id))
+        .orderBy(desc(weightMeasurements.measuredAt))
+        .limit(1),
     ]);
+    const weightKg = latestWeight[0]?.weightKg ?? null;
 
     const [currentHeadline, priorHeadline] = await Promise.all([
       getPlanFitnessHeadline({
@@ -249,6 +256,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
               end: (w.days[w.days.length - 1]?.date ?? w.endDate).slice(0, 10),
             })),
           samples: currentSamples,
+          defaultWeightKg: weightKg,
           source: normalizePowerSource(currentPowerSource),
           headlineModel: currentHeadline,
         })
@@ -261,6 +269,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
               end: (w.days[w.days.length - 1]?.date ?? w.endDate).slice(0, 10),
             })),
           samples: priorSamples,
+          defaultWeightKg: weightKg,
           source: normalizePowerSource(priorPowerSource),
           headlineModel: priorHeadline,
         })
@@ -272,6 +281,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
             end: (week.days[week.days.length - 1]?.date ?? week.endDate).slice(0, 10),
           })),
           samples: currentModeledWindowData.samples,
+          defaultWeightKg: weightKg,
           source: "other",
         })
       : null;
@@ -282,6 +292,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
             end: (week.days[week.days.length - 1]?.date ?? week.endDate).slice(0, 10),
           })),
           samples: priorModeledWindowData.samples,
+          defaultWeightKg: weightKg,
           source: "other",
         })
       : null;

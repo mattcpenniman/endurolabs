@@ -63,9 +63,9 @@ export default function LongitudinalTrend({ weeks }: { weeks: Point[] }) {
           </p>
         </div>
       </div>
-      <div className="mt-3 h-72">
+      <div className="mt-3 h-80">
         <ResponsiveContainer width="100%" height="100%">
-          <ComposedChart data={data}>
+          <ComposedChart data={data} margin={{ top: 8, right: 12, left: 8, bottom: 8 }}>
             <defs>
               <linearGradient id="ciFill" x1="0" y1="0" x2="0" y2="1">
                 <stop offset="0%" stopColor="#2b8456" stopOpacity={0.35} />
@@ -74,7 +74,7 @@ export default function LongitudinalTrend({ weeks }: { weeks: Point[] }) {
             </defs>
             <CartesianGrid strokeDasharray="3 3" stroke="#f3f4f6" />
             <XAxis dataKey="name" tick={{ fontSize: 11, fill: "#9ca3af" }} />
-            <YAxis tick={{ fontSize: 11, fill: "#9ca3af" }} domain={["dataMin - 20", "dataMax + 20"]} />
+            <YAxis tick={{ fontSize: 11, fill: "#9ca3af" }} tickFormatter={(value: number) => `${Math.round(value)} W`} width={58} domain={["dataMin - 20", "dataMax + 20"]} />
             <Tooltip
               labelFormatter={(label) => `Week ${String(label).replace("W", "")}`}
               formatter={(value: unknown, name: string) =>
@@ -83,12 +83,13 @@ export default function LongitudinalTrend({ weeks }: { weeks: Point[] }) {
                   : [String(value), name]
               }
             />
-            <Legend verticalAlign="top" height={28} />
+            <Legend verticalAlign="bottom" height={52} />
             {hasCI && (
               <Area
                 type="monotone"
                 dataKey="upper"
                 name="Upper 95%"
+                legendType="none"
                 stroke="none"
                 fill="url(#ciFill)"
                 connectNulls
@@ -99,6 +100,7 @@ export default function LongitudinalTrend({ weeks }: { weeks: Point[] }) {
                 type="monotone"
                 dataKey="lower"
                 name="Lower 95%"
+                legendType="none"
                 stroke="none"
                 fill="url(#ciFill)"
                 connectNulls

@@ -103,26 +103,28 @@ export default function FitnessCurveChart({ current, prior }: FitnessCurveChartP
           <p className="mt-1 text-xs text-gray-500">Predicted power as a function of heart rate (bpm).</p>
         </div>
       </div>
-      <div className="mt-3 h-72">
+      <div className="mt-3 h-80">
         <ResponsiveContainer width="100%" height="100%">
-          <LineChart data={data} margin={{ top: 10, right: 16, left: 0, bottom: 0 }}>
+          <LineChart data={data} margin={{ top: 8, right: 12, left: 8, bottom: 8 }}>
             <CartesianGrid strokeDasharray="3 3" stroke="#f3f4f6" />
             <XAxis
               dataKey="hr"
               tick={{ fontSize: 11, fill: "#9ca3af" }}
-              label={{ value: "Heart rate (bpm)", position: "insideBottom", offset: -4, fontSize: 11, fill: "#6b7280" }}
+              tickFormatter={(value: number) => `${value} bpm`}
+              height={28}
               domain={["dataMin", "dataMax"]}
             />
             <YAxis
               tick={{ fontSize: 11, fill: "#9ca3af" }}
-              label={{ value: "Power (W)", angle: -90, position: "insideLeft", fontSize: 11, fill: "#6b7280" }}
+              tickFormatter={(value: number) => `${Math.round(value)} W`}
+              width={58}
               domain={["dataMin - 20", "dataMax + 20"]}
             />
             <Tooltip
               labelFormatter={(hr) => `${hr} bpm`}
               formatter={(value: number, name: string) => [`${Math.round(value as number)} W`, name]}
             />
-            <Legend verticalAlign="top" height={28} />
+            <Legend verticalAlign="bottom" height={36} />
             {currentData.length > 0 && (
               <Line
                 type="monotone"

@@ -72,6 +72,11 @@ export default function Header() {
           <a href="/stats" className="hover:text-enduro-600">
             Stats
           </a>
+          {user && (
+            <Link href="/profile" className="hover:text-enduro-600">
+              Profile
+            </Link>
+          )}
           {user ? (
             <button onClick={handleLogout} className="hover:text-enduro-600">
               Sign out

@@ -139,10 +139,12 @@ export default function ActivityExplorer({ activities }: ActivityExplorerProps):
 function TraceChart({ data, trace }: { data: ActivityChartPoint[]; trace: TraceDefinition }): React.ReactNode {
   return (
     <div className="rounded-lg border border-gray-100 bg-gray-50/60 p-3">
-      <h3 className="text-xs font-semibold uppercase tracking-wide text-gray-600">{trace.title}</h3>
+      <h3 className="text-xs font-semibold uppercase tracking-wide text-gray-600">
+        {trace.title} <span className="font-normal normal-case text-gray-400">({trace.key === "paceMinutesPerMile" ? "min/mi" : trace.unit})</span>
+      </h3>
       <div className="mt-2 h-44">
         <ResponsiveContainer width="100%" height="100%">
-          <LineChart data={data} syncId="activity-detail" margin={{ top: 4, right: 8, left: -16, bottom: 0 }}>
+          <LineChart data={data} syncId="activity-detail" margin={{ top: 4, right: 8, left: 4, bottom: 4 }}>
             <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" vertical={false} />
             <XAxis
               dataKey="elapsedSeconds"
@@ -152,7 +154,7 @@ function TraceChart({ data, trace }: { data: ActivityChartPoint[]; trace: TraceD
             />
             <YAxis
               reversed={trace.reversed}
-              width={52}
+              width={42}
               domain={["auto", "auto"]}
               tick={{ fontSize: 10, fill: "#9ca3af" }}
               tickFormatter={(value: number) => trace.key === "paceMinutesPerMile" ? formatPace(value) : Math.round(value).toString()}
