@@ -40,6 +40,10 @@ import {
   calculateLongRunDurability,
   LongRunClassification,
 } from "@/lib/analytics/long-run-durability";
+import {
+  analyzeCadenceByPace,
+  CadenceByPaceResult,
+} from "@/lib/analytics/cadence-by-pace";
 
 interface SerializedDecouplingResult {
   activityId: string;
@@ -58,6 +62,35 @@ interface SerializedDurabilityResult {
   paceRetention: number;
   heartRateDrift: number;
   usableMinutes: number;
+}
+
+async function serializeCadenceByPace(
+  plan: MarathonPlan,
+  rows: Array<typeof runActivities.$inferSelect>,
+): Promise<CadenceByPaceResult> {
+  const eligible = rows.filter((row) => row.sampleCount > 0);
+  if (eligible.length === 0) return { bands: [] };
+  const activityDates = new Map(eligible.map((row) => [row.id, row.localDate]));
+  const sampleRows = await db.select({
+    activityId: activitySamples.activityId,
+    elapsedSeconds: activitySamples.elapsedSeconds,
+    cadence: activitySamples.cadence,
+    speedMetersPerSecond: activitySamples.speedMetersPerSecond,
+  }).from(activitySamples)
+    .where(inArray(activitySamples.activityId, eligible.map((row) => row.id)))
+    .orderBy(asc(activitySamples.activityId), asc(activitySamples.elapsedSeconds));
+
+  return analyzeCadenceByPace(
+    sampleRows.flatMap((sample) => {
+      const activityStartDate = activityDates.get(sample.activityId);
+      return activityStartDate ? [{ ...sample, activityStartDate }] : [];
+    }),
+    plan.weeks.map((week) => ({
+      weekNumber: week.weekNumber,
+      startDate: week.startDate.slice(0, 10),
+      endDate: (week.days[week.days.length - 1]?.date ?? week.endDate).slice(0, 10),
+    })),
+  );
 }
 
 function durabilityCandidates(plan: MarathonPlan): Map<string, LongRunClassification> {
@@ -360,9 +393,11 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     const priorSamples = priorWindowData?.samples ?? [];
     const currentDecoupling = serializeDecoupling(currentSamples, currentActivities);
     const priorDecoupling = serializeDecoupling(priorSamples, priorActivities);
-    const [currentDurability, priorDurability] = await Promise.all([
+    const [currentDurability, priorDurability, currentCadenceByPace, priorCadenceByPace] = await Promise.all([
       serializeDurability(currentPlan, currentActivityRows),
       priorPlan ? serializeDurability(priorPlan, priorActivityRows) : Promise.resolve([]),
+      serializeCadenceByPace(currentPlan, currentActivityRows),
+      priorPlan ? serializeCadenceByPace(priorPlan, priorActivityRows) : Promise.resolve({ bands: [] }),
     ]);
 
     // Derive weekly + plan-level Power @ HR models per plan.
@@ -437,6 +472,10 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
       longRunDurability: {
         current: currentDurability,
         prior: priorDurability,
+      },
+      cadenceByPace: {
+        current: currentCadenceByPace,
+        prior: priorCadenceByPace,
       },
       fitness: {
         current: currentFitness

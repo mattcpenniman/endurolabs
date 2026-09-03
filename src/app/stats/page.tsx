@@ -26,6 +26,8 @@ import ActivityExplorer from "@/app/components/stats/ActivityExplorer";
 import AveragePowerTrend from "@/app/components/stats/AveragePowerTrend";
 import AerobicDecouplingCard, { DecouplingActivity } from "@/app/components/stats/AerobicDecouplingCard";
 import LongRunDurabilityCard, { DurabilityActivity } from "@/app/components/stats/LongRunDurabilityCard";
+import CadenceByPaceTrend from "@/app/components/stats/CadenceByPaceTrend";
+import type { CadenceByPaceResult } from "@/lib/analytics/cadence-by-pace";
 
 interface SavedPlanRow {
   id: string;
@@ -47,6 +49,10 @@ interface StatsResponse {
   longRunDurability: {
     current: DurabilityActivity[];
     prior: DurabilityActivity[];
+  };
+  cadenceByPace: {
+    current: CadenceByPaceResult;
+    prior: CadenceByPaceResult;
   };
   fitness: {
     current: {
@@ -301,6 +307,11 @@ export default function StatsPage() {
               prior={stats.longRunDurability.prior}
             />
 
+            <CadenceByPaceTrend
+              current={stats.cadenceByPace.current}
+              prior={stats.cadenceByPace.prior}
+            />
+
             {stats.fitness?.hasCurrentSamples && (
               <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
                 <FitnessCurveChart
@@ -375,6 +386,13 @@ export default function StatsPage() {
                   average speed and measured power as a percentage of the first three quarters, plus the
                   percentage change in heart rate. Aggregate medians include only steady planned long runs;
                   progression and structured sessions remain separate to avoid rewarding intentional fast finishes.
+                </p>
+                <p>
+                  <strong className="font-medium text-gray-900">Cadence by pace</strong> — median steps per minute
+                  from paired cadence and speed samples, smoothed into 30-second windows and grouped into fixed
+                  30-second-per-mile pace bands. A weekly point requires at least 10 usable minutes in that band;
+                  Garmin half-cadence samples are converted to full steps per minute. The trend is descriptive
+                  and does not apply a universal ideal cadence.
                 </p>
                 <p>
                   <strong className="font-medium text-gray-900">Average power</strong> — distance-weighted
