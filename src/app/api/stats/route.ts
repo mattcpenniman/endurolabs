@@ -44,6 +44,10 @@ import {
   analyzeCadenceByPace,
   CadenceByPaceResult,
 } from "@/lib/analytics/cadence-by-pace";
+import {
+  analyzeElevationAndGrade,
+  ElevationGradeAnalysisResult,
+} from "@/lib/analytics/elevation-grade";
 
 interface SerializedDecouplingResult {
   activityId: string;
@@ -90,6 +94,92 @@ async function serializeCadenceByPace(
       startDate: week.startDate.slice(0, 10),
       endDate: (week.days[week.days.length - 1]?.date ?? week.endDate).slice(0, 10),
     })),
+  );
+}
+
+async function serializeElevationGrade(
+  plan: MarathonPlan,
+  rows: Array<typeof runActivities.$inferSelect>,
+  hasMeasuredPower: boolean,
+): Promise<ElevationGradeAnalysisResult> {
+  const eligible = rows.filter((row) => row.sampleCount > 0);
+  if (eligible.length === 0) {
+    return {
+      totalActivities: 0,
+      qualifyingActivities: 0,
+      elevationGainFeetPerMile: null,
+      distanceMiles: 0,
+      weeks: [],
+      bands: [],
+      rejectionReasons: {},
+      partialNote: null,
+      suppressReason: "No activity detail samples are stored for this plan yet.",
+    };
+  }
+  const sampleRows = await db.select({
+    activityId: activitySamples.activityId,
+    elapsedSeconds: activitySamples.elapsedSeconds,
+    heartRate: activitySamples.heartRate,
+    power: activitySamples.power,
+    speedMetersPerSecond: activitySamples.speedMetersPerSecond,
+    elevationMeters: activitySamples.elevationMeters,
+    latitude: activitySamples.latitude,
+    longitude: activitySamples.longitude,
+  }).from(activitySamples)
+    .where(inArray(activitySamples.activityId, eligible.map((row) => row.id)))
+    .orderBy(asc(activitySamples.activityId), asc(activitySamples.elapsedSeconds));
+
+  const samplesByActivity = new Map<string, typeof sampleRows>();
+  for (const sample of sampleRows) {
+    const list = samplesByActivity.get(sample.activityId) ?? [];
+    list.push(sample);
+    samplesByActivity.set(sample.activityId, list);
+  }
+
+  const activities = eligible.map((row) => ({
+    activityId: row.id,
+    activityStartDate: row.localDate,
+    summaryDistanceMeters: row.distanceMeters,
+    samples: (samplesByActivity.get(row.id) ?? []).map((sample) => ({
+      activityId: sample.activityId,
+      elapsedSeconds: sample.elapsedSeconds,
+      heartRate: sample.heartRate,
+      power: sample.power,
+      speedMetersPerSecond: sample.speedMetersPerSecond,
+      elevationMeters: sample.elevationMeters,
+      latitude: sample.latitude,
+      longitude: sample.longitude,
+    })),
+  })).filter((activity) => activity.samples.length > 0);
+
+  if (activities.length === 0) {
+    return {
+      totalActivities: eligible.length,
+      qualifyingActivities: 0,
+      elevationGainFeetPerMile: null,
+      distanceMiles: 0,
+      weeks: [],
+      bands: [],
+      rejectionReasons: {
+        too_short: 0,
+        too_short_distance: 0,
+        insufficient_gps: 0,
+        insufficient_elevation: eligible.length,
+        insufficient_speed: 0,
+      },
+      partialNote: null,
+      suppressReason: `None of the ${eligible.length} runs qualified — ${eligible.length} ${eligible.length === 1 ? "run has" : "runs have"} no usable sample data.`,
+    };
+  }
+
+  return analyzeElevationAndGrade(
+    activities,
+    plan.weeks.map((week) => ({
+      weekNumber: week.weekNumber,
+      startDate: week.startDate.slice(0, 10),
+      endDate: (week.days[week.days.length - 1]?.date ?? week.endDate).slice(0, 10),
+    })),
+    hasMeasuredPower,
   );
 }
 
@@ -393,12 +483,25 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     const priorSamples = priorWindowData?.samples ?? [];
     const currentDecoupling = serializeDecoupling(currentSamples, currentActivities);
     const priorDecoupling = serializeDecoupling(priorSamples, priorActivities);
-    const [currentDurability, priorDurability, currentCadenceByPace, priorCadenceByPace] = await Promise.all([
-      serializeDurability(currentPlan, currentActivityRows),
-      priorPlan ? serializeDurability(priorPlan, priorActivityRows) : Promise.resolve([]),
-      serializeCadenceByPace(currentPlan, currentActivityRows),
-      priorPlan ? serializeCadenceByPace(priorPlan, priorActivityRows) : Promise.resolve({ bands: [] }),
-    ]);
+    const [currentDurability, priorDurability, currentCadenceByPace, priorCadenceByPace, currentElevationGrade, priorElevationGrade] =
+      await Promise.all([
+        serializeDurability(currentPlan, currentActivityRows),
+        priorPlan ? serializeDurability(priorPlan, priorActivityRows) : Promise.resolve([]),
+        serializeCadenceByPace(currentPlan, currentActivityRows),
+        priorPlan ? serializeCadenceByPace(priorPlan, priorActivityRows) : Promise.resolve({ bands: [] }),
+        serializeElevationGrade(currentPlan, currentActivityRows, !currentPowerSource.startsWith("estimated_")),
+        priorPlan ? serializeElevationGrade(priorPlan, priorActivityRows, !priorPowerSource.startsWith("estimated_")) : Promise.resolve({
+          totalActivities: 0,
+          qualifyingActivities: 0,
+          elevationGainFeetPerMile: null,
+          distanceMiles: 0,
+          weeks: [],
+          bands: [],
+          rejectionReasons: {},
+          partialNote: null,
+          suppressReason: "No prior plan selected.",
+        } as ElevationGradeAnalysisResult),
+      ]);
 
     // Derive weekly + plan-level Power @ HR models per plan.
     const currentFitness = currentSamples.length > 0
@@ -476,6 +579,10 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
       cadenceByPace: {
         current: currentCadenceByPace,
         prior: priorCadenceByPace,
+      },
+      elevationGrade: {
+        current: currentElevationGrade,
+        prior: priorElevationGrade,
       },
       fitness: {
         current: currentFitness

@@ -27,7 +27,9 @@ import AveragePowerTrend from "@/app/components/stats/AveragePowerTrend";
 import AerobicDecouplingCard, { DecouplingActivity } from "@/app/components/stats/AerobicDecouplingCard";
 import LongRunDurabilityCard, { DurabilityActivity } from "@/app/components/stats/LongRunDurabilityCard";
 import CadenceByPaceTrend from "@/app/components/stats/CadenceByPaceTrend";
+import ElevationGradeCard from "@/app/components/stats/ElevationGradeCard";
 import type { CadenceByPaceResult } from "@/lib/analytics/cadence-by-pace";
+import type { ElevationGradeAnalysisResult } from "@/lib/analytics/elevation-grade";
 
 interface SavedPlanRow {
   id: string;
@@ -53,6 +55,10 @@ interface StatsResponse {
   cadenceByPace: {
     current: CadenceByPaceResult;
     prior: CadenceByPaceResult;
+  };
+  elevationGrade: {
+    current: ElevationGradeAnalysisResult;
+    prior: ElevationGradeAnalysisResult;
   };
   fitness: {
     current: {
@@ -312,6 +318,31 @@ export default function StatsPage() {
               prior={stats.cadenceByPace.prior}
             />
 
+            <ElevationGradeCard
+              current={stats.elevationGrade?.current ?? {
+                totalActivities: 0,
+                qualifyingActivities: 0,
+                elevationGainFeetPerMile: null,
+                distanceMiles: 0,
+                weeks: [],
+                bands: [],
+                rejectionReasons: {},
+                partialNote: null,
+                suppressReason: "Elevation and duration coverage for at least three runs is required.",
+              }}
+              prior={stats.elevationGrade?.prior ?? {
+                totalActivities: 0,
+                qualifyingActivities: 0,
+                elevationGainFeetPerMile: null,
+                distanceMiles: 0,
+                weeks: [],
+                bands: [],
+                rejectionReasons: {},
+                partialNote: null,
+                suppressReason: "No prior plan selected.",
+              }}
+            />
+
             {stats.fitness?.hasCurrentSamples && (
               <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
                 <FitnessCurveChart
@@ -393,6 +424,13 @@ export default function StatsPage() {
                   30-second-per-mile pace bands. A weekly point requires at least 10 usable minutes in that band;
                   Garmin half-cadence samples are converted to full steps per minute. The trend is descriptive
                   and does not apply a universal ideal cadence.
+                </p>
+                <p>
+                  <strong className="font-medium text-gray-900">Elevation and grade</strong> — weekly elevation
+                  gain in feet per mile, plus observed pace, heart rate, and measured power across flat, climbing,
+                  and descending samples. Each qualifying activity needs at least six usable minutes and real
+                  GPS, elevation, and speed coverage; results are suppressed until at least three activities
+                  qualify. Grade-adjusted power is shown only for measured sensor power, never modeled value.
                 </p>
                 <p>
                   <strong className="font-medium text-gray-900">Average power</strong> — distance-weighted
