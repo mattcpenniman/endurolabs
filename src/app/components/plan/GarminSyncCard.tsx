@@ -19,6 +19,7 @@ export default function GarminSyncCard({ planId, connection, onChanged }: Garmin
   const [mfaCode, setMfaCode] = useState("");
   const [isMfaRequired, setIsMfaRequired] = useState(false);
   const [isWorking, setIsWorking] = useState(false);
+  const [isDetailWorking, setIsDetailWorking] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
 
   const runRequest = async (url: string, init: RequestInit): Promise<void> => {
@@ -53,6 +54,57 @@ export default function GarminSyncCard({ planId, connection, onChanged }: Garmin
     }
   };
 
+  const syncDetailScope = async (scope: "recent" | "older"): Promise<{ imported: number; failed: number; samples: number }> => {
+    let offset = 0;
+    let imported = 0;
+    let failed = 0;
+    let samples = 0;
+    do {
+      const response = await fetch("/api/integrations/garmin/samples", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ scope, days: 90, offset, batchSize: 10 }),
+      });
+      const body = (await response.json()) as {
+        error?: string;
+        total?: number;
+        processed?: number;
+        imported?: number;
+        failed?: number;
+        samples?: number;
+        nextOffset?: number | null;
+      };
+      if (!response.ok) throw new Error(body.error || "Garmin detail sync failed");
+      imported += body.imported ?? 0;
+      failed += body.failed ?? 0;
+      samples += body.samples ?? 0;
+      setMessage(`${scope === "recent" ? "Recent detail" : "Older backfill"}: ${body.processed ?? 0}/${body.total ?? 0} activities processed.`);
+      if (body.nextOffset === null || body.nextOffset === undefined) break;
+      offset = body.nextOffset;
+    } while (true);
+    return { imported, failed, samples };
+  };
+
+  const syncDetail = async (): Promise<void> => {
+    setIsDetailWorking(true);
+    setMessage(null);
+    try {
+      const recent = await syncDetailScope("recent");
+      await onChanged();
+      setMessage(`Recent detail complete. Backfilling older activities in the background...`);
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      const older = await syncDetailScope("older");
+      const imported = recent.imported + older.imported;
+      const failed = recent.failed + older.failed;
+      setMessage(`Detail sync complete: ${imported} activities imported${failed ? `, ${failed} failed` : ""}.`);
+      await onChanged();
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Garmin detail sync failed");
+    } finally {
+      setIsDetailWorking(false);
+    }
+  };
+
   const awaitingMfa = connection.mfaRequired || isMfaRequired;
 
   return (
@@ -76,6 +128,9 @@ export default function GarminSyncCard({ planId, connection, onChanged }: Garmin
             <div className="mt-4 flex flex-wrap gap-2 text-xs text-gray-600">
               <span className="rounded bg-gray-100 px-2 py-1">{connection.displayName || connection.username}</span>
               <span className="rounded bg-gray-100 px-2 py-1">{connection.activities.length} runs stored</span>
+              <span className="rounded bg-gray-100 px-2 py-1">
+                {connection.activities.filter((activity) => activity.samplesFetchedAt).length} with detail
+              </span>
               {connection.lastSyncAt && (
                 <span className="rounded bg-gray-100 px-2 py-1">Last sync {new Date(connection.lastSyncAt).toLocaleString()}</span>
               )}
@@ -92,7 +147,7 @@ export default function GarminSyncCard({ planId, connection, onChanged }: Garmin
           <div className="flex shrink-0 flex-wrap gap-2">
             <button
               type="button"
-              disabled={isWorking}
+              disabled={isWorking || isDetailWorking}
               onClick={() => runRequest("/api/integrations/garmin/sync", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
@@ -104,7 +159,15 @@ export default function GarminSyncCard({ planId, connection, onChanged }: Garmin
             </button>
             <button
               type="button"
-              disabled={isWorking}
+              disabled={isWorking || isDetailWorking}
+              onClick={syncDetail}
+              className="rounded-lg border border-sky-950 bg-white px-4 py-2 text-sm font-semibold text-sky-950 hover:bg-sky-50 disabled:opacity-50"
+            >
+              {isDetailWorking ? "Syncing detail..." : "Sync detail"}
+            </button>
+            <button
+              type="button"
+              disabled={isWorking || isDetailWorking}
               onClick={() => runRequest("/api/integrations/garmin", { method: "DELETE" })}
               className="rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-600 hover:bg-gray-50 disabled:opacity-50"
             >

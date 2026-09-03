@@ -132,6 +132,8 @@ export const runActivities = pgTable("run_activities", {
   matchConfidence: varchar("match_confidence", { length: 16 }),
   qualityScore: integer("quality_score"),
   excludedFromAnalytics: boolean("excluded_from_analytics").default(false).notNull(),
+  sampleCount: integer("sample_count").default(0).notNull(),
+  samplesFetchedAt: timestamp("samples_fetched_at"),
   syncedAt: timestamp("synced_at").defaultNow().notNull(),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),

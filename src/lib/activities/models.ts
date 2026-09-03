@@ -26,6 +26,8 @@ export interface RunActivity {
   dayOfWeek: string | null;
   plannedWorkoutId: string | null;
   matchConfidence: "high" | "medium" | "low" | null;
+  sampleCount: number;
+  samplesFetchedAt: string | null;
   syncedAt: string;
 }
 

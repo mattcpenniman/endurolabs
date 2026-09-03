@@ -81,3 +81,27 @@ export async function fetchRecentRuns(client: GarminConnectClient, limit = 400):
     return type.includes("running") || type.includes("run");
   });
 }
+
+interface AuthenticatedGarminClient extends GarminConnectClient {
+  httpClient: {
+    get<T>(url: string): Promise<T>;
+  };
+}
+
+export async function fetchActivityDetail(client: GarminConnectClient, activityId: string): Promise<unknown> {
+  const authenticatedClient = client as AuthenticatedGarminClient;
+  if (!authenticatedClient.httpClient?.get) {
+    throw new Error("Installed Garmin client does not expose its authenticated transport");
+  }
+
+  const path = `activity-service/activity/${encodeURIComponent(activityId)}/details?maxChartSize=20000&maxPolylineSize=20000`;
+  try {
+    return await authenticatedClient.httpClient.get(`https://connectapi.garmin.com/${path}`);
+  } catch (primaryError) {
+    try {
+      return await authenticatedClient.httpClient.get(`https://connect.garmin.com/modern/proxy/${path}`);
+    } catch {
+      throw primaryError;
+    }
+  }
+}

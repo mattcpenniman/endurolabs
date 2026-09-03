@@ -39,6 +39,8 @@ function serializeActivity(row: typeof runActivities.$inferSelect): RunActivity 
     dayOfWeek: row.dayOfWeek,
     plannedWorkoutId: row.plannedWorkoutId,
     matchConfidence: row.matchConfidence as RunActivity["matchConfidence"],
+    sampleCount: row.sampleCount,
+    samplesFetchedAt: row.samplesFetchedAt?.toISOString() ?? null,
     syncedAt: row.syncedAt.toISOString(),
   };
 }

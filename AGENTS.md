@@ -19,17 +19,19 @@ src/
 ├── app/
 │   ├── layout.tsx          # Root layout, metadata, minimal shell
 │   ├── globals.css         # Tailwind directives, design tokens, base reset, utility components
-│   ├── api/                # Route handlers (plan generation/export)
+│   ├── api/                # Plan, stats, auth, and Garmin integration routes
 │   └── components/         # UI components organized by domain
 │       ├── charts/         # Recharts visualizations (mileage trends, long run progression)
 │       ├── layout/         # Header, navigation, containers
 │       ├── onboarding/     # Runner profile input forms
 │       └── plan/           # Plan display, weekly/daily views
 ├── lib/
-│   └── training/           # Core domain logic (pure functions, no UI deps)
-│       ├── models.ts       # All shared TypeScript interfaces + time utilities
-│       └── zone-calculator.ts  # VDOT estimation, pace/power zone calculation
-└── test/                   # Vitest test files (currently empty)
+│   ├── activities/         # Persisted activity API models
+│   ├── analytics/          # Power/HR fitness and plan comparison models
+│   ├── db/                 # Drizzle client and PostgreSQL schema
+│   ├── garmin/             # Authentication, summary/detail mapping, ingestion
+│   └── training/           # Core training logic (pure functions, no UI deps)
+└── test/                   # Vitest domain, Garmin, analytics, and smoke tests
 ```
 
 ## Domain Models (key types)
@@ -44,6 +46,29 @@ src/
 | `MarathonPlan` | Complete plan: runner profile, zones, phases, weeks, goal assessment, risk warnings |
 | `GoalAssessment` | Feasibility rating + reasoning for the runner's goal time |
 | `TrainingPhase` | `base` → `marathon_build` → `peak_taper` |
+
+### Persisted Running Data
+
+| Table | Purpose |
+|-------|---------|
+| `run_activities` | Provider activity summaries, plan matching, analytics inclusion, quality score, and detail-ingestion status (`sample_count`, `samples_fetched_at`) |
+| `activity_samples` | High-resolution activity metrics keyed by `(activity_id, elapsed_seconds)`: time, distance, HR, power, speed, elevation, grade, cadence, GPS, and temperature |
+| `weight_measurements` | Timestamped body weight used for W/kg analytics |
+| `fitness_snapshots` | Versioned cached analytics for a user and time window; present but not yet used as the primary stats cache |
+
+## Garmin Data Ingestion
+
+- Summary sync: `src/app/api/integrations/garmin/sync/route.ts`
+- Detail API: `src/app/api/integrations/garmin/samples/route.ts`
+- Detail mapping: `src/lib/garmin/activity-detail.ts`
+- Idempotent sample persistence: `src/lib/garmin/sample-ingestion.ts`
+- Detail rows upsert on `(activity_id, elapsed_seconds)`; do not replace this with duplicate inserts.
+- Garmin fetches use the stored encrypted session and a fixed concurrency of 2 to limit proxy pressure.
+- `samples_fetched_at` records an attempted successful response; `sample_count = 0` can be valid when Garmin returns no time-series metrics.
+- The dev seed creates synthetic fixtures only. Production Garmin ingestion removes timestamp-inconsistent seed rows when real detail is imported.
+- Historical summary import: `npm run garmin:history -- --since YYYY-MM-DD`
+- Missing/all detail backfill: `npm run samples:backfill -- --only-missing` or `npm run samples:backfill`
+- Standalone Garmin scripts load `.env` and require `GARMIN_TOKEN_ENCRYPTION_KEY` to decrypt the existing connection. Never generate a replacement key while encrypted sessions remain in the DB.
 
 ## Conventions
 
@@ -69,9 +94,10 @@ src/
 - Vitest with jsdom, globals enabled
 - Tests belong in `src/test/`
 - Test pure domain logic in `lib/training/` first (zone calculator, models, time utilities)
+- Test Garmin payload mapping as pure logic; DB idempotency requires an integration test against PostgreSQL.
 
 ## Key Configuration
-- `package.json` scripts: `dev`, `build`, `start`, `lint`, `test`, `test:watch`
+- `package.json` scripts include app lifecycle, `db:push`, user/plan utilities, `seed:dev`, `garmin:history`, `samples:backfill`, and Vitest commands
 - `tsconfig.json`: strict mode, `@/*` → `./src/*`, ES2017 target, bundler module resolution
 - `vitest.config.ts`: jsdom environment, React plugin, globals true
 - `next.config.js`: default (empty) config

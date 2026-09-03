@@ -287,6 +287,8 @@ function run(date: string, distanceMiles: number, pace: number, hr: number | nul
     dayOfWeek: "Tuesday",
     plannedWorkoutId: null,
     matchConfidence: null,
+    sampleCount: 0,
+    samplesFetchedAt: null,
     syncedAt: new Date().toISOString(),
   };
 }

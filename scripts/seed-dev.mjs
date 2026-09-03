@@ -117,12 +117,20 @@ try {
     const trace = sampleTrace(a.durationSeconds, a.id, baseHr, pace);
     if (trace.length === 0) continue;
 
-    await sql`delete from activity_samples where activity_id = ${a.id}`;
     const idLit = `'${String(a.id).replace(/'/g, "''")}'::uuid`;
     const ts = `'${now}'`;
     const values = trace.map((s) => `(${ts},${s.elapsedSeconds},${s.distanceMeters},${s.heartRate},${s.power},${s.speedMetersPerSecond},${s.elevationMeters},${s.grade},${s.cadence},NULL,NULL,${s.temperatureCelsius},${idLit})`).join(",");
-    await sql.unsafe(`insert into activity_samples (${SAMPLE_COLUMNS}) values ${values}`);
-    sampleCount += trace.length;
+    await sql.unsafe(`insert into activity_samples (${SAMPLE_COLUMNS}) values ${values}
+      on conflict (activity_id, elapsed_seconds) do update set
+        timestamp = excluded.timestamp, distance_meters = excluded.distance_meters,
+        heart_rate = excluded.heart_rate, power = excluded.power,
+        speed_meters_per_second = excluded.speed_meters_per_second,
+        elevation_meters = excluded.elevation_meters, grade = excluded.grade,
+        cadence = excluded.cadence, latitude = excluded.latitude,
+        longitude = excluded.longitude, temperature_celsius = excluded.temperature_celsius`);
+    const [{ count }] = await sql`select count(*)::int as count from activity_samples where activity_id = ${a.id}`;
+    await sql`update run_activities set sample_count = ${count}, samples_fetched_at = now(), updated_at = now() where id = ${a.id}`;
+    sampleCount += count;
   }
 
   // One body-weight measurement so W/kg can be computed (idempotent).
