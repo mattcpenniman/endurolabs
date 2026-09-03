@@ -139,7 +139,17 @@ async function processHistoryPass(job: typeof garminSyncJobs.$inferSelect, clien
     await db.insert(runActivities).values({ userId: job.userId, ...activity, syncedAt: now, updatedAt: now })
       .onConflictDoUpdate({
         target: [runActivities.userId, runActivities.source, runActivities.providerActivityId],
-        set: { ...activity, syncedAt: now, updatedAt: now },
+        set: {
+          ...activity,
+          averagePower: sql`coalesce(excluded.average_power, ${runActivities.averagePower})`,
+          powerSource: sql`case
+            when excluded.average_power is null and ${runActivities.averagePower} is not null
+              then ${runActivities.powerSource}
+            else excluded.power_source
+          end`,
+          syncedAt: now,
+          updatedAt: now,
+        },
       });
     imported += 1;
   }

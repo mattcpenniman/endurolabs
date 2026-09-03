@@ -25,6 +25,8 @@ interface Point {
   currentPower140: number | null;
   currentPower140CI: [number, number] | null;
   priorPower140: number | null;
+  currentModeledPower140: number | null;
+  priorModeledPower140: number | null;
 }
 
 export default function LongitudinalTrend({ weeks }: { weeks: Point[] }) {
@@ -42,11 +44,14 @@ export default function LongitudinalTrend({ weeks }: { weeks: Point[] }) {
     phase: w.phase.replace(/_/g, " ") || "",
     current: w.currentPower140,
     prior: w.priorPower140,
+    currentModeled: w.currentModeledPower140,
+    priorModeled: w.priorModeledPower140,
     lower: w.currentPower140CI ? w.currentPower140CI[0] : null,
     upper: w.currentPower140CI ? w.currentPower140CI[1] : null,
   }));
 
   const hasCI = weeks.some((w) => w.currentPower140CI !== null);
+  const hasModeled = weeks.some((w) => w.currentModeledPower140 !== null || w.priorModeledPower140 !== null);
 
   return (
     <div className="rounded-xl border border-gray-200 bg-white p-5 shadow-sm">
@@ -54,7 +59,7 @@ export default function LongitudinalTrend({ weeks }: { weeks: Point[] }) {
         <div>
           <h3 className="text-xs font-medium uppercase tracking-wide text-gray-500">Longitudinal Power @ 140</h3>
           <p className="mt-1 text-xs text-gray-500">
-            Estimated watts at 140 bpm, week over week. Green band shows the 95% confidence interval for the current plan.
+            Watts at 140 bpm, week over week. Dashed lines use speed-modeled power; solid lines use measured power.
           </p>
         </div>
       </div>
@@ -108,6 +113,30 @@ export default function LongitudinalTrend({ weeks }: { weeks: Point[] }) {
               dot={{ r: 3 }}
               connectNulls
             />
+            {hasModeled && (
+              <Line
+                type="monotone"
+                dataKey="currentModeled"
+                name="Current modeled P@140"
+                stroke="#2b8456"
+                strokeWidth={2}
+                dot={{ r: 3 }}
+                strokeDasharray="6 4"
+                connectNulls
+              />
+            )}
+            {hasModeled && (
+              <Line
+                type="monotone"
+                dataKey="priorModeled"
+                name="Prior modeled P@140"
+                stroke="#9ca3af"
+                strokeWidth={2}
+                dot={{ r: 3 }}
+                strokeDasharray="6 4"
+                connectNulls
+              />
+            )}
             <Line
               type="monotone"
               dataKey="prior"
@@ -115,7 +144,6 @@ export default function LongitudinalTrend({ weeks }: { weeks: Point[] }) {
               stroke="#9ca3af"
               strokeWidth={2}
               dot={{ r: 3 }}
-              strokeDasharray="6 4"
               connectNulls
             />
           </ComposedChart>

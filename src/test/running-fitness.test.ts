@@ -21,6 +21,7 @@ import { analyzePlanFitness } from "@/lib/analytics/plan-fitness";
 import { comparePlans } from "@/lib/analytics/plan-comparison";
 import { MarathonPlan } from "@/lib/training/models";
 import { RunActivity } from "@/lib/activities/models";
+import { fitSpeedPowerModel } from "@/lib/analytics/modeled-power";
 
 /**
  * Build a clean steady-state trace where Power = 2.5 * (HR lagged by 30s).
@@ -212,6 +213,25 @@ describe("calculateAerobicDecoupling", () => {
   });
 });
 
+describe("fitSpeedPowerModel", () => {
+  it("fits measured summaries and excludes previously estimated power", () => {
+    const measured = [2, 2.5, 3, 3.5, 4].map((speed) => ({
+      distanceMeters: speed * 1000,
+      durationSeconds: 1000,
+      movingDurationSeconds: 1000,
+      averagePower: 50 + 100 * speed,
+      powerSource: "garmin",
+    }));
+    const model = fitSpeedPowerModel([
+      ...measured,
+      { ...measured[0], averagePower: 600, powerSource: "estimated_speed_v1" },
+    ]);
+    expect(model?.intercept).toBeCloseTo(50, 6);
+    expect(model?.slope).toBeCloseTo(100, 6);
+    expect(model?.activityCount).toBe(5);
+  });
+});
+
 describe("analyzePlanFitness — weekly bucketing", () => {
   it("assigns samples to the correct week window and reports best-140", () => {
     const samples = cleanSamples().map((s) => ({ ...s, activityStartDate: "2026-08-05" }));
@@ -356,6 +376,8 @@ describe("comparePlans", () => {
     });
     expect(result.summaries.current?.actualMileage).toBe(67);
     expect(result.summaries.prior?.actualMileage).toBe(57);
+    expect(result.summaries.current?.averagePower).toBeCloseTo(308.88, 2);
+    expect(result.summaries.prior?.averagePower).toBeCloseTo(289.12, 2);
   });
 
   it("handles a missing prior plan gracefully", () => {

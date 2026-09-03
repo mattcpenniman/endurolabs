@@ -4,7 +4,7 @@
 
 import { after, NextRequest, NextResponse } from "next/server";
 import { randomUUID } from "crypto";
-import { and, desc, eq, gte, inArray, isNotNull, isNull, lte, notInArray, or } from "drizzle-orm";
+import { and, desc, eq, gte, inArray, isNotNull, isNull, lte, notInArray, or, sql } from "drizzle-orm";
 import { getCurrentUser } from "@/lib/auth";
 import { db } from "@/lib/db/client";
 import { garminConnections, plans, runActivities } from "@/lib/db/schema";
@@ -149,6 +149,12 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
         target: [runActivities.userId, runActivities.source, runActivities.providerActivityId],
         set: {
           ...activity,
+          averagePower: sql`coalesce(excluded.average_power, ${runActivities.averagePower})`,
+          powerSource: sql`case
+            when excluded.average_power is null and ${runActivities.averagePower} is not null
+              then ${runActivities.powerSource}
+            else excluded.power_source
+          end`,
           planId: assignment?.planId ?? null,
           weekNumber: assignment?.weekNumber ?? null,
           dayOfWeek: assignment?.dayOfWeek ?? null,

@@ -24,10 +24,12 @@ export interface WeekActuals {
   averagePace: number | null;        // min/mile, distance-weighted
   averageHeartRate: number | null;   // bpm, distance-weighted
   averagePower: number | null;       // watts, distance-weighted
+  averagePowerEstimated: boolean;    // includes one or more modeled activity summaries
   elevationGainMeters: number;
   totalDurationSeconds: number;
   adherence: number | null;          // 0-100 share of planned mileage covered
   fitness: PowerHeartRateModel | null;
+  modeledFitness: PowerHeartRateModel | null;
 }
 
 export interface WeekComparisonRow {
@@ -49,6 +51,8 @@ export interface PlanSummary {
   activeWeeks: number;
   averagePace: number | null;
   averageHeartRate: number | null;
+  averagePower: number | null;
+  averagePowerEstimated: boolean;
   adherence: number | null;
   fitnessBest140: number | null;
 }
@@ -100,6 +104,7 @@ function buildWeekActuals(
   week: WeeklyPlan,
   activities: RunActivity[],
   fitnessForWeek: PowerHeartRateModel | null,
+  modeledFitnessForWeek: PowerHeartRateModel | null,
 ): WeekActuals {
   const runs = activitiesInWindow(activities, week);
   const actualMileage = Math.round(runs.reduce((sum, run) => sum + distance(run), 0) * 10) / 10;
@@ -120,10 +125,14 @@ function buildWeekActuals(
     averagePace: weightedAverage(runs, (run) => run.averagePaceMinutesPerMile),
     averageHeartRate: weightedAverage(runs, (run) => run.averageHeartRate),
     averagePower: weightedAverage(runs, (run) => run.averagePower),
+    averagePowerEstimated: runs.some((run) => (
+      run.averagePower !== null && run.powerSource?.startsWith("estimated_")
+    )),
     elevationGainMeters: runs.reduce((sum, run) => sum + (run.elevationGainMeters ?? 0), 0),
     totalDurationSeconds: runs.reduce((sum, run) => sum + run.durationSeconds, 0),
     adherence,
     fitness: fitnessForWeek,
+    modeledFitness: modeledFitnessForWeek,
   };
 }
 
@@ -141,6 +150,8 @@ export function comparePlans(opts: {
   priorActivities: RunActivity[];
   currentFitnessByWeek?: Map<string, PowerHeartRateModel>;
   priorFitnessByWeek?: Map<string, PowerHeartRateModel>;
+  currentModeledFitnessByWeek?: Map<string, PowerHeartRateModel>;
+  priorModeledFitnessByWeek?: Map<string, PowerHeartRateModel>;
 }): PlanComparison {
   const { currentPlan, priorPlan, currentActivities, priorActivities } = opts;
   const maxWeeks = Math.max(
@@ -156,10 +167,20 @@ export function comparePlans(opts: {
     const currentKey = currentWeek ? currentWeek.startDate.slice(0, 10) : null;
     const priorKey = priorWeek ? priorWeek.startDate.slice(0, 10) : null;
     const current = currentWeek
-      ? buildWeekActuals(currentWeek, currentActivities, currentKey ? opts.currentFitnessByWeek?.get(currentKey) ?? null : null)
+      ? buildWeekActuals(
+          currentWeek,
+          currentActivities,
+          currentKey ? opts.currentFitnessByWeek?.get(currentKey) ?? null : null,
+          currentKey ? opts.currentModeledFitnessByWeek?.get(currentKey) ?? null : null,
+        )
       : null;
     const prior = priorWeek
-      ? buildWeekActuals(priorWeek, priorActivities, priorKey ? opts.priorFitnessByWeek?.get(priorKey) ?? null : null)
+      ? buildWeekActuals(
+          priorWeek,
+          priorActivities,
+          priorKey ? opts.priorFitnessByWeek?.get(priorKey) ?? null : null,
+          priorKey ? opts.priorModeledFitnessByWeek?.get(priorKey) ?? null : null,
+        )
       : null;
 
     let deltaMileage: number | null = null;
@@ -246,6 +267,8 @@ function summarizeRows(weeks: WeekComparisonRow[], which: "current" | "prior"): 
     activeWeeks,
     averagePace: weighted((a) => a.averagePace),
     averageHeartRate: weighted((a) => a.averageHeartRate),
+    averagePower: weighted((a) => a.averagePower),
+    averagePowerEstimated: actuals.some((actual) => actual.averagePowerEstimated),
     adherence,
     fitnessBest140,
   };

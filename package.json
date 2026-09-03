@@ -15,6 +15,8 @@
     "seed:dev": "node scripts/seed-dev.mjs",
     "samples:backfill": "node scripts/backfill-samples.mjs",
     "summaries:recompute": "node scripts/recompute-activity-summaries.mjs",
+    "power:analyze": "node scripts/analyze-missing-power.mjs",
+    "power:p140-backtest": "vite-node scripts/backtest-power-at-140.ts",
     "garmin:history": "node scripts/sync-garmin-history.mjs",
     "garmin:worker": "node scripts/garmin-worker.mjs",
     "samples:classify-empty": "node scripts/classify-empty-details.mjs",

@@ -22,6 +22,7 @@ import FitnessCurveChart from "@/app/components/stats/FitnessCurveChart";
 import LongitudinalTrend from "@/app/components/stats/LongitudinalTrend";
 import HeadlineFitnessCard from "@/app/components/stats/HeadlineFitnessCard";
 import ActivityExplorer from "@/app/components/stats/ActivityExplorer";
+import AveragePowerTrend from "@/app/components/stats/AveragePowerTrend";
 
 interface SavedPlanRow {
   id: string;
@@ -268,6 +269,17 @@ export default function StatsPage() {
               </div>
             </div>
 
+            <AveragePowerTrend
+              weeks={stats.comparison.weeks.map((week) => ({
+                weekNumber: week.weekNumber,
+                phase: week.phase ?? "",
+                currentPower: week.current?.averagePower ?? null,
+                currentEstimated: week.current?.averagePowerEstimated ?? false,
+                priorPower: week.prior?.averagePower ?? null,
+                priorEstimated: week.prior?.averagePowerEstimated ?? false,
+              }))}
+            />
+
             {stats.fitness?.hasCurrentSamples && (
               <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
                 <FitnessCurveChart
@@ -284,6 +296,12 @@ export default function StatsPage() {
                       return e ? [e.lower95, e.upper95] as [number, number] : null;
                     })(),
                     priorPower140: w.prior?.fitness?.estimates.find((e) => e.heartRate === 140)?.watts ?? null,
+                    currentModeledPower140: w.current?.fitness
+                      ? null
+                      : w.current?.modeledFitness?.estimates.find((e) => e.heartRate === 140)?.watts ?? null,
+                    priorModeledPower140: w.prior?.fitness
+                      ? null
+                      : w.prior?.modeledFitness?.estimates.find((e) => e.heartRate === 140)?.watts ?? null,
                   }))}
                 />
               </div>
@@ -324,6 +342,11 @@ export default function StatsPage() {
                   Garmin running power the athlete would produce at a heart rate of 140 bpm.
                   Calculated by Huber regression of power vs. (30-second lagged) heart rate over
                   the steady-aerobic subset of each activity.
+                </p>
+                <p>
+                  <strong className="font-medium text-gray-900">Average power</strong> — distance-weighted
+                  activity-summary power. A leading ~ marks a weekly or plan value containing power modeled
+                  from average running speed rather than measured by the device.
                 </p>
                 <p>
                   <strong className="font-medium text-gray-900">Qualification</strong> — samples must

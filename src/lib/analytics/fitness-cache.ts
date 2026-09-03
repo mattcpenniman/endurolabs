@@ -14,6 +14,7 @@ import { ANALYTICS_QUALITY_THRESHOLD } from "@/lib/analytics/activity-quality";
 import { ActivitySampleInput, PowerHeartRateModel, PowerSource } from "@/lib/analytics/models";
 import { SampleWithActivityStart } from "@/lib/analytics/plan-fitness";
 import { analyzePowerAtHeartRate } from "@/lib/analytics/running-fitness";
+import { SpeedPowerModel } from "@/lib/analytics/modeled-power";
 
 export const FITNESS_ALGORITHM_VERSION = "power-hr-v1";
 
@@ -101,6 +102,51 @@ export async function loadFitnessWindowData(
     latestDataAt,
     samples: rows.map((row) => ({
       ...row,
+      activityStartDate: activityById.get(row.activityId)!.localDate,
+    } satisfies SampleWithActivityStart)),
+  };
+}
+
+/** Load HR/speed traces and model power in memory for explicitly estimated activities. */
+export async function loadModeledFitnessWindowData(
+  userId: string,
+  window: FitnessWindow,
+  model: SpeedPowerModel,
+): Promise<FitnessWindowData> {
+  const activities = await db.select({
+    id: runActivities.id,
+    localDate: runActivities.localDate,
+    updatedAt: runActivities.updatedAt,
+  }).from(runActivities).where(and(
+    eq(runActivities.userId, userId),
+    eq(runActivities.powerSource, "estimated_speed_v1"),
+    eq(runActivities.excludedFromAnalytics, false),
+    gte(runActivities.localDate, window.startDate),
+    lt(runActivities.localDate, nextDate(window.endDate)),
+  ));
+  if (activities.length === 0) return { samples: [], latestDataAt: null };
+
+  const activityById = new Map(activities.map((activity) => [activity.id, activity]));
+  const rows = await db.select({
+    activityId: activitySamples.activityId,
+    elapsedSeconds: activitySamples.elapsedSeconds,
+    heartRate: activitySamples.heartRate,
+    speedMetersPerSecond: activitySamples.speedMetersPerSecond,
+    cadence: activitySamples.cadence,
+  }).from(activitySamples)
+    .where(inArray(activitySamples.activityId, activities.map((activity) => activity.id)))
+    .orderBy(asc(activitySamples.activityId), asc(activitySamples.elapsedSeconds));
+
+  return {
+    latestDataAt: activities.reduce<Date | null>(
+      (latest, activity) => !latest || activity.updatedAt > latest ? activity.updatedAt : latest,
+      null,
+    ),
+    samples: rows.map((row) => ({
+      ...row,
+      power: row.speedMetersPerSecond === null
+        ? null
+        : model.intercept + model.slope * row.speedMetersPerSecond,
       activityStartDate: activityById.get(row.activityId)!.localDate,
     } satisfies SampleWithActivityStart)),
   };

@@ -28,8 +28,10 @@ import {
   FitnessWindow,
   getPlanFitnessHeadline,
   loadFitnessWindowData,
+  loadModeledFitnessWindowData,
   normalizePowerSource,
 } from "@/lib/analytics/fitness-cache";
+import { fitSpeedPowerModel } from "@/lib/analytics/modeled-power";
 
 function serializeActivity(row: typeof runActivities.$inferSelect): RunActivity {
   const distanceMiles = Math.max(0, row.distanceMeters) / 1609.344;
@@ -206,9 +208,17 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     const priorWindow = priorPlan ? planWindow(priorPlan) : null;
     const currentPowerSource = primaryPowerSource(currentActivityRows);
     const priorPowerSource = primaryPowerSource(priorActivityRows);
-    const [currentWindowData, priorWindowData] = await Promise.all([
+    const currentSpeedPowerModel = fitSpeedPowerModel(currentActivityRows);
+    const priorSpeedPowerModel = fitSpeedPowerModel(priorActivityRows);
+    const [currentWindowData, priorWindowData, currentModeledWindowData, priorModeledWindowData] = await Promise.all([
       loadFitnessWindowData(user.id, currentWindow, currentPowerSource),
       priorWindow ? loadFitnessWindowData(user.id, priorWindow, priorPowerSource) : Promise.resolve(null),
+      currentSpeedPowerModel
+        ? loadModeledFitnessWindowData(user.id, currentWindow, currentSpeedPowerModel)
+        : Promise.resolve(null),
+      priorWindow && priorSpeedPowerModel
+        ? loadModeledFitnessWindowData(user.id, priorWindow, priorSpeedPowerModel)
+        : Promise.resolve(null),
     ]);
 
     const [currentHeadline, priorHeadline] = await Promise.all([
@@ -255,6 +265,26 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
           headlineModel: priorHeadline,
         })
       : null;
+    const currentModeledFitness = currentModeledWindowData?.samples.length
+      ? analyzePlanFitness({
+          weekWindows: currentPlan.weeks.map((week) => ({
+            start: week.startDate.slice(0, 10),
+            end: (week.days[week.days.length - 1]?.date ?? week.endDate).slice(0, 10),
+          })),
+          samples: currentModeledWindowData.samples,
+          source: "other",
+        })
+      : null;
+    const priorModeledFitness = priorPlan && priorModeledWindowData?.samples.length
+      ? analyzePlanFitness({
+          weekWindows: priorPlan.weeks.map((week) => ({
+            start: week.startDate.slice(0, 10),
+            end: (week.days[week.days.length - 1]?.date ?? week.endDate).slice(0, 10),
+          })),
+          samples: priorModeledWindowData.samples,
+          source: "other",
+        })
+      : null;
 
     const comparison = comparePlans({
       currentPlan,
@@ -263,6 +293,8 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
       priorActivities,
       currentFitnessByWeek: currentFitness?.weeks,
       priorFitnessByWeek: priorFitness?.weeks,
+      currentModeledFitnessByWeek: currentModeledFitness?.weeks,
+      priorModeledFitnessByWeek: priorModeledFitness?.weeks,
     });
 
     return NextResponse.json({
