@@ -1265,8 +1265,16 @@ export default function WeeklyPlanCard({
                       ) : (
                         runEntries.map((entry, index) => {
                         const actualMileage = entry.log?.actualMileage ?? 0;
-                        const syncedActivity = activities.find((activity) => activity.plannedWorkoutId === entry.plannedWorkoutId);
-                        const draft = runDrafts[entry.runId] ?? createDefaultRunDraft(entry.plannedMileage);
+                        const syncedActivity = entry.plannedWorkoutId
+                          ? activities.find((activity) =>
+                              activity.planId === planId
+                              && activity.weekNumber === week.weekNumber
+                              && activity.dayOfWeek === day.dayOfWeek
+                              && activity.plannedWorkoutId === entry.plannedWorkoutId
+                            )
+                          : undefined;
+                        const defaultActualMileage = syncedActivity?.distanceMiles ?? entry.plannedMileage;
+                        const draft = runDrafts[entry.runId] ?? createDefaultRunDraft(defaultActualMileage);
                         const isLastEntry = index === runEntries.length - 1;
                         const showWeekToDateSummary =
                           entry.log?.completed &&
@@ -1457,6 +1465,14 @@ export default function WeeklyPlanCard({
                                 <span className="rounded bg-green-50 px-2 py-1 text-green-700">
                                   Actual {formatMiles(entry.log.actualMileage)} mi
                                 </span>
+                                {entry.log.garminValidationStatus === "validated" && (
+                                  <span className="rounded bg-sky-50 px-2 py-1 text-sky-700">Garmin validated</span>
+                                )}
+                                {entry.log.garminValidationStatus === "variance" && (
+                                  <span className="rounded bg-amber-50 px-2 py-1 text-amber-700">
+                                    Garmin variance {formatMileageDelta(entry.log.garminVariance ?? 0)} mi
+                                  </span>
+                                )}
                                 <span>Feel {entry.log.feelRating}/10</span>
                                 {entry.log.notes && <span className="text-gray-500">{entry.log.notes}</span>}
                                 {weekToDateSummary && (
@@ -1503,7 +1519,7 @@ export default function WeeklyPlanCard({
                                 <DailyLogControls
                                   draft={draft}
                                   plannedMileage={entry.plannedMileage}
-                                  onDraftChange={(patch) => updateRunDraft(entry.runId, entry.plannedMileage, patch)}
+                                  onDraftChange={(patch) => updateRunDraft(entry.runId, defaultActualMileage, patch)}
                                   onSave={() => saveRunLog(day, entry, draft)}
                                   onCancel={entry.isAdditionalRun ? () => cancelAdditionalRun(day.dayOfWeek, entry.runId) : undefined}
                                 />

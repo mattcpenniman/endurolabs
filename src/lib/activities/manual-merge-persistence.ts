@@ -7,17 +7,20 @@ import "server-only";
 import { and, eq, inArray, isNull } from "drizzle-orm";
 import { db } from "@/lib/db/client";
 import { planRunLogs, runActivities } from "@/lib/db/schema";
-import { matchManualLogsToActivities } from "@/lib/activities/manual-merge";
+import { getGarminLogValidation, matchManualLogsToActivities } from "@/lib/activities/manual-merge";
 
 export async function reconcileManualActivityMerges(userId: string, planId?: string): Promise<number> {
   const logs = await db.select({
     id: planRunLogs.id,
     date: planRunLogs.date,
     actualMileageHundredths: planRunLogs.actualMileage,
+    planId: planRunLogs.planId,
+    weekNumber: planRunLogs.weekNumber,
+    plannedWorkoutId: planRunLogs.plannedWorkoutId,
+    mergedActivityId: planRunLogs.mergedActivityId,
   }).from(planRunLogs).where(and(
     eq(planRunLogs.userId, userId),
     eq(planRunLogs.completed, 1),
-    isNull(planRunLogs.mergedActivityId),
     ...(planId ? [eq(planRunLogs.planId, planId)] : []),
   ));
   if (logs.length === 0) return 0;
@@ -30,13 +33,42 @@ export async function reconcileManualActivityMerges(userId: string, planId?: str
     id: runActivities.id,
     localDate: runActivities.localDate,
     distanceMeters: runActivities.distanceMeters,
+    planId: runActivities.planId,
+    weekNumber: runActivities.weekNumber,
+    plannedWorkoutId: runActivities.plannedWorkoutId,
   }).from(runActivities).where(and(
     eq(runActivities.userId, userId),
+    eq(runActivities.source, "garmin"),
     inArray(runActivities.localDate, dates),
   ));
-  const matches = matchManualLogsToActivities(logs, activities.filter((activity) => !claimed.has(activity.id)));
+  for (const log of logs) {
+    if (!log.mergedActivityId) continue;
+    const activity = activities.find((candidate) => candidate.id === log.mergedActivityId);
+    if (!activity) continue;
+    const validation = getGarminLogValidation(log.actualMileageHundredths, activity.distanceMeters);
+    await db.update(planRunLogs).set({
+      garminDistance: validation.garminDistanceHundredths,
+      garminVariance: validation.garminVarianceHundredths,
+      garminValidationStatus: validation.status,
+      updatedAt: new Date(),
+    }).where(eq(planRunLogs.id, log.id));
+  }
+
+  const unmergedLogs = logs.filter((log) => !log.mergedActivityId);
+  const matches = matchManualLogsToActivities(unmergedLogs, activities.filter((activity) => !claimed.has(activity.id)));
   for (const match of matches) {
-    await db.update(planRunLogs).set({ mergedActivityId: match.activityId, mergedAt: new Date(), updatedAt: new Date() })
+    const log = logs.find((candidate) => candidate.id === match.logId);
+    const activity = activities.find((candidate) => candidate.id === match.activityId);
+    if (!log || !activity) continue;
+    const validation = getGarminLogValidation(log.actualMileageHundredths, activity.distanceMeters);
+    await db.update(planRunLogs).set({
+      mergedActivityId: match.activityId,
+      mergedAt: new Date(),
+      garminDistance: validation.garminDistanceHundredths,
+      garminVariance: validation.garminVarianceHundredths,
+      garminValidationStatus: validation.status,
+      updatedAt: new Date(),
+    })
       .where(and(eq(planRunLogs.id, match.logId), isNull(planRunLogs.mergedActivityId)));
   }
   return matches.length;

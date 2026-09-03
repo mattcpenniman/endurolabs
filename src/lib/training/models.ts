@@ -276,6 +276,9 @@ export interface DailyLog {
   runId: string;
   plannedWorkoutId?: string | null;
   mergedActivityId?: string | null;
+  garminDistance?: number | null;
+  garminVariance?: number | null;
+  garminValidationStatus?: "validated" | "variance" | null;
   runTitle?: string;
   isAdditionalRun?: boolean;
   actualMileage: number;

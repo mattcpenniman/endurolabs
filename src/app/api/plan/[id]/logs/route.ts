@@ -19,6 +19,12 @@ function serializeLog(row: typeof planRunLogs.$inferSelect): DailyLog {
     runId: row.runId,
     plannedWorkoutId: row.plannedWorkoutId,
     mergedActivityId: row.mergedActivityId,
+    garminDistance: row.garminDistance === null ? null : row.garminDistance / 100,
+    garminVariance: row.garminVariance === null ? null : row.garminVariance / 100,
+    garminValidationStatus:
+      row.garminValidationStatus === "validated" || row.garminValidationStatus === "variance"
+        ? row.garminValidationStatus
+        : null,
     runTitle: row.runTitle ?? undefined,
     isAdditionalRun: row.isAdditionalRun === 1,
     actualMileage: row.actualMileage / 100,
@@ -148,6 +154,9 @@ export async function POST(
           notes: log.notes ?? "",
           mergedActivityId: null,
           mergedAt: null,
+          garminDistance: null,
+          garminVariance: null,
+          garminValidationStatus: null,
           loggedAt: Number.isNaN(timestamp.getTime()) ? new Date() : timestamp,
           updatedAt: new Date(),
         },
