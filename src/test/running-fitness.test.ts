@@ -18,7 +18,7 @@ import {
 } from "@/lib/analytics/running-fitness";
 import { ActivitySampleInput, PowerHeartRateModel, PreparedFitnessPoint } from "@/lib/analytics/models";
 import { analyzePlanFitness } from "@/lib/analytics/plan-fitness";
-import { comparePlans } from "@/lib/analytics/plan-comparison";
+import { comparePlans, formatPaceShort } from "@/lib/analytics/plan-comparison";
 import { MarathonPlan } from "@/lib/training/models";
 import { RunActivity } from "@/lib/activities/models";
 import { fitSpeedPowerModel } from "@/lib/analytics/modeled-power";
@@ -430,5 +430,11 @@ describe("comparePlans", () => {
     expect(result.priorPlanId).toBeNull();
     expect(result.weeks[0].prior).toBeNull();
     expect(result.weeks[0].deltaMileage).toBeNull();
+  });
+});
+
+describe("formatPaceShort", () => {
+  it("carries rounded seconds into the next minute", () => {
+    expect(formatPaceShort(8.999)).toBe("9:00");
   });
 });

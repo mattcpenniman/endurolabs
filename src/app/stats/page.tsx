@@ -16,6 +16,7 @@ import {
   PlanComparison,
   PlanSummary,
   WeekActuals,
+  formatPaceShort,
 } from "@/lib/analytics/plan-comparison";
 import { PowerHeartRateModel } from "@/lib/analytics/models";
 import FitnessCurveChart from "@/app/components/stats/FitnessCurveChart";
@@ -417,9 +418,7 @@ function Row({ label, value, tone = "text-gray-900" }: { label: string; value: s
 
 function fmtPace(pace: number | null): string {
   if (pace === null) return "--";
-  const m = Math.floor(pace);
-  const s = Math.round((pace - m) * 60);
-  return `${m}:${String(s).padStart(2, "0")}/mi`;
+  return `${formatPaceShort(pace)}/mi`;
 }
 
 // ─── Comparison table ─────────────────────────────────────

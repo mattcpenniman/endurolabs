@@ -285,8 +285,9 @@ export function formatMiles(miles: number | null): string {
 
 export function formatPaceShort(pace: number | null): string {
   if (pace === null || !Number.isFinite(pace)) return "--";
-  const m = Math.floor(pace);
-  const s = Math.round((pace - m) * 60);
+  const totalSeconds = Math.round(pace * 60);
+  const m = Math.floor(totalSeconds / 60);
+  const s = totalSeconds % 60;
   return `${m}:${String(s).padStart(2, "0")}`;
 }
 
