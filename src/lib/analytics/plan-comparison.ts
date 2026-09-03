@@ -42,6 +42,7 @@ export interface WeekComparisonRow {
   deltaPace: number | null;          // minutes/mile; negative == faster
   deltaHeartRate: number | null;     // bpm; negative == lower effort for same work
   deltaPower140: number | null;      // watts; positive == more output at same HR
+  deltaPower140Estimated: boolean;   // one or both values use modeled power
 }
 
 export interface PlanSummary {
@@ -187,6 +188,7 @@ export function comparePlans(opts: {
     let deltaPace: number | null = null;
     let deltaHeartRate: number | null = null;
     let deltaPower140: number | null = null;
+    let deltaPower140Estimated = false;
     if (current && prior) {
       if (current.actualMileage > 0 || prior.actualMileage > 0) {
         deltaMileage = Math.round((current.actualMileage - prior.actualMileage) * 10) / 10;
@@ -197,10 +199,11 @@ export function comparePlans(opts: {
       if (current.averageHeartRate !== null && prior.averageHeartRate !== null) {
         deltaHeartRate = Math.round(current.averageHeartRate - prior.averageHeartRate);
       }
-      const currentPower = powerAt140(current.fitness);
-      const priorPower = powerAt140(prior.fitness);
+      const currentPower = powerAt140(current.fitness ?? current.modeledFitness);
+      const priorPower = powerAt140(prior.fitness ?? prior.modeledFitness);
       if (currentPower !== null && priorPower !== null) {
         deltaPower140 = currentPower - priorPower;
+        deltaPower140Estimated = current.fitness === null || prior.fitness === null;
       }
     }
 
@@ -213,6 +216,7 @@ export function comparePlans(opts: {
       deltaPace,
       deltaHeartRate,
       deltaPower140,
+      deltaPower140Estimated,
     });
   }
 

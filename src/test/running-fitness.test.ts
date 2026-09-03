@@ -16,7 +16,7 @@ import {
   fitPowerAtHeartRate,
   prepareFitnessSamples,
 } from "@/lib/analytics/running-fitness";
-import { ActivitySampleInput, PreparedFitnessPoint } from "@/lib/analytics/models";
+import { ActivitySampleInput, PowerHeartRateModel, PreparedFitnessPoint } from "@/lib/analytics/models";
 import { analyzePlanFitness } from "@/lib/analytics/plan-fitness";
 import { comparePlans } from "@/lib/analytics/plan-comparison";
 import { MarathonPlan } from "@/lib/training/models";
@@ -328,6 +328,29 @@ function run(date: string, distanceMiles: number, pace: number, hr: number | nul
   };
 }
 
+function fitnessAt140(watts: number): PowerHeartRateModel {
+  return {
+    source: "garmin",
+    intercept: 0,
+    slope: 2,
+    rSquared: 0.9,
+    residualStandardError: 5,
+    sampleCount: 100,
+    activityCount: 2,
+    usableMinutes: 30,
+    observedHeartRateRange: [120, 160],
+    confidence: "medium",
+    estimates: [{
+      heartRate: 140,
+      watts,
+      lower95: watts - 10,
+      upper95: watts + 10,
+      wattsPerKg: null,
+      extrapolated: false,
+    }],
+  };
+}
+
 describe("comparePlans", () => {
   const current = minimalPlan("current-plan", [
     { weekNumber: 1, start: "2026-08-03", end: "2026-08-09", miles: 40 },
@@ -378,6 +401,23 @@ describe("comparePlans", () => {
     expect(result.summaries.prior?.actualMileage).toBe(57);
     expect(result.summaries.current?.averagePower).toBeCloseTo(308.88, 2);
     expect(result.summaries.prior?.averagePower).toBeCloseTo(289.12, 2);
+  });
+
+  it("uses modeled Power @ 140 when measured weekly power is unavailable", () => {
+    const result = comparePlans({
+      currentPlan: current,
+      priorPlan: prior,
+      currentActivities,
+      priorActivities,
+      currentModeledFitnessByWeek: new Map([["2026-08-03", fitnessAt140(340)]]),
+      priorFitnessByWeek: new Map([["2025-08-04", fitnessAt140(320)]]),
+      priorModeledFitnessByWeek: new Map([["2025-08-04", fitnessAt140(300)]]),
+    });
+
+    expect(result.weeks[0].current?.fitness).toBeNull();
+    expect(result.weeks[0].current?.modeledFitness?.estimates[0].watts).toBe(340);
+    expect(result.weeks[0].deltaPower140).toBe(20);
+    expect(result.weeks[0].deltaPower140Estimated).toBe(true);
   });
 
   it("handles a missing prior plan gracefully", () => {

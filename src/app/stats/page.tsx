@@ -472,10 +472,12 @@ function WeekComparisonTable({ comparison }: { comparison: PlanComparison }) {
               </td>
               <td className="px-3 py-2 text-right tabular-nums text-gray-900">{row.current?.averageHeartRate ? `${Math.round(row.current.averageHeartRate)}` : "--"}</td>
               <td className="px-3 py-2 text-right tabular-nums text-gray-700">{row.prior?.averageHeartRate ? `${Math.round(row.prior.averageHeartRate)}` : "--"}</td>
-              <td className="px-3 py-2 text-right tabular-nums text-gray-900">{fmtWatts140(row.current?.fitness ?? null)}</td>
-              <td className="px-3 py-2 text-right tabular-nums text-gray-700">{fmtWatts140(row.prior?.fitness ?? null)}</td>
+              <td className="px-3 py-2 text-right tabular-nums text-gray-900">{fmtWatts140(row.current?.fitness ?? null, row.current?.modeledFitness ?? null)}</td>
+              <td className="px-3 py-2 text-right tabular-nums text-gray-700">{fmtWatts140(row.prior?.fitness ?? null, row.prior?.modeledFitness ?? null)}</td>
               <td className={`px-3 py-2 text-right tabular-nums font-medium ${deltaClass(row.deltaPower140)}`}>
-                {row.deltaPower140 === null ? "--" : (row.deltaPower140 > 0 ? "+" : "") + row.deltaPower140}
+                {row.deltaPower140 === null
+                  ? "--"
+                  : `${row.deltaPower140Estimated ? "~" : ""}${row.deltaPower140 > 0 ? "+" : ""}${row.deltaPower140}`}
               </td>
             </tr>
           ))}
@@ -490,11 +492,15 @@ function fmtMiles(miles: number | null): string {
   return `${miles.toFixed(1)} mi`;
 }
 
-function fmtWatts140(m: PowerHeartRateModel | null): string {
+function fmtWatts140(
+  measured: PowerHeartRateModel | null,
+  modeled: PowerHeartRateModel | null,
+): string {
+  const m = measured ?? modeled;
   if (!m) return "--";
   const estimate = m.estimates.find((e) => e.heartRate === 140) ?? m.estimates[0];
   if (!estimate) return "--";
-  return `${Math.round(estimate.watts)} W`;
+  return `${measured ? "" : "~"}${Math.round(estimate.watts)} W`;
 }
 
 function deltaClass(delta: number | null): string {

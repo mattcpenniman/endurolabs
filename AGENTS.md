@@ -74,6 +74,20 @@ src/
 - `summaries:recompute` is DB-only and does not contact Garmin. It processes activities one at a time, always refreshes `sample_count` and `quality_score`, and rebuilds distance, duration, moving duration, average/max HR, average power, and cadence only when stored detail covers at least 95% of the original duration. Partial traces retain their provider summary metrics; valid empty responses score 0.
 - Standalone Garmin scripts load `.env` and require `GARMIN_TOKEN_ENCRYPTION_KEY` to decrypt the existing connection. Never generate a replacement key while encrypted sessions remain in the DB.
 - The summary recompute script only needs `DATABASE_URL`; unlike Garmin history/detail scripts, it does not decrypt or update Garmin sessions.
+- Garmin summary upserts preserve an existing non-null `average_power` and its `power_source` when the incoming Garmin summary has null power. This protects explicitly modeled or detail-recomputed summary power from null historical payloads.
+
+## Modeled Missing Power
+
+- Newport Marathon 2026 has 21 measured-power activities from April 1-19, 2026 and 206 earlier null-power activities from November 17, 2025 through April 1, 2026.
+- The athlete-specific summary model is `watts = -33.526863 + 117.849963 * speed_meters_per_second`. Speed is activity distance divided by moving duration, falling back to total duration.
+- Do not reuse these coefficients for another athlete or plan. Refit and validate with `npm run power:analyze -- --plan-id UUID`; add `--apply` only after its accuracy gates pass.
+- Newport summary validation: leave-one-run-out MAE 4.7 W, RMSE 6.0 W, bias 0.0 W, and R2 0.934. A 14-run near-term temporal holdout produced MAE 14.9 W, RMSE 16.4 W (5.1%), and bias 14.9 W.
+- The 206 applied Newport estimates range from 254-389 W. They are stored only in `run_activities.average_power` with `power_source = 'estimated_speed_v1'`; `activity_samples.power` remains null so modeled data cannot be mistaken for sensor measurements.
+- The stats page displays distance-weighted average power separately. A leading `~` and dashed chart lines indicate weeks containing modeled summaries.
+- For modeled weekly Power @ 140, `src/lib/analytics/modeled-power.ts` refits the speed/power relationship from measured summaries. `loadModeledFitnessWindowData()` applies it to stored speed samples in memory, then the normal 30-second lagged-HR pipeline computes Power @ 140. Synthetic sample power is never persisted.
+- Exact downstream Newport backtest: modeled versus measured plan headline Power @ 140 was 338.6 W versus 336.1 W (2.5 W error). Leave-one-week-out validation across three measured weeks produced MAE 10.1 W, RMSE 10.4 W, bias -4.6 W, and maximum absolute error 13.7 W; none of the three estimates extrapolated beyond the observed HR range.
+- Per-activity modeled Power @ 140 is not approved: leave-one-activity-out MAE was 26.4 W, RMSE 34.0 W, and maximum error 64.7 W. Keep modeled Power @ 140 limited to weekly/plan trends and visually distinct from measured Power @ 140.
+- Re-run the exact downstream validation with `npm run power:p140-backtest -- --plan-id UUID`.
 
 ## Conventions
 
