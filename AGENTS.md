@@ -52,7 +52,7 @@ src/
 | Table | Purpose |
 |-------|---------|
 | `run_activities` | Provider activity summaries, plan matching, analytics inclusion, quality score, and detail-ingestion status (`sample_count`, `samples_fetched_at`) |
-| `activity_samples` | High-resolution activity metrics keyed by `(activity_id, elapsed_seconds)`: time, distance, HR, power, speed, elevation, grade, cadence, GPS, and temperature |
+| `activity_samples` | High-resolution activity metrics keyed by `(activity_id, elapsed_seconds)`: time, distance, HR, power, speed, elevation, grade, cadence, GPS, and temperature. **Not all columns are reliably populated** — real Garmin detail omits `distance_meters` and `grade` (null across samples); rely on `run_activities.distance_meters` for distance and derive slope from `elevation_meters` + `speed_meters_per_second` |
 | `weight_measurements` | Timestamped body weight used for W/kg analytics |
 | `fitness_snapshots` | Versioned plan-headline analytics cache keyed by user, time window, power source, and algorithm version |
 
@@ -67,6 +67,9 @@ src/
 - Garmin fetches use the stored encrypted session and a fixed concurrency of 2 to limit proxy pressure.
 - `samples_fetched_at` records an attempted successful response; `sample_count = 0` can be valid when Garmin returns no time-series metrics.
 - `quality_score` uses the versioned `detail-v1` formula in `src/lib/analytics/activity-quality.ts`: HR coverage, power coverage, GPS coverage, duration coverage, and steady-state share. The sample-analytics threshold is 60; empty detail scores 0.
+- The Garmin detail payload does **not** reliably include per-sample distance or grade. Real stored detail has `activity_samples.distance_meters` null across samples and `grade` null, while `elevation_meters`, `speed_meters_per_second`, `latitude`/`longitude`, `heart_rate`, and `power` are ~98-99% populated.
+- Do not read per-sample `distance_meters` or `grade` as if they were present. Use `run_activities.distance_meters` (the activity summary) for distance, with a speed×Δt integral as a fallback, and derive grade/slope from consecutive pairs: `slope = Δelevation_meters / (avg speed × Δt)`.
+- The elevation/grade analytics (`src/lib/analytics/elevation-grade.ts`) buckets samples as flat (`|slope| < 2%`), climbing (`slope > 0`), or descending (`slope < 0`). Per-sample power is reported only when the caller explicitly marks it as measured sensor power; never present modeled speed-to-power as grade-specific power.
 - The dev seed creates synthetic fixtures only. Production Garmin ingestion removes timestamp-inconsistent seed rows when real detail is imported.
 - Historical summary import: `npm run garmin:history -- --since YYYY-MM-DD`
 - Missing/all detail backfill: `npm run samples:backfill -- --only-missing` or `npm run samples:backfill`
