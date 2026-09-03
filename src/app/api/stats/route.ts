@@ -9,12 +9,13 @@
 // ============================================================
 
 import { NextRequest, NextResponse } from "next/server";
-import { and, desc, eq, inArray, or } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, or } from "drizzle-orm";
 import { db } from "@/lib/db/client";
 import {
   plans,
   planRunLogs,
   runActivities,
+  activitySamples,
   weightMeasurements,
 } from "@/lib/db/schema";
 import { getCurrentUser } from "@/lib/auth";
@@ -35,6 +36,10 @@ import {
 } from "@/lib/analytics/fitness-cache";
 import { fitSpeedPowerModel } from "@/lib/analytics/modeled-power";
 import { analyzeAerobicDecouplingByActivity } from "@/lib/analytics/running-fitness";
+import {
+  calculateLongRunDurability,
+  LongRunClassification,
+} from "@/lib/analytics/long-run-durability";
 
 interface SerializedDecouplingResult {
   activityId: string;
@@ -42,6 +47,82 @@ interface SerializedDecouplingResult {
   localDate: string;
   percentage: number;
   usableMinutes: number;
+}
+
+interface SerializedDurabilityResult {
+  activityId: string;
+  activityName: string;
+  localDate: string;
+  classification: LongRunClassification;
+  powerRetention: number | null;
+  paceRetention: number;
+  heartRateDrift: number;
+  usableMinutes: number;
+}
+
+function durabilityCandidates(plan: MarathonPlan): Map<string, LongRunClassification> {
+  const candidates = new Map<string, LongRunClassification>();
+  for (const week of plan.weeks) {
+    for (const day of week.days) {
+      for (const workout of [day.workout, day.secondaryWorkout]) {
+        if (!workout) continue;
+        if (workout.type !== "long" && workout.type !== "progression") continue;
+        if (workout.type === "progression" && workout.totalDistance < Math.max(8, week.longRunDistance * 0.75)) continue;
+        const classification: LongRunClassification = workout.type === "progression"
+          ? "progression"
+          : workout.type === "long" && workout.segments.every((segment) => ["easy", "recovery", "long"].includes(segment.type))
+            ? "steady"
+            : "structured";
+        candidates.set(workout.id, classification);
+      }
+    }
+  }
+  return candidates;
+}
+
+async function serializeDurability(
+  plan: MarathonPlan,
+  rows: Array<typeof runActivities.$inferSelect>,
+): Promise<SerializedDurabilityResult[]> {
+  const candidates = durabilityCandidates(plan);
+  const eligible = rows.filter((row) => row.plannedWorkoutId && candidates.has(row.plannedWorkoutId) && row.sampleCount > 0);
+  if (eligible.length === 0) return [];
+  const sampleRows = await db.select({
+    activityId: activitySamples.activityId,
+    elapsedSeconds: activitySamples.elapsedSeconds,
+    heartRate: activitySamples.heartRate,
+    power: activitySamples.power,
+    speedMetersPerSecond: activitySamples.speedMetersPerSecond,
+    cadence: activitySamples.cadence,
+  }).from(activitySamples)
+    .where(inArray(activitySamples.activityId, eligible.map((row) => row.id)))
+    .orderBy(asc(activitySamples.activityId), asc(activitySamples.elapsedSeconds));
+  const samplesByActivity = new Map<string, typeof sampleRows>();
+  for (const sample of sampleRows) {
+    const samples = samplesByActivity.get(sample.activityId) ?? [];
+    samples.push(sample);
+    samplesByActivity.set(sample.activityId, samples);
+  }
+
+  return eligible.flatMap((activity) => {
+    const classification = candidates.get(activity.plannedWorkoutId!);
+    if (!classification) return [];
+    const result = calculateLongRunDurability(
+      samplesByActivity.get(activity.id) ?? [],
+      !activity.powerSource.startsWith("estimated_"),
+    );
+    if (!result.suitable || result.paceRetention === null || result.heartRateDrift === null) return [];
+    return [{
+      activityId: activity.id,
+      activityName: activity.activityName,
+      localDate: activity.localDate,
+      classification,
+      powerRetention: result.powerRetention === null ? null : Math.round(result.powerRetention * 10) / 10,
+      paceRetention: Math.round(result.paceRetention * 10) / 10,
+      heartRateDrift: Math.round(result.heartRateDrift * 10) / 10,
+      usableMinutes: Math.round(result.usableMinutes),
+    }];
+  }).sort((a, b) => a.localDate.localeCompare(b.localDate));
 }
 
 function serializeDecoupling(
@@ -279,6 +360,10 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     const priorSamples = priorWindowData?.samples ?? [];
     const currentDecoupling = serializeDecoupling(currentSamples, currentActivities);
     const priorDecoupling = serializeDecoupling(priorSamples, priorActivities);
+    const [currentDurability, priorDurability] = await Promise.all([
+      serializeDurability(currentPlan, currentActivityRows),
+      priorPlan ? serializeDurability(priorPlan, priorActivityRows) : Promise.resolve([]),
+    ]);
 
     // Derive weekly + plan-level Power @ HR models per plan.
     const currentFitness = currentSamples.length > 0
@@ -348,6 +433,10 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
       aerobicDecoupling: {
         current: currentDecoupling,
         prior: priorDecoupling,
+      },
+      longRunDurability: {
+        current: currentDurability,
+        prior: priorDurability,
       },
       fitness: {
         current: currentFitness

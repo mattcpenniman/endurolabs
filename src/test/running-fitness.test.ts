@@ -23,6 +23,7 @@ import { comparePlans, formatPaceShort } from "@/lib/analytics/plan-comparison";
 import { MarathonPlan } from "@/lib/training/models";
 import { RunActivity } from "@/lib/activities/models";
 import { fitSpeedPowerModel } from "@/lib/analytics/modeled-power";
+import { calculateLongRunDurability } from "@/lib/analytics/long-run-durability";
 
 /**
  * Build a clean steady-state trace where Power = 2.5 * (HR lagged by 30s).
@@ -242,6 +243,43 @@ describe("calculateAerobicDecoupling", () => {
     expect(results).toHaveLength(2);
     expect(results.every((result) => result.suitable)).toBe(true);
     expect(results[1].percentage).toBeGreaterThan(results[0].percentage);
+  });
+});
+
+describe("calculateLongRunDurability", () => {
+  function durabilitySamples(durationSeconds = 7200): ActivitySampleInput[] {
+    return Array.from({ length: durationSeconds + 1 }, (_, elapsedSeconds) => {
+      const finalQuarter = elapsedSeconds >= durationSeconds * 0.75;
+      return {
+        activityId: "long-run",
+        elapsedSeconds,
+        heartRate: finalQuarter ? 147 : 140,
+        power: finalQuarter ? 285 : 300,
+        speedMetersPerSecond: finalQuarter ? 2.85 : 3,
+      };
+    });
+  }
+
+  it("compares the first three quarters with the final quarter", () => {
+    const result = calculateLongRunDurability(durabilitySamples());
+    expect(result.suitable).toBe(true);
+    expect(result.paceRetention).toBeCloseTo(95, 1);
+    expect(result.powerRetention).toBeCloseTo(95, 1);
+    expect(result.heartRateDrift).toBeCloseTo(5, 1);
+  });
+
+  it("reports pace and HR without presenting modeled power", () => {
+    const result = calculateLongRunDurability(durabilitySamples(), false);
+    expect(result.suitable).toBe(true);
+    expect(result.paceRetention).toBeCloseTo(95, 1);
+    expect(result.heartRateDrift).toBeCloseTo(5, 1);
+    expect(result.powerRetention).toBeNull();
+  });
+
+  it("rejects short runs and sparse final-quarter data", () => {
+    expect(calculateLongRunDurability(durabilitySamples(3599)).suitable).toBe(false);
+    const sparse = durabilitySamples().filter((sample) => sample.elapsedSeconds < 5400 || sample.elapsedSeconds % 120 === 0);
+    expect(calculateLongRunDurability(sparse).suitable).toBe(false);
   });
 });
 

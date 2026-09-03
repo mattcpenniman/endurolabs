@@ -25,6 +25,7 @@ import HeadlineFitnessCard from "@/app/components/stats/HeadlineFitnessCard";
 import ActivityExplorer from "@/app/components/stats/ActivityExplorer";
 import AveragePowerTrend from "@/app/components/stats/AveragePowerTrend";
 import AerobicDecouplingCard, { DecouplingActivity } from "@/app/components/stats/AerobicDecouplingCard";
+import LongRunDurabilityCard, { DurabilityActivity } from "@/app/components/stats/LongRunDurabilityCard";
 
 interface SavedPlanRow {
   id: string;
@@ -42,6 +43,10 @@ interface StatsResponse {
   aerobicDecoupling: {
     current: DecouplingActivity[];
     prior: DecouplingActivity[];
+  };
+  longRunDurability: {
+    current: DurabilityActivity[];
+    prior: DurabilityActivity[];
   };
   fitness: {
     current: {
@@ -291,6 +296,11 @@ export default function StatsPage() {
               prior={stats.aerobicDecoupling.prior}
             />
 
+            <LongRunDurabilityCard
+              current={stats.longRunDurability.current}
+              prior={stats.longRunDurability.prior}
+            />
+
             {stats.fitness?.hasCurrentSamples && (
               <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
                 <FitnessCurveChart
@@ -359,6 +369,12 @@ export default function StatsPage() {
                   in power-to-heart-rate efficiency between halves of a steady run. It requires at least
                   30 usable minutes of measured power and rejects activities where average power changes
                   by more than 10% between halves. Lower values indicate better aerobic durability.
+                </p>
+                <p>
+                  <strong className="font-medium text-gray-900">Long-run durability</strong> — final-quarter
+                  average speed and measured power as a percentage of the first three quarters, plus the
+                  percentage change in heart rate. Aggregate medians include only steady planned long runs;
+                  progression and structured sessions remain separate to avoid rewarding intentional fast finishes.
                 </p>
                 <p>
                   <strong className="font-medium text-gray-900">Average power</strong> — distance-weighted
