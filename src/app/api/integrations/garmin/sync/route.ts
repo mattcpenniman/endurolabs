@@ -2,7 +2,7 @@
 // EnduroLab - Garmin Activity Sync API
 // ============================================================
 
-import { NextRequest, NextResponse } from "next/server";
+import { after, NextRequest, NextResponse } from "next/server";
 import { and, desc, eq, gte, inArray, isNotNull, isNull, lte, notInArray } from "drizzle-orm";
 import { getCurrentUser } from "@/lib/auth";
 import { db } from "@/lib/db/client";
@@ -13,6 +13,7 @@ import { fetchActivityDetail, fetchRunsSince, restoreGarminClient, StoredGarminA
 import { GarminActivityPayload, matchActivityToPlan, normalizeGarminActivity } from "@/lib/garmin/activities";
 import { mapGarminActivityDetail } from "@/lib/garmin/activity-detail";
 import { mapWithConcurrency, recomputeStoredActivityQuality, upsertActivitySamples } from "@/lib/garmin/sample-ingestion";
+import { recomputeFitnessSnapshotsForActivities } from "@/lib/analytics/fitness-cache";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -160,10 +161,11 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
         const payload = await fetchActivityDetail(client, activity.providerActivityId);
         const samples = mapGarminActivityDetail(payload, activity.startTimeGmt);
         const sampleCount = await upsertActivitySamples(activity.id, samples);
-        return { providerActivityId: activity.providerActivityId, sampleCount, error: null };
+        return { activityId: activity.id, providerActivityId: activity.providerActivityId, sampleCount, error: null };
       } catch (error) {
         console.error(`Failed to sync Garmin detail for ${activity.providerActivityId}:`, error);
         return {
+          activityId: activity.id,
           providerActivityId: activity.providerActivityId,
           sampleCount: null,
           error: error instanceof Error ? error.message : "Detail sync failed",
@@ -190,6 +192,19 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       lastError: null,
       updatedAt: now,
     }).where(eq(garminConnections.id, connection.id));
+
+    const importedActivityIds = detailResults
+      .filter((result) => result.sampleCount !== null && result.sampleCount > 0)
+      .map((result) => result.activityId);
+    if (importedActivityIds.length > 0) {
+      after(async () => {
+        try {
+          await recomputeFitnessSnapshotsForActivities(user.id, importedActivityIds);
+        } catch (error) {
+          console.error("Failed to refresh fitness snapshots after Garmin refresh:", error);
+        }
+      });
+    }
 
     return NextResponse.json({
       success: true,

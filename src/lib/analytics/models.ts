@@ -2,7 +2,7 @@
 // EnduroLab - Running Fitness Analytics Models
 // ============================================================
 
-export type PowerSource = "garmin" | "apple" | "stryd" | "coros" | "other";
+export type PowerSource = "garmin" | "apple" | "apple_watch" | "stryd" | "coros" | "other";
 
 export interface ActivitySampleInput {
   activityId: string;

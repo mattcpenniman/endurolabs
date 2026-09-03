@@ -6,7 +6,7 @@
 // headline.
 // ============================================================
 
-import { ActivitySampleInput, PowerHeartRateModel } from "./models";
+import { ActivitySampleInput, PowerHeartRateModel, PowerSource } from "./models";
 import { DEFAULT_FITNESS_CONFIG, analyzePowerAtHeartRate } from "./running-fitness";
 
 /**
@@ -41,8 +41,16 @@ export function analyzePlanFitness(opts: {
   samples: SampleWithActivityStart[];
   defaultWeightKg?: number | null;
   targets?: number[];
+  source?: PowerSource;
+  headlineModel?: PowerHeartRateModel | null;
 }): PlanFitness {
-  const { weekWindows, samples, defaultWeightKg = null, targets = [130, 140, 150] } = opts;
+  const {
+    weekWindows,
+    samples,
+    defaultWeightKg = null,
+    targets = [130, 140, 150],
+    source = "garmin",
+  } = opts;
   const weeks = new Map<string, PowerHeartRateModel>();
   let best: PowerHeartRateModel | null = null;
   let best140 = -Infinity;
@@ -54,7 +62,7 @@ export function analyzePlanFitness(opts: {
       windowSamples,
       targets,
       defaultWeightKg,
-      "garmin",
+      source,
       DEFAULT_FITNESS_CONFIG,
     );
     if (model) {
@@ -68,9 +76,11 @@ export function analyzePlanFitness(opts: {
   }
 
   const allSamples = samples;
-  const headline = allSamples.length > 0
-    ? analyzePowerAtHeartRate(allSamples, targets, defaultWeightKg, "garmin", DEFAULT_FITNESS_CONFIG)
-    : null;
+  const headline = opts.headlineModel !== undefined
+    ? opts.headlineModel
+    : allSamples.length > 0
+      ? analyzePowerAtHeartRate(allSamples, targets, defaultWeightKg, source, DEFAULT_FITNESS_CONFIG)
+      : null;
 
   const best140Wkg = bestWeekModelWkg(best, defaultWeightKg);
 

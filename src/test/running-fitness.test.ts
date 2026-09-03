@@ -226,6 +226,20 @@ describe("analyzePlanFitness — weekly bucketing", () => {
     expect(result.best140).toBeGreaterThan(300);
     expect(result.headline).not.toBeNull();
   });
+
+  it("uses the selected power source and a cached headline model", () => {
+    const samples = cleanSamples().map((sample) => ({ ...sample, activityStartDate: "2026-08-05" }));
+    const cachedHeadline = analyzePowerAtHeartRate(samples, undefined, null, "apple_watch")!;
+    const result = analyzePlanFitness({
+      weekWindows: [{ start: "2026-08-03", end: "2026-08-09" }],
+      samples,
+      source: "apple_watch",
+      headlineModel: cachedHeadline,
+    });
+
+    expect(result.headline).toBe(cachedHeadline);
+    expect(result.weeks.get("2026-08-03")?.source).toBe("apple_watch");
+  });
 });
 
 // ─── comparePlans — week alignment & deltas ──────────────

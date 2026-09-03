@@ -2,7 +2,7 @@
 // EnduroLab - Garmin Detail Sample Sync API
 // ============================================================
 
-import { NextRequest, NextResponse } from "next/server";
+import { after, NextRequest, NextResponse } from "next/server";
 import { and, asc, count, eq, gte, lt } from "drizzle-orm";
 import { getCurrentUser } from "@/lib/auth";
 import { db } from "@/lib/db/client";
@@ -11,6 +11,7 @@ import { mapGarminActivityDetail } from "@/lib/garmin/activity-detail";
 import { fetchActivityDetail, restoreGarminClient, StoredGarminAuth } from "@/lib/garmin/client";
 import { decryptGarminTokens, encryptGarminTokens } from "@/lib/garmin/crypto";
 import { mapWithConcurrency, upsertActivitySamples } from "@/lib/garmin/sample-ingestion";
+import { recomputeFitnessSnapshotsForActivities } from "@/lib/analytics/fitness-cache";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -89,6 +90,19 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       encryptedTokens: encryptGarminTokens({ kind: "session", session: client.getSession() }),
       updatedAt: new Date(),
     }).where(eq(garminConnections.id, connection.id));
+
+    const importedActivityIds = results
+      .filter((result) => result.sampleCount !== null && result.sampleCount > 0)
+      .map((result) => result.activityId);
+    if (importedActivityIds.length > 0) {
+      after(async () => {
+        try {
+          await recomputeFitnessSnapshotsForActivities(user.id, importedActivityIds);
+        } catch (error) {
+          console.error("Failed to refresh fitness snapshots after detail sync:", error);
+        }
+      });
+    }
 
     const total = totalRow?.value ?? 0;
     const nextOffset = offset + activities.length;

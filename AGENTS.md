@@ -54,7 +54,7 @@ src/
 | `run_activities` | Provider activity summaries, plan matching, analytics inclusion, quality score, and detail-ingestion status (`sample_count`, `samples_fetched_at`) |
 | `activity_samples` | High-resolution activity metrics keyed by `(activity_id, elapsed_seconds)`: time, distance, HR, power, speed, elevation, grade, cadence, GPS, and temperature |
 | `weight_measurements` | Timestamped body weight used for W/kg analytics |
-| `fitness_snapshots` | Versioned cached analytics for a user and time window; present but not yet used as the primary stats cache |
+| `fitness_snapshots` | Versioned plan-headline analytics cache keyed by user, time window, power source, and algorithm version |
 
 ## Garmin Data Ingestion
 

@@ -188,7 +188,15 @@ export const fitnessSnapshots = pgTable("fitness_snapshots", {
   powerSource: varchar("power_source", { length: 32 }).notNull(),
   algorithmVersion: varchar("algorithm_version", { length: 32 }).notNull(),
   metrics: jsonb("metrics").notNull(),
+  computedAt: timestamp("computed_at").defaultNow().notNull(),
   createdAt: timestamp("created_at").defaultNow().notNull(),
 }, (table) => [
+  uniqueIndex("fitness_snapshots_cache_key_unique").on(
+    table.userId,
+    table.windowStart,
+    table.windowEnd,
+    table.powerSource,
+    table.algorithmVersion,
+  ),
   index("fitness_snapshots_user_window_idx").on(table.userId, table.windowEnd),
 ]);

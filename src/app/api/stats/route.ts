@@ -9,10 +9,9 @@
 // ============================================================
 
 import { NextRequest, NextResponse } from "next/server";
-import { and, asc, desc, eq, gte, inArray, isNull, or } from "drizzle-orm";
+import { and, desc, eq } from "drizzle-orm";
 import { db } from "@/lib/db/client";
 import {
-  activitySamples,
   plans,
   runActivities,
 } from "@/lib/db/schema";
@@ -22,10 +21,14 @@ import { RunActivity } from "@/lib/activities/models";
 import { comparePlans } from "@/lib/analytics/plan-comparison";
 import {
   analyzePlanFitness,
-  SampleWithActivityStart,
 } from "@/lib/analytics/plan-fitness";
-import { ActivitySampleInput } from "@/lib/analytics/models";
 import { ANALYTICS_QUALITY_THRESHOLD } from "@/lib/analytics/activity-quality";
+import {
+  FitnessWindow,
+  getPlanFitnessHeadline,
+  loadFitnessWindowData,
+  normalizePowerSource,
+} from "@/lib/analytics/fitness-cache";
 
 function serializeActivity(row: typeof runActivities.$inferSelect): RunActivity {
   const distanceMiles = Math.max(0, row.distanceMeters) / 1609.344;
@@ -63,69 +66,25 @@ function serializeActivity(row: typeof runActivities.$inferSelect): RunActivity 
   };
 }
 
-function loadPlanActivitySamples(user: { id: string }, planId: string): Promise<{
-  activityId: string;
-  activityStartDate: string;
-  samples: ActivitySampleInput[];
-}[]> {
-  const activityRowsQuery = db
-    .select()
-    .from(runActivities)
-    .where(and(
-      eq(runActivities.userId, user.id),
-      eq(runActivities.planId, planId),
-      eq(runActivities.excludedFromAnalytics, false),
-      or(isNull(runActivities.qualityScore), gte(runActivities.qualityScore, ANALYTICS_QUALITY_THRESHOLD))
-    ))
-    .orderBy(asc(runActivities.startTimeGmt));
-  return activityRowsQuery.then((activities) => {
-    if (activities.length === 0) return [];
-    const activityIds = activities.map((a) => a.id);
-    return db
-      .select()
-      .from(activitySamples)
-      .where(inArray(activitySamples.activityId, activityIds))
-      .orderBy(asc(activitySamples.activityId), asc(activitySamples.elapsedSeconds))
-      .then((rows) => {
-        const byActivity = new Map<string, ActivitySampleInput[]>();
-        for (const row of rows) {
-          const arr = byActivity.get(row.activityId) ?? [];
-          arr.push({
-            activityId: row.activityId,
-            elapsedSeconds: row.elapsedSeconds,
-            heartRate: row.heartRate,
-            power: row.power,
-            speedMetersPerSecond: row.speedMetersPerSecond,
-            cadence: row.cadence,
-          });
-          byActivity.set(row.activityId, arr);
-        }
-        return activities
-          .map((activity) => ({
-            activityId: activity.id,
-            activityStartDate: activity.localDate,
-            samples: byActivity.get(activity.id) ?? [],
-          }))
-          .filter((group) => group.samples.length > 0);
-      });
-  });
+function planWindow(plan: MarathonPlan): FitnessWindow {
+  const firstWeek = plan.weeks[0];
+  const lastWeek = plan.weeks[plan.weeks.length - 1];
+  return {
+    startDate: firstWeek.startDate.slice(0, 10),
+    endDate: (lastWeek.days[lastWeek.days.length - 1]?.date ?? lastWeek.endDate).slice(0, 10),
+  };
 }
 
-function samplesAsInputs(stored: {
-  activityId: string;
-  activityStartDate: string;
-  samples: ActivitySampleInput[];
-}[]): SampleWithActivityStart[] {
-  const out: SampleWithActivityStart[] = [];
-  for (const group of stored) {
-    for (const sample of group.samples) {
-      out.push({
-        ...sample,
-        activityStartDate: group.activityStartDate,
-      });
-    }
+function primaryPowerSource(rows: Array<typeof runActivities.$inferSelect>): string {
+  const sampleTotals = new Map<string, number>();
+  for (const row of rows) {
+    if (
+      row.sampleCount === 0
+      || (row.qualityScore !== null && row.qualityScore < ANALYTICS_QUALITY_THRESHOLD)
+    ) continue;
+    sampleTotals.set(row.powerSource, (sampleTotals.get(row.powerSource) ?? 0) + row.sampleCount);
   }
-  return out;
+  return [...sampleTotals].sort((a, b) => b[1] - a[1])[0]?.[0] ?? "garmin";
 }
 
 export async function GET(request: NextRequest): Promise<NextResponse> {
@@ -185,9 +144,10 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
       .limit(2000);
     const currentActivities = currentActivityRows.map(serializeActivity);
 
+    let priorActivityRows: Array<typeof runActivities.$inferSelect> = [];
     let priorActivities: RunActivity[] = [];
     if (priorRow) {
-      const priorActivityRows = await db
+      priorActivityRows = await db
         .select()
         .from(runActivities)
         .where(and(
@@ -200,14 +160,34 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
       priorActivities = priorActivityRows.map(serializeActivity);
     }
 
-    // Sample traces per plan, if any.
-    const [currentSampleGroups, priorSampleGroups] = await Promise.all([
-      loadPlanActivitySamples(user, currentRow.id),
-      priorRow ? loadPlanActivitySamples(user, priorRow.id) : Promise.resolve([]),
+    // Sample traces are windowed by local activity date, matching the snapshot cache key.
+    const currentWindow = planWindow(currentPlan);
+    const priorWindow = priorPlan ? planWindow(priorPlan) : null;
+    const currentPowerSource = primaryPowerSource(currentActivityRows);
+    const priorPowerSource = primaryPowerSource(priorActivityRows);
+    const [currentWindowData, priorWindowData] = await Promise.all([
+      loadFitnessWindowData(user.id, currentWindow, currentPowerSource),
+      priorWindow ? loadFitnessWindowData(user.id, priorWindow, priorPowerSource) : Promise.resolve(null),
     ]);
 
-    const currentSamples = samplesAsInputs(currentSampleGroups);
-    const priorSamples = samplesAsInputs(priorSampleGroups);
+    const [currentHeadline, priorHeadline] = await Promise.all([
+      getPlanFitnessHeadline({
+        userId: user.id,
+        window: currentWindow,
+        powerSource: currentPowerSource,
+        data: currentWindowData,
+      }),
+      priorWindow && priorWindowData
+        ? getPlanFitnessHeadline({
+            userId: user.id,
+            window: priorWindow,
+            powerSource: priorPowerSource,
+            data: priorWindowData,
+          })
+        : Promise.resolve(null),
+    ]);
+    const currentSamples = currentWindowData.samples;
+    const priorSamples = priorWindowData?.samples ?? [];
 
     // Derive weekly + plan-level Power @ HR models per plan.
     const currentFitness = currentSamples.length > 0
@@ -218,6 +198,8 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
               end: (w.days[w.days.length - 1]?.date ?? w.endDate).slice(0, 10),
             })),
           samples: currentSamples,
+          source: normalizePowerSource(currentPowerSource),
+          headlineModel: currentHeadline,
         })
       : null;
     const priorFitness = priorPlan && priorSamples.length > 0
@@ -228,6 +210,8 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
               end: (w.days[w.days.length - 1]?.date ?? w.endDate).slice(0, 10),
             })),
           samples: priorSamples,
+          source: normalizePowerSource(priorPowerSource),
+          headlineModel: priorHeadline,
         })
       : null;
 
