@@ -24,6 +24,7 @@ import LongitudinalTrend from "@/app/components/stats/LongitudinalTrend";
 import HeadlineFitnessCard from "@/app/components/stats/HeadlineFitnessCard";
 import ActivityExplorer from "@/app/components/stats/ActivityExplorer";
 import AveragePowerTrend from "@/app/components/stats/AveragePowerTrend";
+import AerobicDecouplingCard, { DecouplingActivity } from "@/app/components/stats/AerobicDecouplingCard";
 
 interface SavedPlanRow {
   id: string;
@@ -38,6 +39,10 @@ interface StatsResponse {
   currentPlanId: string;
   priorPlanId?: string | null;
   comparison: PlanComparison;
+  aerobicDecoupling: {
+    current: DecouplingActivity[];
+    prior: DecouplingActivity[];
+  };
   fitness: {
     current: {
       headline: PowerHeartRateModel | null;
@@ -281,6 +286,11 @@ export default function StatsPage() {
               }))}
             />
 
+            <AerobicDecouplingCard
+              current={stats.aerobicDecoupling.current}
+              prior={stats.aerobicDecoupling.prior}
+            />
+
             {stats.fitness?.hasCurrentSamples && (
               <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
                 <FitnessCurveChart
@@ -343,6 +353,12 @@ export default function StatsPage() {
                   Garmin running power the athlete would produce at a heart rate of 140 bpm.
                   Calculated by Huber regression of power vs. (30-second lagged) heart rate over
                   the steady-aerobic subset of each activity.
+                </p>
+                <p>
+                  <strong className="font-medium text-gray-900">Aerobic decoupling</strong> — change
+                  in power-to-heart-rate efficiency between halves of a steady run. It requires at least
+                  30 usable minutes of measured power and rejects activities where average power changes
+                  by more than 10% between halves. Lower values indicate better aerobic durability.
                 </p>
                 <p>
                   <strong className="font-medium text-gray-900">Average power</strong> — distance-weighted

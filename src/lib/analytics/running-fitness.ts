@@ -8,6 +8,7 @@
 
 import {
   ActivitySampleInput,
+  ActivityDecouplingResult,
   DecouplingResult,
   FitnessAnalysisConfig,
   FixedHeartRateEstimate,
@@ -212,14 +213,45 @@ export function analyzePowerAtHeartRate(
 }
 
 export function calculateAerobicDecoupling(points: PreparedFitnessPoint[]): DecouplingResult {
-  if (points.length < 60) {
+  if (new Set(points.map((point) => point.activityId)).size > 1) {
+    return { percentage: 0, firstHalfEfficiency: 0, secondHalfEfficiency: 0, suitable: false, reason: "Decoupling must be calculated for one activity at a time." };
+  }
+  const sorted = [...points].sort((a, b) => a.elapsedSeconds - b.elapsedSeconds);
+  if (sorted.length < 60 || sorted[sorted.length - 1].elapsedSeconds - sorted[0].elapsedSeconds < 30 * 60) {
     return { percentage: 0, firstHalfEfficiency: 0, secondHalfEfficiency: 0, suitable: false, reason: "At least 30 usable minutes are required." };
   }
-  const midpoint = Math.floor(points.length / 2);
-  const first = points.slice(0, midpoint);
-  const second = points.slice(midpoint);
-  const firstHalfEfficiency = mean(first.map((point) => point.power)) / mean(first.map((point) => point.heartRate));
-  const secondHalfEfficiency = mean(second.map((point) => point.power)) / mean(second.map((point) => point.heartRate));
+  const midpointTime = (sorted[0].elapsedSeconds + sorted[sorted.length - 1].elapsedSeconds) / 2;
+  const first = sorted.filter((point) => point.elapsedSeconds <= midpointTime);
+  const second = sorted.filter((point) => point.elapsedSeconds > midpointTime);
+  if (first.length < 20 || second.length < 20) {
+    return { percentage: 0, firstHalfEfficiency: 0, secondHalfEfficiency: 0, suitable: false, reason: "Both halves need at least 10 usable minutes." };
+  }
+  const firstPower = mean(first.map((point) => point.power));
+  const secondPower = mean(second.map((point) => point.power));
+  if (Math.abs(secondPower - firstPower) / firstPower > 0.1) {
+    return { percentage: 0, firstHalfEfficiency: 0, secondHalfEfficiency: 0, suitable: false, reason: "Power changed too much between halves for a steady-run comparison." };
+  }
+  const firstHalfEfficiency = firstPower / mean(first.map((point) => point.heartRate));
+  const secondHalfEfficiency = secondPower / mean(second.map((point) => point.heartRate));
   const percentage = (firstHalfEfficiency - secondHalfEfficiency) / firstHalfEfficiency * 100;
   return { percentage, firstHalfEfficiency, secondHalfEfficiency, suitable: true, reason: null };
+}
+
+export function analyzeAerobicDecouplingByActivity(
+  samples: ActivitySampleInput[],
+  config: FitnessAnalysisConfig = DEFAULT_FITNESS_CONFIG,
+): ActivityDecouplingResult[] {
+  const points = prepareFitnessSamples(samples, config);
+  const byActivity = new Map<string, PreparedFitnessPoint[]>();
+  for (const point of points) {
+    const activity = byActivity.get(point.activityId) ?? [];
+    activity.push(point);
+    byActivity.set(point.activityId, activity);
+  }
+
+  return [...byActivity].map(([activityId, activityPoints]) => ({
+    activityId,
+    usableMinutes: activityPoints.length * config.smoothingSeconds / 60,
+    ...calculateAerobicDecoupling(activityPoints),
+  }));
 }

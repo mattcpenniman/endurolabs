@@ -27,12 +27,43 @@ import {
 import { ANALYTICS_QUALITY_THRESHOLD } from "@/lib/analytics/activity-quality";
 import {
   FitnessWindow,
+  FitnessWindowData,
   getPlanFitnessHeadline,
   loadFitnessWindowData,
   loadModeledFitnessWindowData,
   normalizePowerSource,
 } from "@/lib/analytics/fitness-cache";
 import { fitSpeedPowerModel } from "@/lib/analytics/modeled-power";
+import { analyzeAerobicDecouplingByActivity } from "@/lib/analytics/running-fitness";
+
+interface SerializedDecouplingResult {
+  activityId: string;
+  activityName: string;
+  localDate: string;
+  percentage: number;
+  usableMinutes: number;
+}
+
+function serializeDecoupling(
+  samples: FitnessWindowData["samples"],
+  activities: RunActivity[],
+): SerializedDecouplingResult[] {
+  const activityById = new Map(activities.map((activity) => [activity.id, activity]));
+  return analyzeAerobicDecouplingByActivity(samples)
+    .filter((result) => result.suitable)
+    .flatMap((result) => {
+      const activity = activityById.get(result.activityId);
+      if (!activity) return [];
+      return [{
+        activityId: result.activityId,
+        activityName: activity.activityName,
+        localDate: activity.localDate,
+        percentage: Math.round(result.percentage * 10) / 10,
+        usableMinutes: Math.round(result.usableMinutes),
+      }];
+    })
+    .sort((a, b) => a.localDate.localeCompare(b.localDate));
+}
 
 function serializeActivity(row: typeof runActivities.$inferSelect): RunActivity {
   const distanceMiles = Math.max(0, row.distanceMeters) / 1609.344;
@@ -246,6 +277,8 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     ]);
     const currentSamples = currentWindowData.samples;
     const priorSamples = priorWindowData?.samples ?? [];
+    const currentDecoupling = serializeDecoupling(currentSamples, currentActivities);
+    const priorDecoupling = serializeDecoupling(priorSamples, priorActivities);
 
     // Derive weekly + plan-level Power @ HR models per plan.
     const currentFitness = currentSamples.length > 0
@@ -312,6 +345,10 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
       currentPlanId: currentRow.id,
       priorPlanId: priorRow?.id ?? null,
       comparison,
+      aerobicDecoupling: {
+        current: currentDecoupling,
+        prior: priorDecoupling,
+      },
       fitness: {
         current: currentFitness
           ? {

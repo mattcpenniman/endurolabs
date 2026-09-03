@@ -64,3 +64,8 @@ export interface DecouplingResult {
   suitable: boolean;
   reason: string | null;
 }
+
+export interface ActivityDecouplingResult extends DecouplingResult {
+  activityId: string;
+  usableMinutes: number;
+}

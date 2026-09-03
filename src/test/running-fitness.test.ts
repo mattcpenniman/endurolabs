@@ -12,6 +12,7 @@ import { describe, expect, it } from "vitest";
 import {
   DEFAULT_FITNESS_CONFIG,
   analyzePowerAtHeartRate,
+  analyzeAerobicDecouplingByActivity,
   calculateAerobicDecoupling,
   fitPowerAtHeartRate,
   prepareFitnessSamples,
@@ -210,6 +211,37 @@ describe("calculateAerobicDecoupling", () => {
     const result = calculateAerobicDecoupling(points);
     expect(result.suitable).toBe(false);
     expect(result.reason).toBeTruthy();
+  });
+
+  it("rejects activities with materially different power between halves", () => {
+    const points: PreparedFitnessPoint[] = [];
+    for (let i = 0; i < 61; i += 1) {
+      points.push({
+        activityId: "progression",
+        elapsedSeconds: i * 30,
+        heartRate: i < 31 ? 140 : 150,
+        power: i < 31 ? 300 : 350,
+      });
+    }
+    const result = calculateAerobicDecoupling(points);
+    expect(result.suitable).toBe(false);
+    expect(result.reason).toContain("Power changed");
+  });
+
+  it("calculates each activity independently", () => {
+    const samples = ["run-a", "run-b"].flatMap((activityId, activityIndex) => (
+      Array.from({ length: 1861 }, (_, elapsedSeconds) => ({
+        activityId,
+        elapsedSeconds,
+        heartRate: elapsedSeconds < 930 ? 140 : 145 + activityIndex,
+        power: 300,
+        speedMetersPerSecond: 3,
+      }))
+    ));
+    const results = analyzeAerobicDecouplingByActivity(samples);
+    expect(results).toHaveLength(2);
+    expect(results.every((result) => result.suitable)).toBe(true);
+    expect(results[1].percentage).toBeGreaterThan(results[0].percentage);
   });
 });
 
