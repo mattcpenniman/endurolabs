@@ -8,7 +8,7 @@
 // shows the per-minute sample data (HR, power, cadence, pace,
 // elevation, temperature) fetched from the sample trace API.
 
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ActivityDetailResponse, RunActivity } from "@/lib/activities/models";
 import { projectGpsRoute, nearestPointIndex } from "@/lib/activities/activity-map";
 import type { GpsProjection } from "@/lib/activities/activity-map";
@@ -16,6 +16,8 @@ import type { GpsProjection } from "@/lib/activities/activity-map";
 const MAP_WIDTH = 640;
 const MAP_HEIGHT = 400;
 const METERS_PER_MILE = 1609.344;
+const MIN_ZOOM = 1;
+const MAX_ZOOM = 14;
 
 export interface GarminActivityMapCardProps {
   activities: RunActivity[];
@@ -109,6 +111,15 @@ export default function GarminActivityMapCard({ activities, defaultActivityId }:
   );
   const [selectedIndex, setSelectedIndex] = useState<number | null>(null);
 
+  // View transform: zoom (k) and pan (tx, ty) in viewBox units.
+  const [view, setView] = useState({ k: 1, tx: 0, ty: 0 });
+  const svgRef = useRef<SVGSVGElement | null>(null);
+  const dragRef = useRef<{ x: number; y: number; moved: boolean } | null>(null);
+  const suppressClickRef = useRef(false);
+
+  const clamp = useCallback((value: number, min: number, max: number) => Math.min(max, Math.max(min, value)), []);
+  const resetView = useCallback(() => setView({ k: 1, tx: 0, ty: 0 }), []);
+
   const selectedActivity = eligible.find((activity) => activity.id === selectedActivityId) ?? null;
   const samples = useActivitySamples(selectedActivityId);
 
@@ -162,6 +173,82 @@ export default function GarminActivityMapCard({ activities, defaultActivityId }:
     setSelectedIndex(null);
   };
 
+  // Reset zoom/pan whenever a different run is selected so the route re-centers.
+  useEffect(() => {
+    setView({ k: 1, tx: 0, ty: 0 });
+    setSelectedIndex(null);
+  }, [selectedActivityId]);
+
+  // Convert a pointer event to viewBox (pre-transform) coordinates.
+  const screenToViewBox = useCallback(
+    (event: { clientX: number; clientY: number }, svg: SVGSVGElement) => {
+      const ctm = svg.getScreenCTM();
+      if (!ctm) return null;
+      const p = new DOMPoint(event.clientX, event.clientY).matrixTransform(ctm.inverse());
+      return { x: p.x, y: p.y };
+    },
+    []
+  );
+
+  const zoomAt = useCallback(
+    (factor: number, svgX: number, svgY: number) => {
+      setView((v) => {
+        const k = clamp(v.k * factor, MIN_ZOOM, MAX_ZOOM);
+        if (k === v.k) return v;
+        // Keep the point (svgX, svgY) fixed in screen space while zooming.
+        return { k, tx: svgX - (svgX - v.tx) * (k / v.k), ty: svgY - (svgY - v.ty) * (k / v.k) };
+      });
+    },
+    [clamp]
+  );
+
+  // Native non-passive wheel listener so we can zoom without the page scrolling.
+  useEffect(() => {
+    const svg = svgRef.current;
+    if (!svg) return;
+    const onWheel = (event: WheelEvent) => {
+      event.preventDefault();
+      const origin = screenToViewBox(event, svg);
+      if (!origin) return;
+      zoomAt(event.deltaY < 0 ? 1.2 : 1 / 1.2, origin.x, origin.y);
+    };
+    svg.addEventListener("wheel", onWheel, { passive: false });
+    return () => svg.removeEventListener("wheel", onWheel);
+  }, [screenToViewBox, zoomAt, hasMap]);
+
+  const handlePointerDown = (event: React.PointerEvent<SVGSVGElement>) => {
+    const origin = screenToViewBox(event, event.currentTarget);
+    if (!origin) return;
+    dragRef.current = { x: event.clientX, y: event.clientY, moved: false };
+    (event.currentTarget as SVGSVGElement).setPointerCapture(event.pointerId);
+  };
+
+  const handlePointerMove = (event: React.PointerEvent<SVGSVGElement>) => {
+    const drag = dragRef.current;
+    if (!drag) return;
+    const svg = event.currentTarget;
+    const ctm = svg.getScreenCTM();
+    if (!ctm) return;
+    const scale = ctm.a; // pixels per viewBox unit on x
+    const dx = (event.clientX - drag.x) / scale;
+    const dy = (event.clientY - drag.y) / scale;
+    dragRef.current = { x: event.clientX, y: event.clientY, moved: drag.moved || Math.abs(dx) + Math.abs(dy) > 0 };
+    setView((v) => ({ ...v, tx: v.tx + dx, ty: v.ty + dy }));
+  };
+
+  const handlePointerUp = (event: React.PointerEvent<SVGSVGElement>) => {
+    if (dragRef.current && dragRef.current.moved) {
+      suppressClickRef.current = true;
+    }
+    dragRef.current = null;
+    try {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    } catch {
+      /* pointer may already be released */
+    }
+  };
+
+
   if (!showPicker) {
     return (
       <div className="overflow-hidden rounded-xl border border-gray-200 bg-white shadow-sm">
@@ -206,68 +293,108 @@ export default function GarminActivityMapCard({ activities, defaultActivityId }:
       <div className="grid gap-5 p-5 lg:grid-cols-5">
         {/* Route map + summary */}
         <div className="lg:col-span-3">
-          <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1 text-xs text-gray-500">
-            {selectedActivity && (
-              <>
-                <strong className="text-sm text-gray-900">{selectedActivity.activityName}</strong>
-                <span>{selectedActivity.localDate}</span>
-                <span>{selectedActivity.distanceMiles.toFixed(2)} mi</span>
-                {selectedActivity.durationSeconds > 0 && <span>{formatElapsed(selectedActivity.durationSeconds)}</span>}
-              </>
-            )}
-            <span className="ml-auto flex items-center gap-1.5">
-              <span className="inline-block h-2 w-2 rounded-full bg-emerald-500" /> start
-              <span className="ml-2 inline-block h-2 w-2 rounded-full bg-red-500" /> finish
-            </span>
+          <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1 text-xs text-gray-500">
+            <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
+              {selectedActivity && (
+                <>
+                  <strong className="text-sm text-gray-900">{selectedActivity.activityName}</strong>
+                  <span>{selectedActivity.localDate}</span>
+                  <span>{selectedActivity.distanceMiles.toFixed(2)} mi</span>
+                  {selectedActivity.durationSeconds > 0 && <span>{formatElapsed(selectedActivity.durationSeconds)}</span>}
+                </>
+              )}
+            </div>
+            <div className="flex items-center gap-2">
+              <span className="hidden items-center gap-1.5 sm:flex">
+                <span className="inline-block h-2 w-2 rounded-full bg-emerald-500" /> start
+                <span className="ml-2 inline-block h-2 w-2 rounded-full bg-red-500" /> finish
+              </span>
+              <span className="rounded bg-gray-100 px-2 py-0.5 text-[11px] text-gray-500">
+                Scroll to zoom · drag to pan · click a point
+              </span>
+            </div>
           </div>
 
           <div className="mt-3 overflow-hidden rounded-lg border border-gray-200 bg-gray-50">
             {hasMap ? (
               <svg
+                ref={svgRef}
                 viewBox={`0 0 ${MAP_WIDTH} ${MAP_HEIGHT}`}
-                className="block h-auto w-full cursor-pointer select-none"
+                className="block h-auto w-full cursor-move touch-none select-none"
                 role="img"
-                aria-label="Run route map"
+                aria-label="Run route map. Scroll to zoom, drag to pan, click a point for details."
+                onPointerDown={handlePointerDown}
+                onPointerMove={handlePointerMove}
+                onPointerUp={handlePointerUp}
+                onPointerCancel={handlePointerUp}
+                onDoubleClick={(event) => {
+                  const origin = screenToViewBox(event, event.currentTarget);
+                  if (origin) zoomAt(1.8, origin.x, origin.y);
+                }}
                 onClick={(event) => {
-                  const svg = event.currentTarget;
-                  const ctm = svg.getScreenCTM();
-                  if (!ctm) return;
-                  const point = new DOMPoint(event.clientX, event.clientY).matrixTransform(ctm.inverse());
-                  const index = nearestPointIndex(projection.points, point.x, point.y, 40);
+                  if (suppressClickRef.current) {
+                    suppressClickRef.current = false;
+                    return;
+                  }
+                  const origin = screenToViewBox(event, event.currentTarget);
+                  if (!origin) return;
+                  const index = nearestPointIndex(projection.points, origin.x, origin.y, 40);
                   if (index !== null) {
                     setSelectedIndex((current) => (current === index ? null : index));
                   }
                 }}
               >
-                <rect x={0} y={0} width={MAP_WIDTH} height={MAP_HEIGHT} fill="#f8fafc" />
-                <path d={pathD} fill="none" stroke="#cbd5e1" strokeWidth={6} strokeLinejoin="round" strokeLinecap="round" />
-                <path d={pathD} fill="none" stroke="#64748b" strokeWidth={2.5} strokeLinejoin="round" strokeLinecap="round" />
-                {projection.points.map((point, i) => (
-                  <g key={`pt-${i}`}>
-                    <title>{`Elapsed ${formatElapsed(samples?.[i]?.elapsedSeconds ?? 0)}`}</title>
-                    <circle cx={point.x} cy={point.y} r={12} fill="transparent" />
+                <g transform={`translate(${view.tx} ${view.ty}) scale(${view.k})`}>
+                  <rect x={0} y={0} width={MAP_WIDTH} height={MAP_HEIGHT} fill="#f8fafc" />
+                  <path d={pathD} fill="none" stroke="#cbd5e1" strokeWidth={6 / view.k} strokeLinejoin="round" strokeLinecap="round" />
+                  <path d={pathD} fill="none" stroke="#64748b" strokeWidth={2.5 / view.k} strokeLinejoin="round" strokeLinecap="round" />
+                  {projection.points.map((point, i) => (
+                    <g key={`pt-${i}`}>
+                      <title>{`Elapsed ${formatElapsed(samples?.[i]?.elapsedSeconds ?? 0)}`}</title>
+                      <circle cx={point.x} cy={point.y} r={14 / view.k} fill="transparent" />
+                      <circle
+                        cx={point.x}
+                        cy={point.y}
+                        r={4.5 / Math.sqrt(view.k)}
+                        fill={pointColor(i)}
+                        stroke="white"
+                        strokeWidth={1.5 / Math.sqrt(view.k)}
+                        pointerEvents="none"
+                      />
+                    </g>
+                  ))}
+                  {selectedIndexPoint && (
                     <circle
-                      cx={point.x}
-                      cy={point.y}
-                      r={4.5}
-                      fill={pointColor(i)}
-                      stroke="white"
-                      strokeWidth={1.5}
+                      cx={selectedIndexPoint.x}
+                      cy={selectedIndexPoint.y}
+                      r={9 / Math.sqrt(view.k)}
+                      fill="none"
+                      stroke="#f59e0b"
+                      strokeWidth={2.5 / Math.sqrt(view.k)}
                       pointerEvents="none"
                     />
-                  </g>
-                ))}
-                {selectedIndexPoint && (
-                  <circle
-                    cx={selectedIndexPoint.x}
-                    cy={selectedIndexPoint.y}
-                    r={9}
-                    fill="none"
-                    stroke="#f59e0b"
-                    strokeWidth={2.5}
-                    pointerEvents="none"
-                  />
-                )}
+                  )}
+                </g>
+
+                {/* Zoom / reset controls */}
+                <g
+                  transform={`translate(${MAP_WIDTH - 64} ${16})`}
+                  onPointerDown={(event) => event.stopPropagation()}
+                  style={{ cursor: "default" }}
+                >
+                  <rect x={0} y={0} width={48} height={48} rx={8} fill="white" stroke="#e5e7eb" />
+                  <text x={24} y={20} textAnchor="middle" fontSize="20" fill="#374151" className="select-none" onClick={() => zoomAt(1.5, MAP_WIDTH / 2, MAP_HEIGHT / 2)}>+</text>
+                  <line x1={6} y1={24} x2={42} y2={24} stroke="#e5e7eb" />
+                  <text x={24} y={43} textAnchor="middle" fontSize="20" fill="#374151" className="select-none" onClick={() => zoomAt(1 / 1.5, MAP_WIDTH / 2, MAP_HEIGHT / 2)}>−</text>
+                </g>
+                <g
+                  transform={`translate(${MAP_WIDTH - 64} ${76})`}
+                  onPointerDown={(event) => event.stopPropagation()}
+                  style={{ cursor: "default" }}
+                >
+                  <rect x={0} y={0} width={48} height={28} rx={8} fill="white" stroke="#e5e7eb" />
+                  <text x={24} y={19} textAnchor="middle" fontSize="11" fontWeight="600" fill="#374151" className="select-none" onClick={resetView}>Reset</text>
+                </g>
               </svg>
             ) : (
               <div className="flex h-64 flex-col items-center justify-center gap-2 p-6 text-center">
