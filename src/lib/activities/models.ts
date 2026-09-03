@@ -5,7 +5,7 @@
 export interface RunActivity {
   id: string;
   providerActivityId: string;
-  source?: string;
+  source: string;
   powerSource?: string;
   activityName: string;
   activityType: string;
@@ -32,6 +32,8 @@ export interface RunActivity {
   excludedFromAnalytics?: boolean;
   sampleCount: number;
   samplesFetchedAt: string | null;
+  detailFetchStatus?: string | null;
+  detailLastError?: string | null;
   syncedAt: string;
 }
 

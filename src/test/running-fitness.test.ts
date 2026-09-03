@@ -280,6 +280,7 @@ function run(date: string, distanceMiles: number, pace: number, hr: number | nul
   return {
     id: `run-${date}-${distanceMiles}`,
     providerActivityId: date,
+    source: "garmin",
     activityName: "Test run",
     activityType: "street_running",
     localDate: date,

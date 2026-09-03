@@ -3,7 +3,7 @@
 // Backfills Garmin activity detail into activity_samples. Safe to resume or rerun:
 // samples are upserted by (activity_id, elapsed_seconds).
 
-import { createDecipheriv, createHash } from "crypto";
+import { createCipheriv, createDecipheriv, createHash, randomBytes, randomUUID } from "crypto";
 import { createFromSession } from "garmin-connect-client";
 import postgres from "postgres";
 
@@ -34,6 +34,15 @@ function decrypt(encrypted) {
   const decipher = createDecipheriv("aes-256-gcm", createHash("sha256").update(secret).digest(), Buffer.from(iv, "base64url"));
   decipher.setAuthTag(Buffer.from(tag, "base64url"));
   return JSON.parse(Buffer.concat([decipher.update(Buffer.from(ciphertext, "base64url")), decipher.final()]).toString("utf8"));
+}
+
+function encrypt(value) {
+  const secret = process.env.GARMIN_TOKEN_ENCRYPTION_KEY;
+  if (!secret || secret.length < 32) throw new Error("GARMIN_TOKEN_ENCRYPTION_KEY must contain at least 32 characters");
+  const iv = randomBytes(12);
+  const cipher = createCipheriv("aes-256-gcm", createHash("sha256").update(secret).digest(), iv);
+  const ciphertext = Buffer.concat([cipher.update(JSON.stringify(value), "utf8"), cipher.final()]);
+  return `${iv.toString("base64url")}.${cipher.getAuthTag().toString("base64url")}.${ciphertext.toString("base64url")}`;
 }
 
 function number(value) {
@@ -102,29 +111,40 @@ async function runPool(values, mapper) {
   await Promise.all(Array.from({ length: Math.min(concurrency, values.length) }, worker));
 }
 
+let connection;
+let client;
+const workerToken = randomUUID();
 try {
-  const [connection] = await sql`
-    select g.encrypted_tokens as "encryptedTokens", u.id as "userId", u.email
+  [connection] = await sql`
+    select g.id, g.encrypted_tokens as "encryptedTokens", u.id as "userId", u.email
     from garmin_connections g join users u on u.id = g.user_id
     where g.status = 'connected' ${email ? sql`and u.email = ${email}` : sql``}
     order by u.created_at limit 1
   `;
   if (!connection) throw new Error(email ? `No connected Garmin account for ${email}` : "No connected Garmin account found");
+  const [leased] = await sql`update garmin_connections set active_worker_token = ${workerToken},
+    active_job_lease_expires_at = now() + interval '5 minutes', updated_at = now()
+    where id = ${connection.id} and (active_worker_token is null or active_job_lease_expires_at <= now())
+    returning encrypted_tokens as "encryptedTokens"`;
+  if (!leased) throw new Error("Another Garmin import is already running");
+  connection.encryptedTokens = leased.encryptedTokens;
   const auth = decrypt(connection.encryptedTokens);
   if (auth.kind !== "session") throw new Error("Garmin connection still requires MFA");
-  const client = createFromSession(auth.session);
+  client = createFromSession(auth.session);
   const activities = await sql`
     select id, provider_activity_id as "providerActivityId", start_time_gmt as "startTimeGmt"
     from run_activities
     where user_id = ${connection.userId} and source = 'garmin'
       ${days ? sql`and start_time_gmt >= now() - (${days} * interval '1 day')` : sql``}
-      ${onlyMissing ? sql`and sample_count = 0` : sql``}
+      ${onlyMissing ? sql`and samples_fetched_at is null` : sql``}
     order by start_time_gmt
   `;
   let completed = 0;
   let failed = 0;
   await runPool(activities, async (activity) => {
     try {
+      await sql`update garmin_connections set active_job_lease_expires_at = now() + interval '5 minutes', updated_at = now()
+        where id = ${connection.id} and active_worker_token = ${workerToken}`;
       const path = `activity-service/activity/${encodeURIComponent(activity.providerActivityId)}/details?maxChartSize=20000&maxPolylineSize=20000`;
       let payload;
       try {
@@ -145,10 +165,16 @@ try {
         where activity_id = ${activity.id}
           and abs(extract(epoch from (timestamp - ${activity.startTimeGmt})) - elapsed_seconds) > 2`;
       const [{ count }] = await sql`select count(*)::int as count from activity_samples where activity_id = ${activity.id}`;
-      await sql`update run_activities set sample_count = ${count}, samples_fetched_at = now(), updated_at = now() where id = ${activity.id}`;
+      await sql`update run_activities set sample_count = ${count}, samples_fetched_at = now(),
+        detail_fetch_status = ${count > 0 ? "success" : "empty"}, detail_attempt_count = detail_attempt_count + 1,
+        detail_last_attempt_at = now(), detail_last_error = null, detail_next_retry_at = null, updated_at = now()
+        where id = ${activity.id}`;
       completed += 1;
       console.log(`[${completed + failed}/${activities.length}] ${activity.providerActivityId}: ${count} samples`);
     } catch (error) {
+      await sql`update run_activities set detail_fetch_status = 'failed', detail_attempt_count = detail_attempt_count + 1,
+        detail_last_attempt_at = now(), detail_last_error = ${String(error.message).slice(0, 1000)},
+        detail_next_retry_at = now() + interval '15 minutes', updated_at = now() where id = ${activity.id}`;
       failed += 1;
       console.error(`[${completed + failed}/${activities.length}] ${activity.providerActivityId}: ${error.message}`);
     }
@@ -159,5 +185,14 @@ try {
   console.error("Backfill failed:", error.message);
   process.exitCode = 1;
 } finally {
+  if (connection && client) {
+    await sql`update garmin_connections set encrypted_tokens = ${encrypt({ kind: "session", session: client.getSession() })},
+      active_job_id = null, active_worker_token = null, active_job_lease_expires_at = null, updated_at = now()
+      where id = ${connection.id} and active_worker_token = ${workerToken}`;
+  } else if (connection) {
+    await sql`update garmin_connections set active_job_id = null, active_worker_token = null,
+      active_job_lease_expires_at = null, updated_at = now()
+      where id = ${connection.id} and active_worker_token = ${workerToken}`;
+  }
   await sql.end();
 }

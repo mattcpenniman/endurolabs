@@ -9,10 +9,11 @@
 // ============================================================
 
 import { NextRequest, NextResponse } from "next/server";
-import { and, desc, eq } from "drizzle-orm";
+import { and, desc, eq, inArray, or } from "drizzle-orm";
 import { db } from "@/lib/db/client";
 import {
   plans,
+  planRunLogs,
   runActivities,
 } from "@/lib/db/schema";
 import { getCurrentUser } from "@/lib/auth";
@@ -62,6 +63,8 @@ function serializeActivity(row: typeof runActivities.$inferSelect): RunActivity 
     excludedFromAnalytics: row.excludedFromAnalytics,
     sampleCount: row.sampleCount,
     samplesFetchedAt: row.samplesFetchedAt?.toISOString() ?? null,
+    detailFetchStatus: row.detailFetchStatus,
+    detailLastError: row.detailLastError,
     syncedAt: row.syncedAt.toISOString(),
   };
 }
@@ -85,6 +88,60 @@ function primaryPowerSource(rows: Array<typeof runActivities.$inferSelect>): str
     sampleTotals.set(row.powerSource, (sampleTotals.get(row.powerSource) ?? 0) + row.sampleCount);
   }
   return [...sampleTotals].sort((a, b) => b[1] - a[1])[0]?.[0] ?? "garmin";
+}
+
+async function loadPlanActuals(userId: string, planId: string): Promise<{
+  rows: Array<typeof runActivities.$inferSelect>;
+  activities: RunActivity[];
+}> {
+  const logs = await db.select().from(planRunLogs).where(and(
+    eq(planRunLogs.userId, userId),
+    eq(planRunLogs.planId, planId),
+    eq(planRunLogs.completed, 1),
+  ));
+  const mergedIds = logs.map((log) => log.mergedActivityId).filter((id): id is string => Boolean(id));
+  const rows = await db.select().from(runActivities).where(and(
+    eq(runActivities.userId, userId),
+    eq(runActivities.excludedFromAnalytics, false),
+    mergedIds.length > 0
+      ? or(eq(runActivities.planId, planId), inArray(runActivities.id, mergedIds))
+      : eq(runActivities.planId, planId),
+  )).orderBy(desc(runActivities.startTimeGmt)).limit(2000);
+  const activities = rows.map(serializeActivity);
+  for (const log of logs) {
+    if (log.mergedActivityId) continue;
+    activities.push({
+      id: `manual:${log.id}`,
+      providerActivityId: log.id,
+      source: "manual",
+      powerSource: "manual",
+      activityName: log.runTitle ?? "Manual run",
+      activityType: "running",
+      localDate: log.date.slice(0, 10),
+      startTimeLocal: log.date,
+      startTimeGmt: new Date(`${log.date.slice(0, 10)}T12:00:00Z`).toISOString(),
+      distanceMiles: log.actualMileage / 100,
+      durationSeconds: 0,
+      movingDurationSeconds: null,
+      averagePaceMinutesPerMile: null,
+      elevationGainMeters: null,
+      averageHeartRate: null,
+      maxHeartRate: null,
+      averageCadence: null,
+      averagePower: null,
+      calories: null,
+      deviceName: null,
+      planId,
+      weekNumber: log.weekNumber,
+      dayOfWeek: log.dayOfWeek,
+      plannedWorkoutId: log.plannedWorkoutId,
+      matchConfidence: null,
+      sampleCount: 0,
+      samplesFetchedAt: null,
+      syncedAt: log.updatedAt.toISOString(),
+    });
+  }
+  return { rows, activities };
 }
 
 export async function GET(request: NextRequest): Promise<NextResponse> {
@@ -132,32 +189,16 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     if (priorPlan) priorPlan.id = priorRow!.id;
 
     // Activity summaries per plan, scoped to user.
-    const currentActivityRows = await db
-      .select()
-      .from(runActivities)
-      .where(and(
-        eq(runActivities.userId, user.id),
-        eq(runActivities.planId, currentRow.id),
-        eq(runActivities.excludedFromAnalytics, false)
-      ))
-      .orderBy(desc(runActivities.startTimeGmt))
-      .limit(2000);
-    const currentActivities = currentActivityRows.map(serializeActivity);
+    const currentActuals = await loadPlanActuals(user.id, currentRow.id);
+    const currentActivityRows = currentActuals.rows;
+    const currentActivities = currentActuals.activities;
 
     let priorActivityRows: Array<typeof runActivities.$inferSelect> = [];
     let priorActivities: RunActivity[] = [];
     if (priorRow) {
-      priorActivityRows = await db
-        .select()
-        .from(runActivities)
-        .where(and(
-          eq(runActivities.userId, user.id),
-          eq(runActivities.planId, priorRow.id),
-          eq(runActivities.excludedFromAnalytics, false)
-        ))
-        .orderBy(desc(runActivities.startTimeGmt))
-        .limit(2000);
-      priorActivities = priorActivityRows.map(serializeActivity);
+      const priorActuals = await loadPlanActuals(user.id, priorRow.id);
+      priorActivityRows = priorActuals.rows;
+      priorActivities = priorActuals.activities;
     }
 
     // Sample traces are windowed by local activity date, matching the snapshot cache key.

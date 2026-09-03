@@ -23,9 +23,8 @@ export default function MileageTrendChart({ plan, dailyLogs = [], activities = [
     const startDate = week.startDate.slice(0, 10);
     const endDate = week.endDate.slice(0, 10);
     const weekActivities = activities.filter((activity) => activity.localDate >= startDate && activity.localDate <= endDate);
-    const syncedWorkoutIds = new Set(weekActivities.map((activity) => activity.plannedWorkoutId).filter(Boolean));
     const manualMileage = weekLogs
-      .filter((log) => !log.plannedWorkoutId || !syncedWorkoutIds.has(log.plannedWorkoutId))
+      .filter((log) => !log.mergedActivityId)
       .reduce((sum, log) => sum + log.actualMileage, 0);
     const syncedMileage = weekActivities.reduce((sum, activity) => sum + activity.distanceMiles, 0);
     const actualMileage =

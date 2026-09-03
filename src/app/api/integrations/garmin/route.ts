@@ -3,7 +3,8 @@
 // ============================================================
 
 import { NextRequest, NextResponse } from "next/server";
-import { and, desc, eq } from "drizzle-orm";
+import { randomUUID } from "crypto";
+import { and, desc, eq, isNull, lte, or } from "drizzle-orm";
 import { getCurrentUser } from "@/lib/auth";
 import { db } from "@/lib/db/client";
 import { garminConnections, plans, runActivities } from "@/lib/db/schema";
@@ -45,6 +46,8 @@ function serializeActivity(row: typeof runActivities.$inferSelect): RunActivity 
     excludedFromAnalytics: row.excludedFromAnalytics,
     sampleCount: row.sampleCount,
     samplesFetchedAt: row.samplesFetchedAt?.toISOString() ?? null,
+    detailFetchStatus: row.detailFetchStatus,
+    detailLastError: row.detailLastError,
     syncedAt: row.syncedAt.toISOString(),
   };
 }
@@ -73,8 +76,8 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
       .select()
       .from(runActivities)
       .where(planId
-        ? and(eq(runActivities.userId, user.id), eq(runActivities.planId, planId))
-        : eq(runActivities.userId, user.id))
+        ? and(eq(runActivities.userId, user.id), eq(runActivities.source, "garmin"), eq(runActivities.planId, planId))
+        : and(eq(runActivities.userId, user.id), eq(runActivities.source, "garmin")))
       .orderBy(desc(runActivities.startTimeGmt))
       .limit(1000);
 
@@ -96,6 +99,8 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
 }
 
 export async function POST(request: NextRequest): Promise<NextResponse> {
+  const workerToken = randomUUID();
+  let lockedConnectionId: string | null = null;
   try {
     const user = await getCurrentUser();
     if (!user) return NextResponse.json({ error: "Authentication required" }, { status: 401 });
@@ -115,19 +120,50 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       if (stored.kind !== "mfa") {
         return NextResponse.json({ error: "Garmin verification session expired; start sign-in again" }, { status: 409 });
       }
+      const now = new Date();
+      const [locked] = await db.update(garminConnections).set({
+        activeWorkerToken: workerToken,
+        activeJobLeaseExpiresAt: new Date(now.getTime() + 5 * 60_000),
+        updatedAt: now,
+      }).where(and(
+        eq(garminConnections.id, pendingConnection.id),
+        or(isNull(garminConnections.activeWorkerToken), lte(garminConnections.activeJobLeaseExpiresAt, now)),
+      )).returning({ id: garminConnections.id });
+      if (!locked) return NextResponse.json({ error: "Another Garmin import is already running" }, { status: 409 });
+      lockedConnectionId = locked.id;
       const completed = await completeGarminMfa(stored as PendingGarminLogin, body.mfaCode.trim());
       await db.update(garminConnections).set({
         encryptedTokens: encryptGarminTokens(completed.auth),
         status: "connected",
         lastError: null,
+        activeJobId: null,
+        activeWorkerToken: null,
+        activeJobLeaseExpiresAt: null,
         updatedAt: new Date(),
-      }).where(eq(garminConnections.id, pendingConnection.id));
+      }).where(and(eq(garminConnections.id, pendingConnection.id), eq(garminConnections.activeWorkerToken, workerToken)));
+      lockedConnectionId = null;
       return NextResponse.json({ connected: true });
     }
 
     const username = body.username?.trim();
     if (!username || !body.password) {
       return NextResponse.json({ error: "Garmin email and password are required" }, { status: 400 });
+    }
+
+    const [existingConnection] = await db.select({ id: garminConnections.id }).from(garminConnections)
+      .where(eq(garminConnections.userId, user.id)).limit(1);
+    if (existingConnection) {
+      const now = new Date();
+      const [locked] = await db.update(garminConnections).set({
+        activeWorkerToken: workerToken,
+        activeJobLeaseExpiresAt: new Date(now.getTime() + 5 * 60_000),
+        updatedAt: now,
+      }).where(and(
+        eq(garminConnections.id, existingConnection.id),
+        or(isNull(garminConnections.activeWorkerToken), lte(garminConnections.activeJobLeaseExpiresAt, now)),
+      )).returning({ id: garminConnections.id });
+      if (!locked) return NextResponse.json({ error: "Another Garmin import is already running" }, { status: 409 });
+      lockedConnectionId = locked.id;
     }
 
     const connected = await loginToGarmin(username, body.password);
@@ -141,6 +177,9 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       encryptedTokens: encryptGarminTokens(storedAuth),
       status,
       lastError: null,
+      activeJobId: null,
+      activeWorkerToken: null,
+      activeJobLeaseExpiresAt: null,
       updatedAt: now,
     }).onConflictDoUpdate({
       target: garminConnections.userId,
@@ -150,9 +189,13 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
         encryptedTokens: encryptGarminTokens(storedAuth),
         status,
         lastError: null,
+        activeJobId: null,
+        activeWorkerToken: null,
+        activeJobLeaseExpiresAt: null,
         updatedAt: now,
       },
     });
+    lockedConnectionId = null;
 
     if (connected.mfaRequired) {
       return NextResponse.json({
@@ -163,6 +206,17 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     }
     return NextResponse.json({ connected: true });
   } catch (error) {
+    if (lockedConnectionId) {
+      await db.update(garminConnections).set({
+        activeJobId: null,
+        activeWorkerToken: null,
+        activeJobLeaseExpiresAt: null,
+        updatedAt: new Date(),
+      }).where(and(
+        eq(garminConnections.id, lockedConnectionId),
+        eq(garminConnections.activeWorkerToken, workerToken),
+      ));
+    }
     console.error("Failed to connect Garmin:", error);
     const rawMessage = error instanceof Error ? error.message : "";
     const message = rawMessage.includes("GARMIN_TOKEN_ENCRYPTION_KEY")

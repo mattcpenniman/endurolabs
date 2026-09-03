@@ -4,7 +4,7 @@
 // EnduroLab - Garmin Sync Settings
 // ============================================================
 
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import { GarminConnectionStatus } from "@/lib/activities/models";
 
 interface GarminSyncCardProps {
@@ -20,6 +20,8 @@ export default function GarminSyncCard({ planId, connection, onChanged }: Garmin
   const [isMfaRequired, setIsMfaRequired] = useState(false);
   const [isWorking, setIsWorking] = useState(false);
   const [isDetailWorking, setIsDetailWorking] = useState(false);
+  const [historySince, setHistorySince] = useState(() => `${new Date().getFullYear() - 2}-01-01`);
+  const [activeJobId, setActiveJobId] = useState<string | null>(null);
   const [updatingActivityId, setUpdatingActivityId] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
 
@@ -61,56 +63,63 @@ export default function GarminSyncCard({ planId, connection, onChanged }: Garmin
     }
   };
 
-  const syncDetailScope = async (scope: "recent" | "older"): Promise<{ imported: number; failed: number; samples: number }> => {
-    let offset = 0;
-    let imported = 0;
-    let failed = 0;
-    let samples = 0;
-    do {
-      const response = await fetch("/api/integrations/garmin/samples", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ scope, days: 90, offset, batchSize: 10 }),
-      });
-      const body = (await response.json()) as {
-        error?: string;
-        total?: number;
-        processed?: number;
-        imported?: number;
-        failed?: number;
-        samples?: number;
-        nextOffset?: number | null;
-      };
-      if (!response.ok) throw new Error(body.error || "Garmin detail sync failed");
-      imported += body.imported ?? 0;
-      failed += body.failed ?? 0;
-      samples += body.samples ?? 0;
-      setMessage(`${scope === "recent" ? "Recent detail" : "Older backfill"}: ${body.processed ?? 0}/${body.total ?? 0} activities processed.`);
-      if (body.nextOffset === null || body.nextOffset === undefined) break;
-      offset = body.nextOffset;
-    } while (true);
-    return { imported, failed, samples };
-  };
-
-  const syncDetail = async (): Promise<void> => {
+  const startJob = async (url: string, payload: object): Promise<void> => {
     setIsDetailWorking(true);
     setMessage(null);
     try {
-      const recent = await syncDetailScope("recent");
-      await onChanged();
-      setMessage(`Recent detail complete. Backfilling older activities in the background...`);
-      await new Promise((resolve) => setTimeout(resolve, 0));
-      const older = await syncDetailScope("older");
-      const imported = recent.imported + older.imported;
-      const failed = recent.failed + older.failed;
-      setMessage(`Detail sync complete: ${imported} activities imported${failed ? `, ${failed} failed` : ""}.`);
-      await onChanged();
+      const response = await fetch(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      const body = (await response.json()) as { jobId?: string; error?: string };
+      if (!response.ok || !body.jobId) throw new Error(body.error || "Could not start Garmin job");
+      setActiveJobId(body.jobId);
+      setMessage("Garmin import queued. It will continue on the server if this page closes.");
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Garmin detail sync failed");
-    } finally {
       setIsDetailWorking(false);
     }
   };
+
+  useEffect(() => {
+    if (!activeJobId) return;
+    let cancelled = false;
+    const poll = async (): Promise<void> => {
+      try {
+        const response = await fetch(`/api/integrations/garmin/jobs/${activeJobId}`);
+        const job = (await response.json()) as {
+          status?: string;
+          total?: number | null;
+          processed?: number;
+          succeeded?: number;
+          empty?: number;
+          failed?: number;
+          error?: string | null;
+        };
+        if (!response.ok) throw new Error(job.error || "Could not read Garmin job");
+        if (cancelled) return;
+        const terminal = ["succeeded", "partial", "failed"].includes(job.status ?? "");
+        setMessage(`Garmin import: ${job.processed ?? 0}${job.total === null ? "" : `/${job.total}`} processed, ${job.succeeded ?? 0} imported, ${job.empty ?? 0} empty${job.failed ? `, ${job.failed} failed` : ""}.${job.error ? ` ${job.error}` : ""}`);
+        if (terminal) {
+          setActiveJobId(null);
+          setIsDetailWorking(false);
+          await onChanged();
+        }
+      } catch (error) {
+        if (!cancelled) {
+          setMessage(error instanceof Error ? error.message : "Garmin job polling failed");
+          setIsDetailWorking(false);
+        }
+      }
+    };
+    poll();
+    const timer = window.setInterval(poll, 1500);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, [activeJobId, onChanged]);
 
   const setActivityExcluded = async (activityId: string, excludedFromAnalytics: boolean): Promise<void> => {
     setUpdatingActivityId(activityId);
@@ -196,7 +205,7 @@ export default function GarminSyncCard({ planId, connection, onChanged }: Garmin
         </div>
 
         {connection.connected ? (
-          <div className="flex shrink-0 flex-wrap gap-2">
+          <div className="flex max-w-sm shrink-0 flex-wrap justify-end gap-2">
             <button
               type="button"
               disabled={isWorking || isDetailWorking}
@@ -212,11 +221,37 @@ export default function GarminSyncCard({ planId, connection, onChanged }: Garmin
             <button
               type="button"
               disabled={isWorking || isDetailWorking}
-              onClick={syncDetail}
+              onClick={() => startJob("/api/integrations/garmin/samples", { scope: "all", days: 90 })}
               className="rounded-lg border border-sky-950 bg-white px-4 py-2 text-sm font-semibold text-sky-950 hover:bg-sky-50 disabled:opacity-50"
             >
               {isDetailWorking ? "Syncing detail..." : "Sync detail"}
             </button>
+            <form
+              className="flex w-full items-end gap-2 pt-2"
+              onSubmit={(event) => {
+                event.preventDefault();
+                startJob("/api/integrations/garmin/history", { since: historySince });
+              }}
+            >
+              <label className="min-w-0 flex-1">
+                <span className="block text-[10px] font-bold uppercase tracking-wide text-gray-500">Import summaries since</span>
+                <input
+                  type="date"
+                  required
+                  max={new Date().toISOString().slice(0, 10)}
+                  value={historySince}
+                  onChange={(event) => setHistorySince(event.target.value)}
+                  className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
+                />
+              </label>
+              <button
+                type="submit"
+                disabled={isWorking || isDetailWorking}
+                className="rounded-lg border border-sky-950 bg-white px-3 py-2 text-sm font-semibold text-sky-950 hover:bg-sky-50 disabled:opacity-50"
+              >
+                Import history
+              </button>
+            </form>
             <button
               type="button"
               disabled={isWorking || isDetailWorking}

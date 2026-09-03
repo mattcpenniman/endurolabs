@@ -12,6 +12,7 @@ services:
       NEXT_PUBLIC_APP_URL: ${APP_URL:-http://localhost:3000}
       DATABASE_URL: postgresql://${POSTGRES_USER:-enduro}:${POSTGRES_PASSWORD:-endurodev}@db:5432/${POSTGRES_DB:-endurolab}
       GARMIN_TOKEN_ENCRYPTION_KEY: ${GARMIN_TOKEN_ENCRYPTION_KEY:-}
+      GARMIN_WORKER_SECRET: ${GARMIN_WORKER_SECRET:?GARMIN_WORKER_SECRET is required}
     ports:
       - "${PORT:-3000}:${PORT:-3000}"
     volumes:
@@ -22,6 +23,22 @@ services:
       db:
         condition: service_healthy
     command: sh -c "npm run db:push && npm run dev"
+
+  garmin-worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: endurolab-garmin-worker
+    restart: unless-stopped
+    environment:
+      WORKER_APP_URL: http://app:${PORT:-3000}
+      GARMIN_WORKER_SECRET: ${GARMIN_WORKER_SECRET:?GARMIN_WORKER_SECRET is required}
+    volumes:
+      - .:/app
+      - node_modules:/app/node_modules
+    depends_on:
+      - app
+    command: npm run garmin:worker
 
   db:
     image: postgres:16-alpine

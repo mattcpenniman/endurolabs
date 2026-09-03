@@ -128,6 +128,22 @@ interface AuthenticatedGarminClient extends GarminConnectClient {
   };
 }
 
+export async function fetchHistoryActivitiesPage(
+  client: GarminConnectClient,
+  offset: number,
+  limit = 200,
+): Promise<unknown[]> {
+  const authenticatedClient = client as AuthenticatedGarminClient;
+  if (!authenticatedClient.httpClient?.get) {
+    throw new Error("Installed Garmin client does not expose its authenticated transport");
+  }
+  const page = await authenticatedClient.httpClient.get<unknown>(
+    `https://connectapi.garmin.com/activitylist-service/activities/search/activities?start=${offset}&limit=${limit}`
+  );
+  if (!Array.isArray(page)) throw new Error("Garmin history response was not an activity list");
+  return page;
+}
+
 export async function fetchActivityDetail(client: GarminConnectClient, activityId: string): Promise<unknown> {
   const authenticatedClient = client as AuthenticatedGarminClient;
   if (!authenticatedClient.httpClient?.get) {

@@ -59,32 +59,6 @@ export const plans = pgTable("plans", {
   uniqueIndex("plans_share_token_unique").on(table.shareToken),
 ]);
 
-export const planRunLogs = pgTable("plan_run_logs", {
-  id: uuid("id").primaryKey().defaultRandom(),
-  userId: uuid("user_id")
-    .notNull()
-    .references(() => users.id, { onDelete: "cascade" }),
-  planId: uuid("plan_id")
-    .notNull()
-    .references(() => plans.id, { onDelete: "cascade" }),
-  weekNumber: integer("week_number").notNull(),
-  date: varchar("date", { length: 32 }).notNull(),
-  dayOfWeek: varchar("day_of_week", { length: 16 }).notNull(),
-  runId: varchar("run_id", { length: 255 }).notNull(),
-  plannedWorkoutId: varchar("planned_workout_id", { length: 255 }),
-  runTitle: varchar("run_title", { length: 255 }),
-  isAdditionalRun: integer("is_additional_run").default(0).notNull(),
-  actualMileage: integer("actual_mileage_hundredths").notNull(),
-  completed: integer("completed").default(1).notNull(),
-  feelRating: integer("feel_rating").notNull(),
-  notes: text("notes").default("").notNull(),
-  loggedAt: timestamp("logged_at").notNull(),
-  createdAt: timestamp("created_at").defaultNow().notNull(),
-  updatedAt: timestamp("updated_at").defaultNow().notNull(),
-}, (table) => [
-  uniqueIndex("plan_run_logs_unique_run").on(table.planId, table.weekNumber, table.dayOfWeek, table.runId),
-]);
-
 export const garminConnections = pgTable("garmin_connections", {
   id: uuid("id").primaryKey().defaultRandom(),
   userId: uuid("user_id")
@@ -96,10 +70,43 @@ export const garminConnections = pgTable("garmin_connections", {
   status: varchar("status", { length: 32 }).default("connected").notNull(),
   lastSyncAt: timestamp("last_sync_at"),
   lastError: text("last_error"),
+  activeJobId: uuid("active_job_id"),
+  activeWorkerToken: varchar("active_worker_token", { length: 64 }),
+  activeJobLeaseExpiresAt: timestamp("active_job_lease_expires_at"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 }, (table) => [
   uniqueIndex("garmin_connections_user_unique").on(table.userId),
+]);
+
+export const garminSyncJobs = pgTable("garmin_sync_jobs", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  userId: uuid("user_id")
+    .notNull()
+    .references(() => users.id, { onDelete: "cascade" }),
+  connectionId: uuid("connection_id")
+    .notNull()
+    .references(() => garminConnections.id, { onDelete: "cascade" }),
+  kind: varchar("kind", { length: 32 }).notNull(),
+  status: varchar("status", { length: 32 }).default("queued").notNull(),
+  parameters: jsonb("parameters").notNull(),
+  cursor: jsonb("cursor"),
+  totalItems: integer("total_items"),
+  processedItems: integer("processed_items").default(0).notNull(),
+  succeededItems: integer("succeeded_items").default(0).notNull(),
+  emptyItems: integer("empty_items").default(0).notNull(),
+  failedItems: integer("failed_items").default(0).notNull(),
+  sampleCount: integer("sample_count").default(0).notNull(),
+  attemptCount: integer("attempt_count").default(0).notNull(),
+  lastError: text("last_error"),
+  leaseExpiresAt: timestamp("lease_expires_at"),
+  startedAt: timestamp("started_at"),
+  finishedAt: timestamp("finished_at"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+}, (table) => [
+  index("garmin_sync_jobs_user_status_idx").on(table.userId, table.status, table.createdAt),
+  index("garmin_sync_jobs_connection_idx").on(table.connectionId, table.createdAt),
 ]);
 
 export const runActivities = pgTable("run_activities", {
@@ -134,13 +141,48 @@ export const runActivities = pgTable("run_activities", {
   excludedFromAnalytics: boolean("excluded_from_analytics").default(false).notNull(),
   sampleCount: integer("sample_count").default(0).notNull(),
   samplesFetchedAt: timestamp("samples_fetched_at"),
+  detailFetchStatus: varchar("detail_fetch_status", { length: 32 }),
+  detailAttemptCount: integer("detail_attempt_count").default(0).notNull(),
+  detailLastAttemptAt: timestamp("detail_last_attempt_at"),
+  detailLastError: text("detail_last_error"),
+  detailNextRetryAt: timestamp("detail_next_retry_at"),
   syncedAt: timestamp("synced_at").defaultNow().notNull(),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 }, (table) => [
-  uniqueIndex("run_activities_provider_unique").on(table.userId, table.providerActivityId),
+  uniqueIndex("run_activities_provider_unique").on(table.userId, table.source, table.providerActivityId),
   index("run_activities_user_date_idx").on(table.userId, table.localDate),
   index("run_activities_plan_idx").on(table.planId),
+  index("run_activities_detail_queue_idx").on(table.userId, table.source, table.detailFetchStatus, table.startTimeGmt),
+]);
+
+export const planRunLogs = pgTable("plan_run_logs", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  userId: uuid("user_id")
+    .notNull()
+    .references(() => users.id, { onDelete: "cascade" }),
+  planId: uuid("plan_id")
+    .notNull()
+    .references(() => plans.id, { onDelete: "cascade" }),
+  weekNumber: integer("week_number").notNull(),
+  date: varchar("date", { length: 32 }).notNull(),
+  dayOfWeek: varchar("day_of_week", { length: 16 }).notNull(),
+  runId: varchar("run_id", { length: 255 }).notNull(),
+  plannedWorkoutId: varchar("planned_workout_id", { length: 255 }),
+  runTitle: varchar("run_title", { length: 255 }),
+  isAdditionalRun: integer("is_additional_run").default(0).notNull(),
+  actualMileage: integer("actual_mileage_hundredths").notNull(),
+  completed: integer("completed").default(1).notNull(),
+  feelRating: integer("feel_rating").notNull(),
+  notes: text("notes").default("").notNull(),
+  mergedActivityId: uuid("merged_activity_id").references(() => runActivities.id, { onDelete: "set null" }),
+  mergedAt: timestamp("merged_at"),
+  loggedAt: timestamp("logged_at").notNull(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+}, (table) => [
+  uniqueIndex("plan_run_logs_unique_run").on(table.planId, table.weekNumber, table.dayOfWeek, table.runId),
+  uniqueIndex("plan_run_logs_merged_activity_unique").on(table.mergedActivityId),
 ]);
 
 export const activitySamples = pgTable("activity_samples", {

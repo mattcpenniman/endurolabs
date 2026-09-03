@@ -275,6 +275,7 @@ export interface DailyLog {
   dayOfWeek: string;
   runId: string;
   plannedWorkoutId?: string | null;
+  mergedActivityId?: string | null;
   runTitle?: string;
   isAdditionalRun?: boolean;
   actualMileage: number;

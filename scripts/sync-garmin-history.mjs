@@ -3,7 +3,7 @@
 // Imports Garmin run summaries back to a requested date. This bypasses the
 // package's strict parser because some valid older records omit activityName.
 
-import { createDecipheriv, createHash } from "crypto";
+import { createCipheriv, createDecipheriv, createHash, randomBytes, randomUUID } from "crypto";
 import { createFromSession } from "garmin-connect-client";
 import postgres from "postgres";
 
@@ -29,6 +29,15 @@ function decrypt(encrypted) {
   return JSON.parse(Buffer.concat([decipher.update(Buffer.from(ciphertext, "base64url")), decipher.final()]).toString("utf8"));
 }
 
+function encrypt(value) {
+  const secret = process.env.GARMIN_TOKEN_ENCRYPTION_KEY;
+  if (!secret || secret.length < 32) throw new Error("GARMIN_TOKEN_ENCRYPTION_KEY must contain at least 32 characters");
+  const iv = randomBytes(12);
+  const cipher = createCipheriv("aes-256-gcm", createHash("sha256").update(secret).digest(), iv);
+  const ciphertext = Buffer.concat([cipher.update(JSON.stringify(value), "utf8"), cipher.final()]);
+  return `${iv.toString("base64url")}.${cipher.getAuthTag().toString("base64url")}.${ciphertext.toString("base64url")}`;
+}
+
 function rounded(value) {
   return Number.isFinite(value) ? Math.round(value) : null;
 }
@@ -42,19 +51,30 @@ if (!since || !/^\d{4}-\d{2}-\d{2}$/.test(since)) {
 const email = argument("email");
 const sql = postgres(process.env.DATABASE_URL || "postgresql://enduro:endurodev@localhost:5432/endurolab", { prepare: false });
 
+let connection;
+let client;
+const workerToken = randomUUID();
 try {
-  const [connection] = await sql`
-    select g.encrypted_tokens as "encryptedTokens", u.id as "userId", u.email
+  [connection] = await sql`
+    select g.id, g.encrypted_tokens as "encryptedTokens", u.id as "userId", u.email
     from garmin_connections g join users u on u.id = g.user_id
     where g.status = 'connected' ${email ? sql`and u.email = ${email}` : sql``}
     order by u.created_at limit 1
   `;
   if (!connection) throw new Error(email ? `No connected Garmin account for ${email}` : "No connected Garmin account found");
+  const [leased] = await sql`update garmin_connections set active_worker_token = ${workerToken},
+    active_job_lease_expires_at = now() + interval '5 minutes', updated_at = now()
+    where id = ${connection.id} and (active_worker_token is null or active_job_lease_expires_at <= now())
+    returning encrypted_tokens as "encryptedTokens"`;
+  if (!leased) throw new Error("Another Garmin import is already running");
+  connection.encryptedTokens = leased.encryptedTokens;
   const auth = decrypt(connection.encryptedTokens);
   if (auth.kind !== "session") throw new Error("Garmin connection still requires MFA");
-  const client = createFromSession(auth.session);
+  client = createFromSession(auth.session);
   const fetched = [];
   for (let start = 0; start < 5000; start += 200) {
+    await sql`update garmin_connections set active_job_lease_expires_at = now() + interval '5 minutes', updated_at = now()
+      where id = ${connection.id} and active_worker_token = ${workerToken}`;
     const page = await client.httpClient.get(`https://connectapi.garmin.com/activitylist-service/activities/search/activities?start=${start}&limit=200`);
     fetched.push(...page);
     const oldest = page.at(-1)?.startTimeLocal?.slice(0, 10);
@@ -76,7 +96,7 @@ try {
       moving_duration_seconds, elevation_gain_meters, average_heart_rate, max_heart_rate,
       average_cadence, average_power, calories, device_name, synced_at, updated_at
     ) values (
-      ${connection.userId}, ${String(activity.activityId)}, 'garmin', 'garmin',
+      ${connection.userId}, ${String(activity.activityId)}, 'garmin', ${String(activity.manufacturer ?? "").toLowerCase().includes("apple") ? "apple_watch" : "garmin"},
       ${activity.activityName?.trim() || "Garmin run"}, ${activity.activityType?.typeKey || "running"},
       ${activity.startTimeLocal.slice(0, 10)}, ${activity.startTimeLocal}, ${startTimeGmt},
       ${Math.max(0, rounded(activity.distance) ?? 0)}, ${Math.max(0, rounded(activity.duration) ?? 0)},
@@ -84,8 +104,8 @@ try {
       ${rounded(activity.maxHR)}, ${rounded(activity.averageRunningCadenceInStepsPerMinute)},
       ${rounded(activity.avgPower)}, ${rounded(activity.calories)}, ${activity.manufacturer?.trim() || null},
       ${now}, ${now}
-    ) on conflict (user_id, provider_activity_id) do update set
-      source = excluded.source, power_source = excluded.power_source,
+    ) on conflict (user_id, source, provider_activity_id) do update set
+      power_source = excluded.power_source,
       activity_name = excluded.activity_name, activity_type = excluded.activity_type,
       local_date = excluded.local_date, start_time_local = excluded.start_time_local,
       start_time_gmt = excluded.start_time_gmt, distance_meters = excluded.distance_meters,
@@ -101,5 +121,14 @@ try {
   console.error("Garmin history sync failed:", error.message);
   process.exitCode = 1;
 } finally {
+  if (connection && client) {
+    await sql`update garmin_connections set encrypted_tokens = ${encrypt({ kind: "session", session: client.getSession() })},
+      active_job_id = null, active_worker_token = null, active_job_lease_expires_at = null, updated_at = now()
+      where id = ${connection.id} and active_worker_token = ${workerToken}`;
+  } else if (connection) {
+    await sql`update garmin_connections set active_job_id = null, active_worker_token = null,
+      active_job_lease_expires_at = null, updated_at = now()
+      where id = ${connection.id} and active_worker_token = ${workerToken}`;
+  }
   await sql.end();
 }

@@ -9,6 +9,7 @@ import { planRunLogs, plans } from "@/lib/db/schema";
 import { getCurrentUser } from "@/lib/auth";
 import { DailyLog, MarathonPlan } from "@/lib/training/models";
 import { isWeekFullyLogged } from "@/lib/training/progress-tracker";
+import { reconcileManualActivityMerges } from "@/lib/activities/manual-merge-persistence";
 
 function serializeLog(row: typeof planRunLogs.$inferSelect): DailyLog {
   return {
@@ -17,6 +18,7 @@ function serializeLog(row: typeof planRunLogs.$inferSelect): DailyLog {
     dayOfWeek: row.dayOfWeek,
     runId: row.runId,
     plannedWorkoutId: row.plannedWorkoutId,
+    mergedActivityId: row.mergedActivityId,
     runTitle: row.runTitle ?? undefined,
     isAdditionalRun: row.isAdditionalRun === 1,
     actualMileage: row.actualMileage / 100,
@@ -135,6 +137,8 @@ export async function POST(
       .onConflictDoUpdate({
         target: [planRunLogs.planId, planRunLogs.weekNumber, planRunLogs.dayOfWeek, planRunLogs.runId],
         set: {
+          date: log.date,
+          dayOfWeek: log.dayOfWeek,
           plannedWorkoutId: log.plannedWorkoutId ?? null,
           runTitle: log.runTitle ?? null,
           isAdditionalRun: log.isAdditionalRun ? 1 : 0,
@@ -142,10 +146,14 @@ export async function POST(
           completed: log.completed ? 1 : 0,
           feelRating: log.feelRating,
           notes: log.notes ?? "",
+          mergedActivityId: null,
+          mergedAt: null,
           loggedAt: Number.isNaN(timestamp.getTime()) ? new Date() : timestamp,
           updatedAt: new Date(),
         },
       });
+
+    await reconcileManualActivityMerges(user.id, id);
 
     return NextResponse.json({ success: true });
   } catch (error) {
