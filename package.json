@@ -14,6 +14,7 @@
     "plan:create-from-garmin": "node scripts/create-plan-from-garmin.mjs",
     "seed:dev": "node scripts/seed-dev.mjs",
     "samples:backfill": "node scripts/backfill-samples.mjs",
+    "summaries:recompute": "node scripts/recompute-activity-summaries.mjs",
     "garmin:history": "node scripts/sync-garmin-history.mjs",
     "lint": "next lint",
     "test": "vitest run",

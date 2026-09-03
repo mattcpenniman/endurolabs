@@ -45,11 +45,24 @@ describe("Garmin activities", () => {
     });
 
     expect(activity.providerActivityId).toBe("12345");
+    expect(activity.source).toBe("garmin");
+    expect(activity.powerSource).toBe("garmin");
     expect(activity.localDate).toBe("2026-08-04");
     expect(activity.distanceMeters).toBe(8047);
     expect(activity.durationSeconds).toBe(2400);
     expect(activity.averageHeartRate).toBe(151);
     expect(activity.averagePower).toBe(279);
+  });
+
+  it("records Apple-origin power forwarded through Garmin", () => {
+    const activity = normalizeGarminActivity({
+      activityId: 12346,
+      startTimeLocal: "2026-08-04 06:30:00",
+      startTimeGMT: "2026-08-04 10:30:00",
+      manufacturer: "Apple",
+    });
+    expect(activity.source).toBe("garmin");
+    expect(activity.powerSource).toBe("apple_watch");
   });
 
   it("recognizes indoor, trail, and street running types", () => {

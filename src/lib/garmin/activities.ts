@@ -24,6 +24,8 @@ export interface GarminActivityPayload {
 
 export interface NormalizedGarminActivity {
   providerActivityId: string;
+  source: "garmin";
+  powerSource: "garmin" | "apple_watch";
   activityName: string;
   activityType: string;
   localDate: string;
@@ -67,6 +69,8 @@ export function normalizeGarminActivity(activity: GarminActivityPayload): Normal
 
   return {
     providerActivityId: String(activity.activityId),
+    source: "garmin",
+    powerSource: activity.manufacturer?.toLowerCase().includes("apple") ? "apple_watch" : "garmin",
     activityName: activity.activityName?.trim() || "Garmin run",
     activityType: activity.activityType?.typeKey ?? "running",
     localDate,

@@ -5,6 +5,8 @@
 export interface RunActivity {
   id: string;
   providerActivityId: string;
+  source?: string;
+  powerSource?: string;
   activityName: string;
   activityType: string;
   localDate: string;
@@ -26,6 +28,8 @@ export interface RunActivity {
   dayOfWeek: string | null;
   plannedWorkoutId: string | null;
   matchConfidence: "high" | "medium" | "low" | null;
+  qualityScore?: number | null;
+  excludedFromAnalytics?: boolean;
   sampleCount: number;
   samplesFetchedAt: string | null;
   syncedAt: string;

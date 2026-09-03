@@ -62,13 +62,18 @@ src/
 - Detail API: `src/app/api/integrations/garmin/samples/route.ts`
 - Detail mapping: `src/lib/garmin/activity-detail.ts`
 - Idempotent sample persistence: `src/lib/garmin/sample-ingestion.ts`
+- Foreground refresh runs in order: incrementally upsert summaries, ingest recent missing detail, compute summary quality, then allow the stats read. Summary discovery uses `garmin_connections.last_sync_at` as a 15-minute TTL and fetches from the newest persisted Garmin activity through a captured current-time boundary.
 - Detail rows upsert on `(activity_id, elapsed_seconds)`; do not replace this with duplicate inserts.
 - Garmin fetches use the stored encrypted session and a fixed concurrency of 2 to limit proxy pressure.
 - `samples_fetched_at` records an attempted successful response; `sample_count = 0` can be valid when Garmin returns no time-series metrics.
+- `quality_score` uses the versioned `detail-v1` formula in `src/lib/analytics/activity-quality.ts`: HR coverage, power coverage, GPS coverage, duration coverage, and steady-state share. The sample-analytics threshold is 60; empty detail scores 0.
 - The dev seed creates synthetic fixtures only. Production Garmin ingestion removes timestamp-inconsistent seed rows when real detail is imported.
 - Historical summary import: `npm run garmin:history -- --since YYYY-MM-DD`
 - Missing/all detail backfill: `npm run samples:backfill -- --only-missing` or `npm run samples:backfill`
+- Detail-derived summary recompute: `npm run summaries:recompute` (preview with `npm run summaries:recompute -- --dry-run`; target a user with `--email runner@example.com`).
+- `summaries:recompute` is DB-only and does not contact Garmin. It processes activities one at a time, always refreshes `sample_count` and `quality_score`, and rebuilds distance, duration, moving duration, average/max HR, average power, and cadence only when stored detail covers at least 95% of the original duration. Partial traces retain their provider summary metrics; valid empty responses score 0.
 - Standalone Garmin scripts load `.env` and require `GARMIN_TOKEN_ENCRYPTION_KEY` to decrypt the existing connection. Never generate a replacement key while encrypted sessions remain in the DB.
+- The summary recompute script only needs `DATABASE_URL`; unlike Garmin history/detail scripts, it does not decrypt or update Garmin sessions.
 
 ## Conventions
 
@@ -97,7 +102,7 @@ src/
 - Test Garmin payload mapping as pure logic; DB idempotency requires an integration test against PostgreSQL.
 
 ## Key Configuration
-- `package.json` scripts include app lifecycle, `db:push`, user/plan utilities, `seed:dev`, `garmin:history`, `samples:backfill`, and Vitest commands
+- `package.json` scripts include app lifecycle, `db:push`, user/plan utilities, `seed:dev`, `garmin:history`, `samples:backfill`, `summaries:recompute`, and Vitest commands
 - `tsconfig.json`: strict mode, `@/*` → `./src/*`, ES2017 target, bundler module resolution
 - `vitest.config.ts`: jsdom environment, React plugin, globals true
 - `next.config.js`: default (empty) config

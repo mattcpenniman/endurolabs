@@ -3,16 +3,22 @@
 // ============================================================
 
 import { NextRequest, NextResponse } from "next/server";
-import { and, eq, inArray, notInArray } from "drizzle-orm";
+import { and, desc, eq, gte, inArray, isNotNull, isNull, lte, notInArray } from "drizzle-orm";
 import { getCurrentUser } from "@/lib/auth";
 import { db } from "@/lib/db/client";
 import { garminConnections, plans, runActivities } from "@/lib/db/schema";
 import { MarathonPlan } from "@/lib/training/models";
 import { decryptGarminTokens, encryptGarminTokens } from "@/lib/garmin/crypto";
-import { fetchRecentRuns, restoreGarminClient, StoredGarminAuth } from "@/lib/garmin/client";
+import { fetchActivityDetail, fetchRunsSince, restoreGarminClient, StoredGarminAuth } from "@/lib/garmin/client";
 import { GarminActivityPayload, matchActivityToPlan, normalizeGarminActivity } from "@/lib/garmin/activities";
+import { mapGarminActivityDetail } from "@/lib/garmin/activity-detail";
+import { mapWithConcurrency, recomputeStoredActivityQuality, upsertActivitySamples } from "@/lib/garmin/sample-ingestion";
 
 export const runtime = "nodejs";
+export const maxDuration = 60;
+
+const DEFAULT_TTL_SECONDS = 15 * 60;
+const RECENT_DETAIL_DAYS = 90;
 
 export async function POST(request: NextRequest): Promise<NextResponse> {
   const user = await getCurrentUser();
@@ -23,10 +29,18 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     .from(garminConnections)
     .where(eq(garminConnections.userId, user.id))
     .limit(1);
-  if (!connection) return NextResponse.json({ error: "Connect Garmin first" }, { status: 409 });
+  if (!connection || connection.status !== "connected") {
+    return NextResponse.json({ error: "Connect Garmin first" }, { status: 409 });
+  }
 
   try {
-    const body = (await request.json().catch(() => ({}))) as { planId?: string; limit?: number };
+    const body = (await request.json().catch(() => ({}))) as {
+      planId?: string;
+      limit?: number;
+      detailLimit?: number;
+      ttlSeconds?: number;
+      force?: boolean;
+    };
     const planId = body.planId ?? user.currentPlanId;
     let plan: MarathonPlan | null = null;
     if (planId) {
@@ -42,7 +56,19 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
 
     const auth = decryptGarminTokens<StoredGarminAuth>(connection.encryptedTokens);
     const client = restoreGarminClient(auth);
-    const fetched = await fetchRecentRuns(client, body.limit ?? 400);
+    const syncThrough = new Date();
+    const ttlSeconds = Math.min(Math.max(Math.round(body.ttlSeconds ?? DEFAULT_TTL_SECONDS), 0), 86_400);
+    const summaryIsFresh = !body.force
+      && connection.lastSyncAt !== null
+      && syncThrough.getTime() - connection.lastSyncAt.getTime() < ttlSeconds * 1000;
+    const [latestActivity] = summaryIsFresh ? [] : await db.select({ startTimeGmt: runActivities.startTimeGmt })
+      .from(runActivities)
+      .where(and(eq(runActivities.userId, user.id), eq(runActivities.source, "garmin")))
+      .orderBy(desc(runActivities.startTimeGmt))
+      .limit(1);
+    const fetched = summaryIsFresh
+      ? []
+      : await fetchRunsSince(client, latestActivity?.startTimeGmt ?? null, syncThrough, body.limit ?? 400);
     const normalized = fetched.map((activity) => normalizeGarminActivity(activity as GarminActivityPayload));
     const fetchedIds = normalized.map((activity) => activity.providerActivityId);
     const existingActivities = fetchedIds.length > 0
@@ -77,7 +103,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     );
     let matched = 0;
 
-    for (const activity of normalized.reverse()) {
+    for (const activity of [...normalized].reverse()) {
       const match = plan ? matchActivityToPlan(activity, plan, claimedWorkoutIds) : null;
       if (match) {
         claimedWorkoutIds.add(match.plannedWorkoutId);
@@ -112,16 +138,74 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       });
     }
 
+    const detailCutoff = new Date(syncThrough.getTime() - RECENT_DETAIL_DAYS * 86_400_000);
+    const detailLimit = Math.min(Math.max(Math.round(body.detailLimit ?? 10), 0), 20);
+    const detailActivities = detailLimit > 0 ? await db.select({
+      id: runActivities.id,
+      providerActivityId: runActivities.providerActivityId,
+      startTimeGmt: runActivities.startTimeGmt,
+    })
+      .from(runActivities)
+      .where(and(
+        eq(runActivities.userId, user.id),
+        eq(runActivities.source, "garmin"),
+        isNull(runActivities.samplesFetchedAt),
+        gte(runActivities.startTimeGmt, detailCutoff),
+        lte(runActivities.startTimeGmt, syncThrough)
+      ))
+      .orderBy(desc(runActivities.startTimeGmt))
+      .limit(detailLimit) : [];
+    const detailResults = await mapWithConcurrency(detailActivities, 2, async (activity) => {
+      try {
+        const payload = await fetchActivityDetail(client, activity.providerActivityId);
+        const samples = mapGarminActivityDetail(payload, activity.startTimeGmt);
+        const sampleCount = await upsertActivitySamples(activity.id, samples);
+        return { providerActivityId: activity.providerActivityId, sampleCount, error: null };
+      } catch (error) {
+        console.error(`Failed to sync Garmin detail for ${activity.providerActivityId}:`, error);
+        return {
+          providerActivityId: activity.providerActivityId,
+          sampleCount: null,
+          error: error instanceof Error ? error.message : "Detail sync failed",
+        };
+      }
+    });
+    const legacyQualityActivities = await db.select({ id: runActivities.id })
+      .from(runActivities)
+      .where(and(
+        eq(runActivities.userId, user.id),
+        eq(runActivities.source, "garmin"),
+        isNotNull(runActivities.samplesFetchedAt),
+        isNull(runActivities.qualityScore)
+      ))
+      .orderBy(desc(runActivities.startTimeGmt))
+      .limit(5);
+    await mapWithConcurrency(legacyQualityActivities, 2, (activity) => recomputeStoredActivityQuality(activity.id));
+
     const now = new Date();
     await db.update(garminConnections).set({
       encryptedTokens: encryptGarminTokens({ kind: "session", session: client.getSession() }),
       status: "connected",
-      lastSyncAt: now,
+      lastSyncAt: summaryIsFresh ? connection.lastSyncAt : now,
       lastError: null,
       updatedAt: now,
     }).where(eq(garminConnections.id, connection.id));
 
-    return NextResponse.json({ success: true, synced: normalized.length, matched, lastSyncAt: now.toISOString() });
+    return NextResponse.json({
+      success: true,
+      skippedByTtl: summaryIsFresh,
+      through: syncThrough.toISOString(),
+      synced: normalized.length,
+      matched,
+      details: {
+        attempted: detailResults.length,
+        imported: detailResults.filter((result) => result.sampleCount !== null).length,
+        failed: detailResults.filter((result) => result.sampleCount === null).length,
+        samples: detailResults.reduce((sum, result) => sum + (result.sampleCount ?? 0), 0),
+        qualityBackfilled: legacyQualityActivities.length,
+      },
+      lastSyncAt: (summaryIsFresh ? connection.lastSyncAt : now)?.toISOString() ?? null,
+    });
   } catch (error) {
     console.error("Failed to sync Garmin activities:", error);
     const message = error instanceof Error && error.message.includes("GARMIN_TOKEN_ENCRYPTION_KEY")

@@ -103,12 +103,27 @@ export default function StatsPage() {
     setError(null);
     const params = new URLSearchParams({ currentPlanId });
     if (priorPlanId) params.set("priorPlanId", priorPlanId);
-    fetch(`/api/stats?${params.toString()}`)
-      .then(async (res) => {
-        if (!res.ok) throw new Error((await res.json()).error ?? "Failed to load stats");
-        return (await res.json()) as StatsResponse;
-      })
-      .then((data) => { if (!cancelled) setStats(data); })
+    const load = async (): Promise<void> => {
+      let syncWarning: string | null = null;
+      const syncResponse = await fetch("/api/integrations/garmin/sync", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ planId: currentPlanId }),
+      });
+      if (!syncResponse.ok && syncResponse.status !== 409) {
+        const body = (await syncResponse.json().catch(() => ({}))) as { error?: string };
+        syncWarning = body.error ?? "Garmin refresh failed; showing stored stats.";
+      }
+
+      const response = await fetch(`/api/stats?${params.toString()}`);
+      if (!response.ok) throw new Error(((await response.json()) as { error?: string }).error ?? "Failed to load stats");
+      const data = (await response.json()) as StatsResponse;
+      if (!cancelled) {
+        setStats(data);
+        setError(syncWarning);
+      }
+    };
+    load()
       .catch((err: Error) => { if (!cancelled) setError(err.message); })
       .finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };

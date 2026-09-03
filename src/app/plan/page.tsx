@@ -281,7 +281,13 @@ function PlanPageContent(): React.ReactNode {
   useEffect(() => {
     if (!plan?.id) return;
     let isMounted = true;
-    loadGarminConnection()
+    fetch("/api/integrations/garmin/sync", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ planId: plan.id }),
+    })
+      .catch(() => null)
+      .then(() => loadGarminConnection())
       .then((status) => {
         if (isMounted) setGarminConnection(status);
       })

@@ -20,6 +20,7 @@ export default function GarminSyncCard({ planId, connection, onChanged }: Garmin
   const [isMfaRequired, setIsMfaRequired] = useState(false);
   const [isWorking, setIsWorking] = useState(false);
   const [isDetailWorking, setIsDetailWorking] = useState(false);
+  const [updatingActivityId, setUpdatingActivityId] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
 
   const runRequest = async (url: string, init: RequestInit): Promise<void> => {
@@ -31,6 +32,8 @@ export default function GarminSyncCard({ planId, connection, onChanged }: Garmin
         error?: string;
         synced?: number;
         matched?: number;
+        skippedByTtl?: boolean;
+        details?: { imported: number; failed: number };
         mfaRequired?: boolean;
         mfaMethod?: string;
       };
@@ -39,7 +42,11 @@ export default function GarminSyncCard({ planId, connection, onChanged }: Garmin
         setIsMfaRequired(true);
         setMessage(`Enter the verification code Garmin sent by ${body.mfaMethod ?? "email or SMS"}.`);
       } else if (typeof body.synced === "number") {
-        setMessage(`Synced ${body.synced} runs; ${body.matched ?? 0} matched to this plan.`);
+        const summary = body.skippedByTtl ? "Summaries already current" : `Synced ${body.synced} runs`;
+        const detail = body.details
+          ? ` ${body.details.imported} detail imports${body.details.failed ? `, ${body.details.failed} failed` : ""}.`
+          : "";
+        setMessage(`${summary}; ${body.matched ?? 0} matched to this plan.${detail}`);
       } else {
         setMessage("Garmin connection updated.");
         setIsMfaRequired(false);
@@ -105,6 +112,25 @@ export default function GarminSyncCard({ planId, connection, onChanged }: Garmin
     }
   };
 
+  const setActivityExcluded = async (activityId: string, excludedFromAnalytics: boolean): Promise<void> => {
+    setUpdatingActivityId(activityId);
+    setMessage(null);
+    try {
+      const response = await fetch(`/api/activities/${activityId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ excludedFromAnalytics }),
+      });
+      const body = (await response.json()) as { error?: string };
+      if (!response.ok) throw new Error(body.error ?? "Failed to update activity");
+      await onChanged();
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Failed to update activity");
+    } finally {
+      setUpdatingActivityId(null);
+    }
+  };
+
   const awaitingMfa = connection.mfaRequired || isMfaRequired;
 
   return (
@@ -141,6 +167,32 @@ export default function GarminSyncCard({ planId, connection, onChanged }: Garmin
               {message || connection.lastError}
             </p>
           )}
+          {connection.connected && connection.activities.length > 0 && (
+            <details className="mt-4 text-xs text-gray-600">
+              <summary className="cursor-pointer font-medium text-gray-700">Recent activity quality</summary>
+              <div className="mt-2 divide-y divide-gray-100 rounded-lg border border-gray-200">
+                {connection.activities.slice(0, 8).map((activity) => (
+                  <div key={activity.id} className="flex items-center justify-between gap-3 px-3 py-2">
+                    <div className="min-w-0">
+                      <p className="truncate font-medium text-gray-800">{activity.activityName}</p>
+                      <p className="text-gray-400">
+                        {activity.localDate} | quality {activity.qualityScore ?? "pending"}/100
+                      </p>
+                    </div>
+                    <label className="flex shrink-0 items-center gap-2">
+                      <input
+                        type="checkbox"
+                        checked={activity.excludedFromAnalytics ?? false}
+                        disabled={updatingActivityId === activity.id}
+                        onChange={(event) => setActivityExcluded(activity.id, event.target.checked)}
+                      />
+                      Exclude
+                    </label>
+                  </div>
+                ))}
+              </div>
+            </details>
+          )}
         </div>
 
         {connection.connected ? (
@@ -151,11 +203,11 @@ export default function GarminSyncCard({ planId, connection, onChanged }: Garmin
               onClick={() => runRequest("/api/integrations/garmin/sync", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ planId, limit: 400 }),
+                body: JSON.stringify({ planId, limit: 400, force: true }),
               })}
               className="rounded-lg bg-sky-950 px-4 py-2 text-sm font-semibold text-white hover:bg-sky-900 disabled:opacity-50"
             >
-              {isWorking ? "Syncing..." : "Sync recent runs"}
+              {isWorking ? "Refreshing..." : "Refresh Garmin"}
             </button>
             <button
               type="button"

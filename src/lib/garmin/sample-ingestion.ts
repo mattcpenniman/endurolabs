@@ -8,10 +8,17 @@ import { and, count, eq, sql } from "drizzle-orm";
 import { db } from "@/lib/db/client";
 import { activitySamples, runActivities } from "@/lib/db/schema";
 import { GarminActivitySample } from "@/lib/garmin/activity-detail";
+import { computeActivityQualityScore } from "@/lib/analytics/activity-quality";
 
 const INSERT_BATCH_SIZE = 500;
 
 export async function upsertActivitySamples(activityId: string, samples: GarminActivitySample[]): Promise<number> {
+  const [activity] = await db.select({ durationSeconds: runActivities.durationSeconds })
+    .from(runActivities)
+    .where(eq(runActivities.id, activityId))
+    .limit(1);
+  if (!activity) throw new Error("Run activity not found");
+
   for (let start = 0; start < samples.length; start += INSERT_BATCH_SIZE) {
     const values = samples.slice(start, start + INSERT_BATCH_SIZE).map((sample) => ({ activityId, ...sample }));
     await db.insert(activitySamples).values(values).onConflictDoUpdate({
@@ -41,12 +48,37 @@ export async function upsertActivitySamples(activityId: string, samples: GarminA
     .from(activitySamples)
     .where(eq(activitySamples.activityId, activityId));
   const sampleCount = result?.value ?? 0;
+  const qualityScore = computeActivityQualityScore(samples, activity.durationSeconds);
   await db.update(runActivities).set({
     sampleCount,
     samplesFetchedAt: new Date(),
+    qualityScore,
     updatedAt: new Date(),
   }).where(eq(runActivities.id, activityId));
   return sampleCount;
+}
+
+export async function recomputeStoredActivityQuality(activityId: string): Promise<number> {
+  const [activity, samples] = await Promise.all([
+    db.select({ durationSeconds: runActivities.durationSeconds })
+      .from(runActivities)
+      .where(eq(runActivities.id, activityId))
+      .limit(1)
+      .then((rows) => rows[0]),
+    db.select({
+      elapsedSeconds: activitySamples.elapsedSeconds,
+      heartRate: activitySamples.heartRate,
+      power: activitySamples.power,
+      speedMetersPerSecond: activitySamples.speedMetersPerSecond,
+      latitude: activitySamples.latitude,
+      longitude: activitySamples.longitude,
+    }).from(activitySamples).where(eq(activitySamples.activityId, activityId)),
+  ]);
+  if (!activity) throw new Error("Run activity not found");
+  const qualityScore = computeActivityQualityScore(samples, activity.durationSeconds);
+  await db.update(runActivities).set({ qualityScore, updatedAt: new Date() })
+    .where(eq(runActivities.id, activityId));
+  return qualityScore;
 }
 
 export async function mapWithConcurrency<T, R>(

@@ -9,7 +9,7 @@
 // ============================================================
 
 import { NextRequest, NextResponse } from "next/server";
-import { and, asc, desc, eq, inArray } from "drizzle-orm";
+import { and, asc, desc, eq, gte, inArray, isNull, or } from "drizzle-orm";
 import { db } from "@/lib/db/client";
 import {
   activitySamples,
@@ -25,12 +25,15 @@ import {
   SampleWithActivityStart,
 } from "@/lib/analytics/plan-fitness";
 import { ActivitySampleInput } from "@/lib/analytics/models";
+import { ANALYTICS_QUALITY_THRESHOLD } from "@/lib/analytics/activity-quality";
 
 function serializeActivity(row: typeof runActivities.$inferSelect): RunActivity {
   const distanceMiles = Math.max(0, row.distanceMeters) / 1609.344;
   return {
     id: row.id,
     providerActivityId: row.providerActivityId,
+    source: row.source,
+    powerSource: row.powerSource,
     activityName: row.activityName,
     activityType: row.activityType,
     localDate: row.localDate,
@@ -52,6 +55,8 @@ function serializeActivity(row: typeof runActivities.$inferSelect): RunActivity 
     dayOfWeek: row.dayOfWeek,
     plannedWorkoutId: row.plannedWorkoutId,
     matchConfidence: row.matchConfidence as RunActivity["matchConfidence"] ?? null,
+    qualityScore: row.qualityScore,
+    excludedFromAnalytics: row.excludedFromAnalytics,
     sampleCount: row.sampleCount,
     samplesFetchedAt: row.samplesFetchedAt?.toISOString() ?? null,
     syncedAt: row.syncedAt.toISOString(),
@@ -66,7 +71,12 @@ function loadPlanActivitySamples(user: { id: string }, planId: string): Promise<
   const activityRowsQuery = db
     .select()
     .from(runActivities)
-    .where(and(eq(runActivities.userId, user.id), eq(runActivities.planId, planId)))
+    .where(and(
+      eq(runActivities.userId, user.id),
+      eq(runActivities.planId, planId),
+      eq(runActivities.excludedFromAnalytics, false),
+      or(isNull(runActivities.qualityScore), gte(runActivities.qualityScore, ANALYTICS_QUALITY_THRESHOLD))
+    ))
     .orderBy(asc(runActivities.startTimeGmt));
   return activityRowsQuery.then((activities) => {
     if (activities.length === 0) return [];
@@ -166,7 +176,11 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     const currentActivityRows = await db
       .select()
       .from(runActivities)
-      .where(and(eq(runActivities.userId, user.id), eq(runActivities.planId, currentRow.id)))
+      .where(and(
+        eq(runActivities.userId, user.id),
+        eq(runActivities.planId, currentRow.id),
+        eq(runActivities.excludedFromAnalytics, false)
+      ))
       .orderBy(desc(runActivities.startTimeGmt))
       .limit(2000);
     const currentActivities = currentActivityRows.map(serializeActivity);
@@ -176,7 +190,11 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
       const priorActivityRows = await db
         .select()
         .from(runActivities)
-        .where(and(eq(runActivities.userId, user.id), eq(runActivities.planId, priorRow.id)))
+        .where(and(
+          eq(runActivities.userId, user.id),
+          eq(runActivities.planId, priorRow.id),
+          eq(runActivities.excludedFromAnalytics, false)
+        ))
         .orderBy(desc(runActivities.startTimeGmt))
         .limit(2000);
       priorActivities = priorActivityRows.map(serializeActivity);

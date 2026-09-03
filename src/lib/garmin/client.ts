@@ -82,6 +82,46 @@ export async function fetchRecentRuns(client: GarminConnectClient, limit = 400):
   });
 }
 
+function activityStart(activity: Activity): Date | null {
+  const value = (activity as Activity & { startTimeGMT?: string }).startTimeGMT;
+  if (!value) return null;
+  const parsed = new Date(value.endsWith("Z") ? value : `${value}Z`);
+  return Number.isNaN(parsed.getTime()) ? null : parsed;
+}
+
+/** Fetch newest activities until the latest persisted boundary is crossed. */
+export async function fetchRunsSince(
+  client: GarminConnectClient,
+  lowerBound: Date | null,
+  through: Date,
+  limit = 400
+): Promise<Activity[]> {
+  const maximum = Math.min(Math.max(limit, 1), 1000);
+  const activities: Activity[] = [];
+  let offset = 0;
+
+  while (offset < maximum) {
+    const pageSize = Math.min(200, maximum - offset);
+    const page = await client.getActivities(offset, pageSize);
+    activities.push(...page);
+    offset += page.length;
+    const crossedBoundary = lowerBound !== null && page.some((activity) => {
+      const start = activityStart(activity);
+      return start !== null && start <= lowerBound;
+    });
+    if (page.length < pageSize || crossedBoundary) break;
+  }
+
+  return activities.filter((activity) => {
+    const type = activity.activityType?.typeKey?.toLowerCase() ?? "";
+    const start = activityStart(activity);
+    return (type.includes("running") || type.includes("run"))
+      && start !== null
+      && start <= through
+      && (lowerBound === null || start >= lowerBound);
+  });
+}
+
 interface AuthenticatedGarminClient extends GarminConnectClient {
   httpClient: {
     get<T>(url: string): Promise<T>;

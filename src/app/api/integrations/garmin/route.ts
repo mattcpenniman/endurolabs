@@ -18,6 +18,8 @@ function serializeActivity(row: typeof runActivities.$inferSelect): RunActivity 
   return {
     id: row.id,
     providerActivityId: row.providerActivityId,
+    source: row.source,
+    powerSource: row.powerSource,
     activityName: row.activityName,
     activityType: row.activityType,
     localDate: row.localDate,
@@ -39,6 +41,8 @@ function serializeActivity(row: typeof runActivities.$inferSelect): RunActivity 
     dayOfWeek: row.dayOfWeek,
     plannedWorkoutId: row.plannedWorkoutId,
     matchConfidence: row.matchConfidence as RunActivity["matchConfidence"],
+    qualityScore: row.qualityScore,
+    excludedFromAnalytics: row.excludedFromAnalytics,
     sampleCount: row.sampleCount,
     samplesFetchedAt: row.samplesFetchedAt?.toISOString() ?? null,
     syncedAt: row.syncedAt.toISOString(),
