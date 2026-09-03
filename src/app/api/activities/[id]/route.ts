@@ -29,6 +29,10 @@ export async function GET(
     power: activitySamples.power,
     cadence: activitySamples.cadence,
     speedMetersPerSecond: activitySamples.speedMetersPerSecond,
+    latitude: activitySamples.latitude,
+    longitude: activitySamples.longitude,
+    elevationMeters: activitySamples.elevationMeters,
+    temperatureCelsius: activitySamples.temperatureCelsius,
   }).from(activitySamples)
     .where(eq(activitySamples.activityId, id))
     .orderBy(asc(activitySamples.elapsedSeconds));

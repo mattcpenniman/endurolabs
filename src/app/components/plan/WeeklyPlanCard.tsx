@@ -29,6 +29,7 @@ interface WeeklyPlanCardProps {
   focusDate?: string | null;
   onWeekUpdate?: (updatedWeek: WeeklyPlan) => Promise<void> | void;
   onMileageChange: (weekNumber: number, mileage: number) => Promise<void>;
+  onActivityClick?: (activityId: string) => void;
 }
 
 type IntensityTargetKey = keyof NonNullable<RunnerProfile["intensityTargetPercents"]>;
@@ -443,6 +444,7 @@ export default function WeeklyPlanCard({
   focusDate = null,
   onWeekUpdate,
   onMileageChange,
+  onActivityClick,
 }: WeeklyPlanCardProps) {
   const [localDays, setLocalDays] = useState<DailyPlan[]>(
     [...week.days].sort((a, b) => dayDisplayOrder[a.dayOfWeek] - dayDisplayOrder[b.dayOfWeek])
@@ -1357,7 +1359,20 @@ export default function WeeklyPlanCard({
                             )}
 
                             {syncedActivity && (
-                              <div className="mt-3 rounded-lg border border-sky-100 bg-sky-50 p-3">
+                              <div
+                                className={`mt-3 rounded-lg border border-sky-100 bg-sky-50 p-3 ${onActivityClick ? "cursor-pointer hover:border-sky-300 hover:bg-sky-100/70 transition-colors" : ""}`}
+                                role={onActivityClick ? "button" : undefined}
+                                tabIndex={onActivityClick ? 0 : undefined}
+                                onClick={onActivityClick ? () => onActivityClick(syncedActivity.id) : undefined}
+                                onKeyDown={onActivityClick
+                                  ? (event) => {
+                                      if (event.key === "Enter" || event.key === " ") {
+                                        event.preventDefault();
+                                        onActivityClick(syncedActivity.id);
+                                      }
+                                    }
+                                  : undefined}
+                              >
                                 <div className="flex flex-wrap items-center gap-2">
                                   <span className="rounded-full bg-sky-950 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-white">Garmin synced</span>
                                   <span className="text-xs font-semibold text-sky-950">{syncedActivity.activityName}</span>
@@ -1371,6 +1386,11 @@ export default function WeeklyPlanCard({
                                   {syncedActivity.averagePower && <span>{syncedActivity.averagePower} W avg</span>}
                                   {syncedActivity.elevationGainMeters !== null && <span>{Math.round(syncedActivity.elevationGainMeters * 3.28084).toLocaleString()} ft gain</span>}
                                 </div>
+                                {onActivityClick && (
+                                  <p className="mt-2 text-[11px] font-medium text-sky-800">
+                                    View run map →
+                                  </p>
+                                )}
                               </div>
                             )}
 

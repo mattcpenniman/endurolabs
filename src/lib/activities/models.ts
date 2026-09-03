@@ -55,6 +55,10 @@ export interface ActivityChartSample {
   power: number | null;
   cadence: number | null;
   speedMetersPerSecond: number | null;
+  latitude?: number | null;
+  longitude?: number | null;
+  elevationMeters?: number | null;
+  temperatureCelsius?: number | null;
 }
 
 export interface ActivityChartPoint extends ActivityChartSample {

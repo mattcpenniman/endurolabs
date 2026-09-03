@@ -23,6 +23,7 @@ import LongRunProgressionChart from "@/app/components/charts/LongRunProgressionC
 import IntensityDistributionChart from "@/app/components/charts/IntensityDistributionChart";
 import RunTrendChart from "@/app/components/charts/RunTrendChart";
 import GarminSyncCard from "@/app/components/plan/GarminSyncCard";
+import GarminActivityMapCard from "@/app/components/plan/GarminActivityMapCard";
 import { GarminConnectionStatus } from "@/lib/activities/models";
 import { generateRaceDayPlan } from "@/lib/training/race-day-plan";
 import { calculatePaceZones, calculatePowerZones } from "@/lib/training/zone-calculator";
@@ -199,6 +200,16 @@ function PlanPageContent(): React.ReactNode {
   const [dailyLogRefresh, setDailyLogRefresh] = useState(0);
   const [dailyLogs, setDailyLogs] = useState<DailyLog[]>([]);
   const [garminConnection, setGarminConnection] = useState<GarminConnectionStatus>(EMPTY_GARMIN_STATUS);
+  const [garminMapActivityId, setGarminMapActivityId] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!garminMapActivityId) return;
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setGarminMapActivityId(null);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [garminMapActivityId]);
   const [shareToken, setShareToken] = useState<string | null>(null);
   const [shareLinkUrl, setShareLinkUrl] = useState<string | null>(null);
   const [shareStatus, setShareStatus] = useState<string | null>(null);
@@ -1758,6 +1769,7 @@ function PlanPageContent(): React.ReactNode {
                               focusDate={focusDate}
                               onWeekUpdate={handleWeekUpdate}
                               onMileageChange={handleAdjustWeeklyMileage}
+                              onActivityClick={(activityId) => setGarminMapActivityId(activityId)}
                             />
                           ))}
                         </div>
@@ -2196,7 +2208,7 @@ function PlanPageContent(): React.ReactNode {
                       >
                         Create Share Link
                       </button>
-                    )}
+                     )}
                   </div>
                 </div>
               </div>
@@ -2204,6 +2216,43 @@ function PlanPageContent(): React.ReactNode {
           </div>
         )}
       </div>
+
+      {garminMapActivityId && plan && (
+        <div
+          className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-slate-900/60 p-4 backdrop-blur-sm"
+          onClick={() => setGarminMapActivityId(null)}
+          role="dialog"
+          aria-modal="true"
+        >
+          <div
+            className="my-8 max-h-[90vh] w-full max-w-5xl overflow-hidden rounded-2xl bg-white shadow-2xl"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="flex items-center justify-between border-b border-gray-200 bg-white px-5 py-3">
+              <div className="flex items-center gap-2">
+                <span className="flex h-7 w-7 items-center justify-center rounded-full bg-sky-950 text-[10px] font-black text-white">G</span>
+                <span className="text-sm font-semibold text-gray-900">Run Map</span>
+              </div>
+              <button
+                type="button"
+                onClick={() => setGarminMapActivityId(null)}
+                className="rounded-md px-2 py-1 text-sm font-medium text-gray-500 hover:bg-gray-100 hover:text-gray-900"
+              >
+                ✕ Close
+              </button>
+            </div>
+            <div className="max-h-[calc(90vh-64px)] overflow-y-auto">
+              <GarminActivityMapCard
+                key={garminMapActivityId}
+                activities={garminConnection.activities.filter(
+                  (activity) => activity.planId === plan.id
+                )}
+                defaultActivityId={garminMapActivityId}
+              />
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
