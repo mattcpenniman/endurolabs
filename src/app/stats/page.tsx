@@ -11,7 +11,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import type { RunnerProfile, MarathonPlan } from "@/lib/training/models";
-import type { RunActivity } from "@/lib/activities/models";
+import type { GarminConnectionStatus } from "@/lib/activities/models";
 import {
   PlanComparison,
   PlanSummary,
@@ -21,6 +21,7 @@ import { PowerHeartRateModel } from "@/lib/analytics/models";
 import FitnessCurveChart from "@/app/components/stats/FitnessCurveChart";
 import LongitudinalTrend from "@/app/components/stats/LongitudinalTrend";
 import HeadlineFitnessCard from "@/app/components/stats/HeadlineFitnessCard";
+import ActivityExplorer from "@/app/components/stats/ActivityExplorer";
 
 interface SavedPlanRow {
   id: string;
@@ -61,6 +62,7 @@ export default function StatsPage() {
   const [priorPlanId, setPriorPlanId] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [stats, setStats] = useState<StatsResponse | null>(null);
+  const [garminConnection, setGarminConnection] = useState<GarminConnectionStatus | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const loadAuthAndPlans = useCallback(async () => {
@@ -100,6 +102,7 @@ export default function StatsPage() {
     if (!authingDone || !currentPlanId) return;
     let cancelled = false;
     setLoading(true);
+    setGarminConnection(null);
     setError(null);
     const params = new URLSearchParams({ currentPlanId });
     if (priorPlanId) params.set("priorPlanId", priorPlanId);
@@ -115,11 +118,21 @@ export default function StatsPage() {
         syncWarning = body.error ?? "Garmin refresh failed; showing stored stats.";
       }
 
-      const response = await fetch(`/api/stats?${params.toString()}`);
+      const [response, activityResponse] = await Promise.all([
+        fetch(`/api/stats?${params.toString()}`),
+        fetch(`/api/integrations/garmin?planId=${encodeURIComponent(currentPlanId)}`),
+      ]);
       if (!response.ok) throw new Error(((await response.json()) as { error?: string }).error ?? "Failed to load stats");
       const data = (await response.json()) as StatsResponse;
+      const connection = activityResponse.ok
+        ? await activityResponse.json() as GarminConnectionStatus
+        : null;
+      if (!activityResponse.ok) {
+        syncWarning = syncWarning ?? "Activity detail status could not be loaded.";
+      }
       if (!cancelled) {
         setStats(data);
+        setGarminConnection(connection);
         setError(syncWarning);
       }
     };
@@ -131,6 +144,8 @@ export default function StatsPage() {
 
   const currentPlan = plans.find((p) => p.id === currentPlanId) ?? null;
   const priorPlan = plans.find((p) => p.id === priorPlanId) ?? null;
+  const currentActivities = garminConnection?.activities ?? [];
+  const hasStoredDetail = currentActivities.some((activity) => activity.sampleCount > 0);
   const currentSummaryRow = useMemo(() => {
     if (!currentPlan) return null;
     return {
@@ -274,16 +289,32 @@ export default function StatsPage() {
               </div>
             )}
 
-            {!stats.fitness?.hasCurrentSamples && (
+            {garminConnection && !hasStoredDetail && (
               <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
-                No sample-level Garmin data is associated with this plan yet.
-                Sync Garmin in
-                <a href="/plan" className="mx-1 font-medium underline">My Plans</a>,
-                or import sample data to unlock the Power @ 140 bpm headline metric.
+                <p className="font-semibold">Import activity detail to unlock sample analytics</p>
+                <p className="mt-1 max-w-3xl text-amber-800">
+                  {currentActivities.length === 0
+                    ? "This plan has no matched Garmin runs yet. Sync summaries, then import detail samples."
+                    : `None of this plan's ${currentActivities.length} matched runs has stored detail samples yet.`}
+                </p>
+                <a
+                  href="/plan?view=current&tab=settings#garmin-detail-sync"
+                  className="mt-3 inline-flex rounded-lg bg-amber-900 px-3 py-2 font-semibold text-white hover:bg-amber-800"
+                >
+                  {garminConnection.connected ? "Open Garmin detail import" : "Connect Garmin and import detail"}
+                </a>
+              </div>
+            )}
+
+            {garminConnection && hasStoredDetail && !stats.fitness?.hasCurrentSamples && (
+              <div className="rounded-xl border border-gray-200 bg-gray-50 p-4 text-sm text-gray-700">
+                Detail samples are stored for this plan, but none currently meet the quality and power-source requirements for headline analytics.
               </div>
             )}
 
             <WeekComparisonTable comparison={stats.comparison} />
+
+            <ActivityExplorer key={currentPlanId} activities={currentActivities} />
 
             <details className="rounded-xl border border-gray-200 bg-white p-5 text-sm text-gray-600">
               <summary className="cursor-pointer font-medium text-gray-900">Methodology</summary>

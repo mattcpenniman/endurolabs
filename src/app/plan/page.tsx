@@ -84,6 +84,13 @@ const INTENSITY_TARGET_RANGES: Record<IntensityTargetKey, { min: number; max: nu
   vo2: { min: 1, max: 4 },
 };
 
+function parsePlanTab(value: string | null): PlanTab | null {
+  return value === "overview" || value === "schedule" || value === "race"
+    || value === "scorecard" || value === "settings"
+    ? value
+    : null;
+}
+
 function clampMileage(value: number): number {
   if (!Number.isFinite(value)) return 5;
   return Math.max(5, Math.min(120, Math.round(value)));
@@ -174,6 +181,7 @@ export default function PlanPage(): React.ReactNode {
 function PlanPageContent(): React.ReactNode {
   const router = useRouter();
   const searchParams = useSearchParams();
+  const requestedPlanTab = parsePlanTab(searchParams.get("tab"));
   const [plan, setPlan] = useState<MarathonPlan | null>(null);
   const [isCheckingAuth, setIsCheckingAuth] = useState(true);
   const [isLoading, setIsLoading] = useState(false);
@@ -187,7 +195,7 @@ function PlanPageContent(): React.ReactNode {
   const [runsPerWeek, setRunsPerWeek] = useState<number | null>(null);
   const [weeksOverride, setWeeksOverride] = useState<number | null>(null);
   const [planName, setPlanName] = useState("");
-  const [activePlanTab, setActivePlanTab] = useState<PlanTab>("overview");
+  const [activePlanTab, setActivePlanTab] = useState<PlanTab>(() => requestedPlanTab ?? "overview");
   const [dailyLogRefresh, setDailyLogRefresh] = useState(0);
   const [dailyLogs, setDailyLogs] = useState<DailyLog[]>([]);
   const [garminConnection, setGarminConnection] = useState<GarminConnectionStatus>(EMPTY_GARMIN_STATUS);
@@ -511,7 +519,7 @@ function PlanPageContent(): React.ReactNode {
 
   const handleLoadPlan = async (
     planId: string,
-    options: { focusCurrentSchedule?: boolean; updateRoute?: boolean } = {}
+    options: { focusCurrentSchedule?: boolean; updateRoute?: boolean; tab?: PlanTab | null } = {}
   ) => {
     setIsLoading(true);
     setError(null);
@@ -537,7 +545,11 @@ function PlanPageContent(): React.ReactNode {
       );
       setPacingStrategy(saved.runnerProfile.racePacingStrategy ?? "even");
       setExpectedTempF(saved.runnerProfile.expectedRaceTempF ?? 50);
-      if (options.focusCurrentSchedule) {
+      if (options.tab) {
+        setExpandedWeeks(new Set());
+        setActivePlanTab(options.tab);
+        setPendingCurrentPlanFocus(false);
+      } else if (options.focusCurrentSchedule) {
         focusCurrentSchedule(saved.planData, persistedLogs);
       } else {
         setExpandedWeeks(new Set());
@@ -1155,16 +1167,33 @@ function PlanPageContent(): React.ReactNode {
     }
 
     if (plan?.id === activePlanId) {
-      focusCurrentSchedule(plan, dailyLogs);
+      if (requestedPlanTab) {
+        setActivePlanTab(requestedPlanTab);
+        setPendingCurrentPlanFocus(false);
+      } else {
+        focusCurrentSchedule(plan, dailyLogs);
+      }
       setHasAttemptedCurrentPlanLoad(true);
       return;
     }
 
     setHasAttemptedCurrentPlanLoad(true);
-    handleLoadPlan(activePlanId, { focusCurrentSchedule: true, updateRoute: false }).catch(() => {
+    handleLoadPlan(activePlanId, {
+      focusCurrentSchedule: !requestedPlanTab,
+      updateRoute: false,
+      tab: requestedPlanTab,
+    }).catch(() => {
       // Errors are handled inside handleLoadPlan.
     });
-  }, [activePlanId, currentPlanRequestCount, dailyLogs, hasAttemptedCurrentPlanLoad, isCheckingAuth, isCurrentPlanView, isLoading, plan]);
+  }, [activePlanId, currentPlanRequestCount, dailyLogs, hasAttemptedCurrentPlanLoad, isCheckingAuth, isCurrentPlanView, isLoading, plan, requestedPlanTab]);
+
+  useEffect(() => {
+    if (activePlanTab !== "settings" || window.location.hash !== "#garmin-detail-sync") return;
+    const timeoutId = window.setTimeout(() => {
+      document.getElementById("garmin-detail-sync")?.scrollIntoView({ behavior: "smooth", block: "start" });
+    }, 120);
+    return () => window.clearTimeout(timeoutId);
+  }, [activePlanTab, plan]);
 
   useEffect(() => {
     if (!pendingCurrentPlanFocus || !plan || activePlanTab !== "schedule") return;

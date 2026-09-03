@@ -134,7 +134,7 @@ export default function GarminSyncCard({ planId, connection, onChanged }: Garmin
   const awaitingMfa = connection.mfaRequired || isMfaRequired;
 
   return (
-    <div className="rounded-lg border border-gray-200 bg-white p-5 md:col-span-2">
+    <div id="garmin-detail-sync" className="scroll-mt-24 rounded-lg border border-gray-200 bg-white p-5 md:col-span-2">
       <div className="flex flex-col gap-5 lg:flex-row lg:items-start lg:justify-between">
         <div className="max-w-xl">
           <div className="flex items-center gap-2">

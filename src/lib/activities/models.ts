@@ -46,3 +46,19 @@ export interface GarminConnectionStatus {
   lastError?: string | null;
   activities: RunActivity[];
 }
+
+export interface ActivityChartSample {
+  elapsedSeconds: number;
+  heartRate: number | null;
+  power: number | null;
+  cadence: number | null;
+  speedMetersPerSecond: number | null;
+}
+
+export interface ActivityChartPoint extends ActivityChartSample {
+  paceMinutesPerMile: number | null;
+}
+
+export interface ActivityDetailResponse {
+  samples: ActivityChartSample[];
+}
