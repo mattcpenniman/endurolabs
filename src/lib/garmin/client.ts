@@ -34,6 +34,18 @@ export type GarminLoginResult =
   | { mfaRequired: true; pending: PendingGarminLogin }
   | { mfaRequired: false; client: GarminConnectClient; auth: GarminSession };
 
+interface RefreshableGarminClient extends GarminConnectClient {
+  httpClient: {
+    client: {
+      defaults: { timeout: number };
+      interceptors: { response: { clear(): void } };
+    };
+    refreshToken(): Promise<string>;
+  };
+}
+
+const GARMIN_REQUEST_TIMEOUT_MS = 30_000;
+
 export async function loginToGarmin(username: string, password: string): Promise<GarminLoginResult> {
   const context = await createAuthContext({ username, password });
   if (context.mfaRequired) {
@@ -60,9 +72,26 @@ export async function completeGarminMfa(pending: PendingGarminLogin, code: strin
   return { client, auth: { kind: "session", session: client.getSession() } };
 }
 
-export function restoreGarminClient(auth: StoredGarminAuth): GarminConnectClient {
+export async function restoreGarminClient(auth: StoredGarminAuth): Promise<GarminConnectClient> {
   if (auth.kind !== "session") throw new Error("Garmin MFA verification is still required");
-  return createFromSession(auth.session);
+  let client = createFromSession(auth.session) as RefreshableGarminClient;
+  client.httpClient.client.defaults.timeout = GARMIN_REQUEST_TIMEOUT_MS;
+
+  const expiresAt = auth.session.oauth2Token.expires_at;
+  if (expiresAt !== undefined && expiresAt <= Math.floor(Date.now() / 1000)) {
+    // The package's 401 interceptor recursively waits on itself when OAuth1 is
+    // also invalid. Refresh without that interceptor so reconnect errors return.
+    client.httpClient.client.interceptors.response.clear();
+    try {
+      await client.httpClient.refreshToken();
+    } catch {
+      throw new Error("Garmin session expired. Reconnect Garmin to resume syncing.");
+    }
+    client = createFromSession(client.getSession()) as RefreshableGarminClient;
+    client.httpClient.client.defaults.timeout = GARMIN_REQUEST_TIMEOUT_MS;
+  }
+
+  return client;
 }
 
 export async function fetchRecentRuns(client: GarminConnectClient, limit = 400): Promise<Activity[]> {

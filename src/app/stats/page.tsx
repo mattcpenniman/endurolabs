@@ -137,7 +137,7 @@ export default function StatsPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ planId: currentPlanId }),
       });
-      if (!syncResponse.ok && syncResponse.status !== 409) {
+      if (!syncResponse.ok) {
         const body = (await syncResponse.json().catch(() => ({}))) as { error?: string };
         syncWarning = body.error ?? "Garmin refresh failed; showing stored stats.";
       }

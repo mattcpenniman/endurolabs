@@ -75,7 +75,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     }
     leaseAcquired = true;
     const auth = decryptGarminTokens<StoredGarminAuth>(leasedConnection.encryptedTokens);
-    const client = restoreGarminClient(auth);
+    const client = await restoreGarminClient(auth);
     const syncThrough = new Date();
     const ttlSeconds = Math.min(Math.max(Math.round(body.ttlSeconds ?? DEFAULT_TTL_SECONDS), 0), 86_400);
     const summaryIsFresh = !body.force
@@ -250,7 +250,10 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     });
   } catch (error) {
     console.error("Failed to sync Garmin activities:", error);
-    const message = error instanceof Error && error.message.includes("GARMIN_TOKEN_ENCRYPTION_KEY")
+    const message = error instanceof Error && (
+      error.message.includes("GARMIN_TOKEN_ENCRYPTION_KEY")
+      || error.message.startsWith("Garmin session expired.")
+    )
       ? error.message
       : "Garmin sync failed. Reconnect if Garmin has expired the session.";
     await db.update(garminConnections).set({

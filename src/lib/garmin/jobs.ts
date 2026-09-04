@@ -64,7 +64,7 @@ function detailWindow(parameters: DetailJobParameters) {
       : undefined;
 }
 
-async function processDetailPass(job: typeof garminSyncJobs.$inferSelect, client: ReturnType<typeof restoreGarminClient>): Promise<boolean> {
+async function processDetailPass(job: typeof garminSyncJobs.$inferSelect, client: Awaited<ReturnType<typeof restoreGarminClient>>): Promise<boolean> {
   const parameters = job.parameters as DetailJobParameters;
   const cursor = (job.cursor ?? {}) as JobCursor;
   const through = new Date(parameters.through);
@@ -122,7 +122,7 @@ async function processDetailPass(job: typeof garminSyncJobs.$inferSelect, client
   return activities.length < DETAIL_BATCH_SIZE;
 }
 
-async function processHistoryPass(job: typeof garminSyncJobs.$inferSelect, client: ReturnType<typeof restoreGarminClient>): Promise<boolean> {
+async function processHistoryPass(job: typeof garminSyncJobs.$inferSelect, client: Awaited<ReturnType<typeof restoreGarminClient>>): Promise<boolean> {
   const parameters = job.parameters as HistoryJobParameters;
   const cursor = (job.cursor ?? {}) as JobCursor;
   const offset = cursor.offset ?? 0;
@@ -230,9 +230,9 @@ export async function processGarminJob(jobId: string, maxPasses = 4): Promise<vo
     return;
   }
 
-  let client: ReturnType<typeof restoreGarminClient> | null = null;
+  let client: Awaited<ReturnType<typeof restoreGarminClient>> | null = null;
   try {
-    client = restoreGarminClient(decryptGarminTokens<StoredGarminAuth>(connection.encryptedTokens));
+    client = await restoreGarminClient(decryptGarminTokens<StoredGarminAuth>(connection.encryptedTokens));
     let complete = false;
     for (let pass = 0; pass < maxPasses && !complete; pass += 1) {
       const renewedLease = new Date(Date.now() + LEASE_MS);

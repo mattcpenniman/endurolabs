@@ -25,6 +25,12 @@ export default function GarminSyncCard({ planId, connection, onChanged }: Garmin
   const [updatingActivityId, setUpdatingActivityId] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
 
+  useEffect(() => {
+    if (!connection.connected && connection.username && !username) {
+      setUsername(connection.username);
+    }
+  }, [connection.connected, connection.username, username]);
+
   const runRequest = async (url: string, init: RequestInit): Promise<void> => {
     setIsWorking(true);
     setMessage(null);
@@ -141,16 +147,17 @@ export default function GarminSyncCard({ planId, connection, onChanged }: Garmin
   };
 
   const awaitingMfa = connection.mfaRequired || isMfaRequired;
+  const reconnectRequired = connection.status === "error";
 
   return (
-    <div id="garmin-detail-sync" className="scroll-mt-24 rounded-lg border border-gray-200 bg-white p-5 md:col-span-2">
+    <div id="garmin-detail-sync" className={`scroll-mt-24 rounded-lg border bg-white p-5 md:col-span-2 ${reconnectRequired ? "border-red-300" : "border-gray-200"}`}>
       <div className="flex flex-col gap-5 lg:flex-row lg:items-start lg:justify-between">
         <div className="max-w-xl">
           <div className="flex items-center gap-2">
             <span className="flex h-8 w-8 items-center justify-center rounded-full bg-sky-950 text-xs font-black text-white">G</span>
             <h3 className="text-sm font-semibold text-gray-900">Garmin Connect</h3>
-            <span className={`rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide ${connection.connected ? "bg-emerald-100 text-emerald-700" : "bg-gray-100 text-gray-600"}`}>
-              {connection.connected ? "Connected" : "Not connected"}
+            <span className={`rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide ${connection.connected ? "bg-emerald-100 text-emerald-700" : reconnectRequired ? "bg-red-100 text-red-700" : "bg-gray-100 text-gray-600"}`}>
+              {connection.connected ? "Connected" : reconnectRequired ? "Reconnect required" : "Not connected"}
             </span>
           </div>
           <p className="mt-2 text-sm text-gray-500">
@@ -171,9 +178,15 @@ export default function GarminSyncCard({ planId, connection, onChanged }: Garmin
               )}
             </div>
           )}
-          {(message || connection.lastError) && (
+          {reconnectRequired && (
+            <div role="alert" className="mt-4 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-800">
+              <p className="font-semibold">Garmin is disconnected</p>
+              <p className="mt-1">{connection.lastError || "Your Garmin session is no longer valid. Sign in again to resume run imports."}</p>
+            </div>
+          )}
+          {(message || (!reconnectRequired && connection.lastError)) && (
             <p className={`mt-3 text-xs ${message?.toLowerCase().includes("failed") || connection.lastError ? "text-red-600" : "text-emerald-700"}`}>
-              {message || connection.lastError}
+              {message || (!reconnectRequired ? connection.lastError : null)}
             </p>
           )}
           {connection.connected && connection.activities.length > 0 && (
@@ -342,7 +355,7 @@ export default function GarminSyncCard({ planId, connection, onChanged }: Garmin
               disabled={isWorking}
               className="rounded-lg bg-sky-950 px-4 py-2 text-sm font-semibold text-white hover:bg-sky-900 disabled:opacity-50 sm:col-span-2"
             >
-              {isWorking ? "Connecting..." : "Connect Garmin"}
+              {isWorking ? "Connecting..." : reconnectRequired ? "Reconnect Garmin" : "Connect Garmin"}
             </button>
           </form>
         )}
