@@ -8,16 +8,11 @@
 // shows the per-minute sample data (HR, power, cadence, pace,
 // elevation, temperature) fetched from the sample trace API.
 
-import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { ActivityDetailResponse, RunActivity } from "@/lib/activities/models";
-import { projectGpsRoute, nearestPointIndex } from "@/lib/activities/activity-map";
-import type { GpsProjection } from "@/lib/activities/activity-map";
+import React, { useEffect, useMemo, useState } from "react";
+import type { ActivityChartSample, ActivityDetailResponse, RunActivity } from "@/lib/activities/models";
+import GarminActivityLeafletMap from "@/app/components/plan/GarminActivityLeafletMap";
 
-const MAP_WIDTH = 640;
-const MAP_HEIGHT = 400;
 const METERS_PER_MILE = 1609.344;
-const MIN_ZOOM = 1;
-const MAX_ZOOM = 14;
 
 export interface GarminActivityMapCardProps {
   activities: RunActivity[];
@@ -25,15 +20,7 @@ export interface GarminActivityMapCardProps {
   onActivityChange?: (activityId: string) => void;
 }
 
-interface SampleDetail {
-  elapsedSeconds: number;
-  heartRate: number | null;
-  power: number | null;
-  cadence: number | null;
-  speedMetersPerSecond: number | null;
-  elevationMeters?: number | null;
-  temperatureCelsius?: number | null;
-}
+type SampleDetail = ActivityChartSample;
 
 // Module-level cache so an activity trace is fetched at most
 // once per tab, across any number of card mounts.
@@ -96,12 +83,6 @@ function formatPace(minutesPerMile: number | null): string {
   return `${minutes}:${String(seconds).padStart(2, "0")}`;
 }
 
-function elevationHue(value: number, min: number, max: number): string {
-  const t = max === min ? 0.5 : Math.min(1, Math.max(0, (value - min) / (max - min)));
-  const hue = Math.round(145 - t * 110);
-  return `hsl(${hue} 55% 45%)`;
-}
-
 export default function GarminActivityMapCard({
   activities,
   activityId,
@@ -117,24 +98,8 @@ export default function GarminActivityMapCard({
   const selectedActivityId = activityId === undefined ? localActivityId : activityId;
   const [selectedIndex, setSelectedIndex] = useState<number | null>(null);
 
-  // View transform: zoom (k) and pan (tx, ty) in viewBox units.
-  const [view, setView] = useState({ k: 1, tx: 0, ty: 0 });
-  const svgRef = useRef<SVGSVGElement | null>(null);
-  const dragRef = useRef<{ x: number; y: number; moved: boolean } | null>(null);
-  const suppressClickRef = useRef(false);
-
-  const clamp = useCallback((value: number, min: number, max: number) => Math.min(max, Math.max(min, value)), []);
-  const resetView = useCallback(() => setView({ k: 1, tx: 0, ty: 0 }), []);
-
   const selectedActivity = eligible.find((activity) => activity.id === selectedActivityId) ?? null;
   const samples = useActivitySamples(selectedActivityId);
-
-  const projection: GpsProjection = useMemo(
-    () => (samples && samples.length > 1
-      ? projectGpsRoute(samples, MAP_WIDTH, MAP_HEIGHT)
-      : { points: [], width: MAP_WIDTH, height: MAP_HEIGHT }),
-    [samples]
-  );
 
   const elevationDomain = useMemo(() => {
     if (!samples) return null;
@@ -145,26 +110,13 @@ export default function GarminActivityMapCard({
     return { min: Math.min(...values), max: Math.max(...values) };
   }, [samples]);
 
-  const pointColor = (index: number): string => {
-    if (!elevationDomain) return "#3da16a";
-    const value = samples?.[index]?.elevationMeters;
-    return typeof value === "number"
-      ? elevationHue(value, elevationDomain.min, elevationDomain.max)
-      : "hsl(200 8% 82%)";
-  };
-
-  const pathD = useMemo(() => {
-    if (projection.points.length === 0) return "";
-    return projection.points
-      .map((p, i) => `${i === 0 ? "M" : "L"} ${p.x.toFixed(2)} ${p.y.toFixed(2)}`)
-      .join(" ");
-  }, [projection]);
-
-  const hasMap = projection.points.length >= 2;
+  const gpsSampleCount = samples?.filter((sample) => (
+    typeof sample.latitude === "number" && typeof sample.longitude === "number"
+  )).length ?? 0;
+  const hasMap = gpsSampleCount >= 2;
   const hasSamples = samples !== null && samples.length > 0;
   const showPicker = eligible.length > 0;
 
-  const selectedIndexPoint = selectedIndex !== null ? projection.points[selectedIndex] ?? null : null;
   const selectedSample = selectedIndex !== null ? samples?.[selectedIndex] : undefined;
   const selectedSpeed = selectedSample?.speedMetersPerSecond ?? null;
   const selectedPace = selectedSpeed && selectedSpeed > 0
@@ -184,80 +136,9 @@ export default function GarminActivityMapCard({
     setSelectedIndex(null);
   };
 
-  // Reset zoom/pan whenever a different run is selected so the route re-centers.
   useEffect(() => {
-    setView({ k: 1, tx: 0, ty: 0 });
     setSelectedIndex(null);
   }, [selectedActivityId]);
-
-  // Convert a pointer event to viewBox (pre-transform) coordinates.
-  const screenToViewBox = useCallback(
-    (event: { clientX: number; clientY: number }, svg: SVGSVGElement) => {
-      const ctm = svg.getScreenCTM();
-      if (!ctm) return null;
-      const p = new DOMPoint(event.clientX, event.clientY).matrixTransform(ctm.inverse());
-      return { x: p.x, y: p.y };
-    },
-    []
-  );
-
-  const zoomAt = useCallback(
-    (factor: number, svgX: number, svgY: number) => {
-      setView((v) => {
-        const k = clamp(v.k * factor, MIN_ZOOM, MAX_ZOOM);
-        if (k === v.k) return v;
-        // Keep the point (svgX, svgY) fixed in screen space while zooming.
-        return { k, tx: svgX - (svgX - v.tx) * (k / v.k), ty: svgY - (svgY - v.ty) * (k / v.k) };
-      });
-    },
-    [clamp]
-  );
-
-  // Native non-passive wheel listener so we can zoom without the page scrolling.
-  useEffect(() => {
-    const svg = svgRef.current;
-    if (!svg) return;
-    const onWheel = (event: WheelEvent) => {
-      event.preventDefault();
-      const origin = screenToViewBox(event, svg);
-      if (!origin) return;
-      zoomAt(event.deltaY < 0 ? 1.2 : 1 / 1.2, origin.x, origin.y);
-    };
-    svg.addEventListener("wheel", onWheel, { passive: false });
-    return () => svg.removeEventListener("wheel", onWheel);
-  }, [screenToViewBox, zoomAt, hasMap]);
-
-  const handlePointerDown = (event: React.PointerEvent<SVGSVGElement>) => {
-    const origin = screenToViewBox(event, event.currentTarget);
-    if (!origin) return;
-    dragRef.current = { x: event.clientX, y: event.clientY, moved: false };
-    (event.currentTarget as SVGSVGElement).setPointerCapture(event.pointerId);
-  };
-
-  const handlePointerMove = (event: React.PointerEvent<SVGSVGElement>) => {
-    const drag = dragRef.current;
-    if (!drag) return;
-    const svg = event.currentTarget;
-    const ctm = svg.getScreenCTM();
-    if (!ctm) return;
-    const scale = ctm.a; // pixels per viewBox unit on x
-    const dx = (event.clientX - drag.x) / scale;
-    const dy = (event.clientY - drag.y) / scale;
-    dragRef.current = { x: event.clientX, y: event.clientY, moved: drag.moved || Math.abs(dx) + Math.abs(dy) > 0 };
-    setView((v) => ({ ...v, tx: v.tx + dx, ty: v.ty + dy }));
-  };
-
-  const handlePointerUp = (event: React.PointerEvent<SVGSVGElement>) => {
-    if (dragRef.current && dragRef.current.moved) {
-      suppressClickRef.current = true;
-    }
-    dragRef.current = null;
-    try {
-      event.currentTarget.releasePointerCapture(event.pointerId);
-    } catch {
-      /* pointer may already be released */
-    }
-  };
 
 
   if (!showPicker) {
@@ -328,85 +209,13 @@ export default function GarminActivityMapCard({
 
           <div className="mt-3 overflow-hidden rounded-lg border border-gray-200 bg-gray-50">
             {hasMap ? (
-              <svg
-                ref={svgRef}
-                viewBox={`0 0 ${MAP_WIDTH} ${MAP_HEIGHT}`}
-                className="block h-auto w-full cursor-move touch-none select-none"
-                role="img"
-                aria-label="Run route map. Scroll to zoom, drag to pan, click a point for details."
-                onPointerDown={handlePointerDown}
-                onPointerMove={handlePointerMove}
-                onPointerUp={handlePointerUp}
-                onPointerCancel={handlePointerUp}
-                onDoubleClick={(event) => {
-                  const origin = screenToViewBox(event, event.currentTarget);
-                  if (origin) zoomAt(1.8, origin.x, origin.y);
+              <GarminActivityLeafletMap
+                samples={samples ?? []}
+                selectedIndex={selectedIndex}
+                onPointSelect={(index) => {
+                  setSelectedIndex((current) => (current === index ? null : index));
                 }}
-                onClick={(event) => {
-                  if (suppressClickRef.current) {
-                    suppressClickRef.current = false;
-                    return;
-                  }
-                  const origin = screenToViewBox(event, event.currentTarget);
-                  if (!origin) return;
-                  const index = nearestPointIndex(projection.points, origin.x, origin.y, 40);
-                  if (index !== null) {
-                    setSelectedIndex((current) => (current === index ? null : index));
-                  }
-                }}
-              >
-                <g transform={`translate(${view.tx} ${view.ty}) scale(${view.k})`}>
-                  <rect x={0} y={0} width={MAP_WIDTH} height={MAP_HEIGHT} fill="#f8fafc" />
-                  <path d={pathD} fill="none" stroke="#cbd5e1" strokeWidth={6 / view.k} strokeLinejoin="round" strokeLinecap="round" />
-                  <path d={pathD} fill="none" stroke="#64748b" strokeWidth={2.5 / view.k} strokeLinejoin="round" strokeLinecap="round" />
-                  {projection.points.map((point, i) => (
-                    <g key={`pt-${i}`}>
-                      <title>{`Elapsed ${formatElapsed(samples?.[i]?.elapsedSeconds ?? 0)}`}</title>
-                      <circle cx={point.x} cy={point.y} r={14 / view.k} fill="transparent" />
-                      <circle
-                        cx={point.x}
-                        cy={point.y}
-                        r={4.5 / Math.sqrt(view.k)}
-                        fill={pointColor(i)}
-                        stroke="white"
-                        strokeWidth={1.5 / Math.sqrt(view.k)}
-                        pointerEvents="none"
-                      />
-                    </g>
-                  ))}
-                  {selectedIndexPoint && (
-                    <circle
-                      cx={selectedIndexPoint.x}
-                      cy={selectedIndexPoint.y}
-                      r={9 / Math.sqrt(view.k)}
-                      fill="none"
-                      stroke="#f59e0b"
-                      strokeWidth={2.5 / Math.sqrt(view.k)}
-                      pointerEvents="none"
-                    />
-                  )}
-                </g>
-
-                {/* Zoom / reset controls */}
-                <g
-                  transform={`translate(${MAP_WIDTH - 64} ${16})`}
-                  onPointerDown={(event) => event.stopPropagation()}
-                  style={{ cursor: "default" }}
-                >
-                  <rect x={0} y={0} width={48} height={48} rx={8} fill="white" stroke="#e5e7eb" />
-                  <text x={24} y={20} textAnchor="middle" fontSize="20" fill="#374151" className="select-none" onClick={() => zoomAt(1.5, MAP_WIDTH / 2, MAP_HEIGHT / 2)}>+</text>
-                  <line x1={6} y1={24} x2={42} y2={24} stroke="#e5e7eb" />
-                  <text x={24} y={43} textAnchor="middle" fontSize="20" fill="#374151" className="select-none" onClick={() => zoomAt(1 / 1.5, MAP_WIDTH / 2, MAP_HEIGHT / 2)}>−</text>
-                </g>
-                <g
-                  transform={`translate(${MAP_WIDTH - 64} ${76})`}
-                  onPointerDown={(event) => event.stopPropagation()}
-                  style={{ cursor: "default" }}
-                >
-                  <rect x={0} y={0} width={48} height={28} rx={8} fill="white" stroke="#e5e7eb" />
-                  <text x={24} y={19} textAnchor="middle" fontSize="11" fontWeight="600" fill="#374151" className="select-none" onClick={resetView}>Reset</text>
-                </g>
-              </svg>
+              />
             ) : (
               <div className="flex h-64 flex-col items-center justify-center gap-2 p-6 text-center">
                 <p className="text-sm font-medium text-gray-500">No GPS route available</p>
