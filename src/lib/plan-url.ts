@@ -26,6 +26,15 @@ export function buildPlanUrl(
   return `/plan${query ? `?${query}` : ""}${normalizedHash}`;
 }
 
+/** Adds a selected public run card to an existing tokenized plan share URL. */
+export function buildSharedRunUrl(baseUrl: string, activityId: string, origin?: string): string {
+  const url = new URL(baseUrl, origin ?? "http://localhost");
+  url.searchParams.set("runmap", activityId);
+  return baseUrl.startsWith("/") && origin === undefined
+    ? `${url.pathname}${url.search}${url.hash}`
+    : url.toString();
+}
+
 export function isSafeInternalRedirect(value: string): boolean {
   return value.startsWith("/") && !value.startsWith("//");
 }

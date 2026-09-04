@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildPlanUrl, isSafeInternalRedirect } from "@/lib/plan-url";
+import { buildPlanUrl, buildSharedRunUrl, isSafeInternalRedirect } from "@/lib/plan-url";
 
 describe("plan URL state", () => {
   it("updates one value while preserving other parameters and the hash", () => {
@@ -20,6 +20,16 @@ describe("plan URL state", () => {
     expect(buildPlanUrl(new URLSearchParams(), { runmap: "09/04/26 6mi" })).toBe(
       "/plan?runmap=09%2F04%2F26+6mi"
     );
+  });
+
+  it("targets an activity on a tokenized public plan URL", () => {
+    expect(buildSharedRunUrl("/share/token-1", "activity 1")).toBe(
+      "/share/token-1?runmap=activity+1"
+    );
+    expect(buildSharedRunUrl(
+      "https://example.com/share/token-1?source=card",
+      "activity-1",
+    )).toBe("https://example.com/share/token-1?source=card&runmap=activity-1");
   });
 });
 

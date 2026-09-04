@@ -1296,8 +1296,8 @@ function PlanPageContent(): React.ReactNode {
     }
   }, [activePlanId, savedPlans]);
 
-  const handleUpdateShareAccess = async (enabled: boolean) => {
-    if (!plan) return;
+  const handleUpdateShareAccess = async (enabled: boolean): Promise<string | null> => {
+    if (!plan) return null;
 
     setIsSaving(true);
     setShareStatus(null);
@@ -1313,8 +1313,10 @@ function PlanPageContent(): React.ReactNode {
       setShareLinkUrl(data.shareUrl);
       await refreshSavedPlans();
       setShareStatus(enabled ? "Share link enabled." : "Share link revoked.");
+      return data.shareUrl;
     } catch (err) {
       setShareStatus(err instanceof Error ? err.message : "Failed to update share access");
+      return null;
     } finally {
       setIsSaving(false);
     }
@@ -2324,6 +2326,8 @@ function PlanPageContent(): React.ReactNode {
                 activities={planActivities}
                 activityId={runMapActivity.id}
                 onActivityChange={(activityId) => updatePlanRoute({ runmap: activityId })}
+                shareBaseUrl={shareUrl}
+                onCreateShareLink={() => handleUpdateShareAccess(true)}
               />
             </div>
           </div>

@@ -87,6 +87,7 @@ export default function GarminActivityLeafletMap({
 
       L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
         attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
+        crossOrigin: true,
         maxZoom: 19,
       }).addTo(map);
 

@@ -6,11 +6,13 @@
 
 import React from "react";
 import { notFound } from "next/navigation";
-import { eq } from "drizzle-orm";
+import { and, eq, gt } from "drizzle-orm";
 import { db } from "@/lib/db/client";
-import { plans } from "@/lib/db/schema";
+import { plans, runActivities } from "@/lib/db/schema";
 import PlanOverviewCard from "@/app/components/plan/PlanOverviewCard";
 import PaceZonesCard from "@/app/components/plan/PaceZonesCard";
+import GarminActivityMapCard from "@/app/components/plan/GarminActivityMapCard";
+import { serializeRunActivity } from "@/lib/activities/serialize";
 import { calculatePaceZones, calculatePowerZones } from "@/lib/training/zone-calculator";
 import { MarathonPlan, RunnerProfile, Workout, formatPace } from "@/lib/training/models";
 import { formatPlanDate } from "@/lib/training/date-utils";
@@ -58,10 +60,14 @@ function WorkoutBlock({ workout, label }: { workout: Workout; label?: string }):
 
 export default async function SharedPlanPage({
   params,
+  searchParams,
 }: {
   params: Promise<{ token: string }>;
+  searchParams: Promise<{ runmap?: string | string[] }>;
 }): Promise<React.ReactNode> {
   const { token } = await params;
+  const query = await searchParams;
+  const requestedActivityId = Array.isArray(query.runmap) ? query.runmap[0] : query.runmap;
 
   const [sharedPlan] = await db
     .select()
@@ -83,6 +89,14 @@ export default async function SharedPlanPage({
     powerZones: calculatePowerZones(runnerProfile, paceZones),
   };
   const planTitle = runnerProfile.raceName?.trim() || "Shared Marathon Plan";
+  const [activityRow] = requestedActivityId
+    ? await db.select().from(runActivities).where(and(
+      eq(runActivities.id, requestedActivityId),
+      eq(runActivities.planId, sharedPlan.id),
+      gt(runActivities.sampleCount, 0),
+    )).limit(1)
+    : [];
+  const sharedActivity = activityRow ? serializeRunActivity(activityRow) : null;
 
   return (
     <main className="section-padding">
@@ -94,6 +108,21 @@ export default async function SharedPlanPage({
             {plan.totalWeeks} weeks · Peak {plan.peakWeeklyMileage} mi/week · Race day {formatPlanDate(plan.raceDay)}
           </p>
         </div>
+
+        {sharedActivity && (
+          <section className="mb-8">
+            <div className="mb-3">
+              <p className="text-xs font-semibold uppercase tracking-wide text-enduro-700">Shared run</p>
+              <h2 className="mt-1 text-2xl font-bold text-gray-900">Run details</h2>
+            </div>
+            <GarminActivityMapCard
+              activities={[sharedActivity]}
+              activityId={sharedActivity.id}
+              detailUrlPrefix={`/api/share/${token}/activities`}
+              shareBaseUrl={`/share/${token}`}
+            />
+          </section>
+        )}
 
         <div className="mb-8 grid gap-6 lg:grid-cols-3">
           <div className="lg:col-span-2">

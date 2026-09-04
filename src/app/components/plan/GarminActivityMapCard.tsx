@@ -8,9 +8,11 @@
 // shows the per-minute sample data (HR, power, cadence, pace,
 // elevation, temperature) fetched from the sample trace API.
 
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import type { ActivityDetailResponse, ActivitySplit, RunActivity } from "@/lib/activities/models";
 import GarminActivityLeafletMap from "@/app/components/plan/GarminActivityLeafletMap";
+import { buildSharedRunUrl } from "@/lib/plan-url";
+import { toBlob } from "html-to-image";
 
 const METERS_PER_MILE = 1609.344;
 
@@ -18,23 +20,27 @@ export interface GarminActivityMapCardProps {
   activities: RunActivity[];
   activityId?: string | null;
   onActivityChange?: (activityId: string) => void;
+  detailUrlPrefix?: string;
+  shareBaseUrl?: string | null;
+  onCreateShareLink?: () => Promise<string | null>;
 }
 
 // Module-level cache so an activity trace is fetched at most
 // once per tab, across any number of card mounts.
 const activityDetailCache = new Map<string, ActivityDetailResponse>();
 
-function useActivityDetail(activityId: string | null): ActivityDetailResponse | null {
+function useActivityDetail(activityId: string | null, detailUrlPrefix: string): ActivityDetailResponse | null {
+  const cacheKey = activityId ? `${detailUrlPrefix}/${activityId}` : null;
   const [detail, setDetail] = useState<ActivityDetailResponse | null>(
-    activityId ? activityDetailCache.get(activityId) ?? null : null
+    cacheKey ? activityDetailCache.get(cacheKey) ?? null : null
   );
 
   useEffect(() => {
-    if (!activityId) {
+    if (!activityId || !cacheKey) {
       setDetail(null);
       return;
     }
-    const cached = activityDetailCache.get(activityId);
+    const cached = activityDetailCache.get(cacheKey);
     if (cached) {
       setDetail(cached);
       return;
@@ -42,7 +48,7 @@ function useActivityDetail(activityId: string | null): ActivityDetailResponse | 
 
     let cancelled = false;
     setDetail(null);
-    fetch(`/api/activities/${activityId}`)
+    fetch(cacheKey)
       .then(async (response) => {
         const body = (await response.json()) as ActivityDetailResponse & { error?: string };
         if (!response.ok) throw new Error(body.error ?? "Failed to load activity detail");
@@ -50,18 +56,18 @@ function useActivityDetail(activityId: string | null): ActivityDetailResponse | 
       })
       .then((body) => {
         if (cancelled) return;
-        activityDetailCache.set(activityId, body);
+        activityDetailCache.set(cacheKey, body);
         setDetail(body);
       })
       .catch(() => {
         if (cancelled) return;
         const empty = { samples: [], splits: [] };
-        activityDetailCache.set(activityId, empty);
+        activityDetailCache.set(cacheKey, empty);
         setDetail(empty);
       });
 
     return () => { cancelled = true; };
-  }, [activityId]);
+  }, [activityId, cacheKey]);
 
   return detail;
 }
@@ -86,7 +92,11 @@ export default function GarminActivityMapCard({
   activities,
   activityId,
   onActivityChange,
+  detailUrlPrefix = "/api/activities",
+  shareBaseUrl = null,
+  onCreateShareLink,
 }: GarminActivityMapCardProps): React.ReactNode {
+  const cardRef = useRef<HTMLDivElement | null>(null);
   const eligible = activities
     .filter((activity) => (activity.sampleCount ?? 0) > 0)
     .sort((a, b) => b.startTimeGmt.localeCompare(a.startTimeGmt));
@@ -96,9 +106,12 @@ export default function GarminActivityMapCard({
   );
   const selectedActivityId = activityId === undefined ? localActivityId : activityId;
   const [selectedIndex, setSelectedIndex] = useState<number | null>(null);
+  const [imageStatus, setImageStatus] = useState<"idle" | "copying" | "copied" | "downloaded" | "error">("idle");
+  const [imageError, setImageError] = useState<string | null>(null);
+  const [shareStatus, setShareStatus] = useState<"idle" | "copying" | "copied" | "error">("idle");
 
   const selectedActivity = eligible.find((activity) => activity.id === selectedActivityId) ?? null;
-  const detail = useActivityDetail(selectedActivityId);
+  const detail = useActivityDetail(selectedActivityId, detailUrlPrefix);
   const samples = detail?.samples ?? null;
   const splits = detail?.splits ?? [];
 
@@ -137,8 +150,73 @@ export default function GarminActivityMapCard({
     setSelectedIndex(null);
   };
 
+  const handleCopyImage = async (): Promise<void> => {
+    if (!cardRef.current || !selectedActivity || !detail) return;
+    setImageStatus("copying");
+    setImageError(null);
+    try {
+      await document.fonts?.ready;
+      await new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
+      await new Promise<void>((resolve) => window.setTimeout(resolve, 250));
+      const exportWidth = Math.max(cardRef.current.offsetWidth, cardRef.current.scrollWidth);
+      const exportHeight = cardRef.current.scrollHeight;
+      const blob = await toBlob(cardRef.current, {
+        backgroundColor: "#ffffff",
+        cacheBust: true,
+        width: exportWidth,
+        height: exportHeight,
+        pixelRatio: 2,
+        skipFonts: true,
+        style: { overflow: "visible" },
+        filter: (node) => !(node instanceof HTMLElement && node.dataset.exportIgnore === "true"),
+      });
+      if (!blob) throw new Error("Unable to render run card");
+
+      if (navigator.clipboard?.write && typeof ClipboardItem !== "undefined") {
+        try {
+          await navigator.clipboard.write([new ClipboardItem({ "image/png": blob })]);
+          setImageStatus("copied");
+          return;
+        } catch {
+          // Fall back to a download when image clipboard writes are blocked.
+        }
+      }
+
+      const downloadUrl = URL.createObjectURL(blob);
+      const anchor = document.createElement("a");
+      anchor.href = downloadUrl;
+      anchor.download = `${selectedActivity.localDate}-run-card.png`;
+      document.body.appendChild(anchor);
+      anchor.click();
+      anchor.remove();
+      window.setTimeout(() => URL.revokeObjectURL(downloadUrl), 1000);
+      setImageStatus("downloaded");
+    } catch (error) {
+      console.error("Failed to copy run card image:", error);
+      setImageError(error instanceof Error ? error.message : "The browser could not render this card.");
+      setImageStatus("error");
+    }
+  };
+
+  const handleCopyShareLink = async (): Promise<void> => {
+    if (!selectedActivity) return;
+    setShareStatus("copying");
+    try {
+      const baseUrl = shareBaseUrl ?? await onCreateShareLink?.();
+      if (!baseUrl) throw new Error("Unable to create share link");
+      const runUrl = buildSharedRunUrl(baseUrl, selectedActivity.id, window.location.origin);
+      await navigator.clipboard.writeText(runUrl);
+      setShareStatus("copied");
+    } catch {
+      setShareStatus("error");
+    }
+  };
+
   useEffect(() => {
     setSelectedIndex(null);
+    setImageStatus("idle");
+    setImageError(null);
+    setShareStatus("idle");
   }, [selectedActivityId]);
 
 
@@ -164,28 +242,48 @@ export default function GarminActivityMapCard({
   }
 
   return (
-    <div className="overflow-hidden rounded-xl border border-gray-200 bg-white shadow-sm">
+    <div ref={cardRef} className="overflow-hidden rounded-xl border border-gray-200 bg-white shadow-sm">
       <div className="flex flex-col gap-4 border-b border-gray-200 bg-white px-5 py-4 md:flex-row md:items-center md:justify-between">
         <CardHeader />
-        <label className="min-w-0 md:w-80">
-          <span className="sr-only">Choose a run</span>
-          <select
-            value={selectedActivityId ?? ""}
-            onChange={(event) => handleActivityChange(event.target.value)}
-            className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900"
-          >
-            {eligible.map((activity) => (
-              <option key={activity.id} value={activity.id}>
-                {activity.localDate} · {activity.activityName} · {activity.distanceMiles.toFixed(1)} mi
-              </option>
-            ))}
-          </select>
-        </label>
+        <div data-export-ignore="true" className="flex min-w-0 flex-col gap-2 sm:flex-row sm:items-center">
+          <label className="min-w-0 sm:w-72">
+            <span className="sr-only">Choose a run</span>
+            <select
+              value={selectedActivityId ?? ""}
+              onChange={(event) => handleActivityChange(event.target.value)}
+              className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900"
+            >
+              {eligible.map((activity) => (
+                <option key={activity.id} value={activity.id}>
+                  {activity.localDate} · {activity.activityName} · {activity.distanceMiles.toFixed(1)} mi
+                </option>
+              ))}
+            </select>
+          </label>
+          <div className="flex gap-2">
+            <button
+              type="button"
+              onClick={handleCopyImage}
+              disabled={!detail || imageStatus === "copying"}
+              className="rounded-lg border border-gray-300 bg-white px-3 py-2 text-xs font-semibold text-gray-700 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {imageStatus === "copying" ? "Rendering..." : imageStatus === "copied" ? "Image copied" : imageStatus === "downloaded" ? "PNG downloaded" : imageStatus === "error" ? "Try again" : "Copy image"}
+            </button>
+            <button
+              type="button"
+              onClick={handleCopyShareLink}
+              disabled={!selectedActivity || shareStatus === "copying"}
+              className="rounded-lg bg-enduro-700 px-3 py-2 text-xs font-semibold text-white hover:bg-enduro-800 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {shareStatus === "copying" ? "Creating..." : shareStatus === "copied" ? "Link copied" : shareStatus === "error" ? "Try again" : "Share"}
+            </button>
+          </div>
+        </div>
       </div>
 
-      <div className="grid gap-5 p-5 lg:grid-cols-5">
+      <div className={imageStatus === "copying" ? "space-y-5 p-5" : "grid gap-5 p-5 lg:grid-cols-5"}>
         {/* Route map + summary */}
-        <div className="lg:col-span-3">
+        <div className={imageStatus === "copying" ? undefined : "lg:col-span-3"}>
           <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1 text-xs text-gray-500">
             <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
               {selectedActivity && (
@@ -211,6 +309,7 @@ export default function GarminActivityMapCard({
           <div className="mt-3 overflow-hidden rounded-lg border border-gray-200 bg-gray-50">
             {hasMap ? (
               <GarminActivityLeafletMap
+                key={imageStatus === "copying" ? "export-map" : "interactive-map"}
                 samples={samples ?? []}
                 selectedIndex={selectedIndex}
                 onPointSelect={(index) => {
@@ -256,7 +355,7 @@ export default function GarminActivityMapCard({
         </div>
 
         {/* Selected point detail */}
-        <div className="lg:col-span-2">
+        {imageStatus !== "copying" && <div className="lg:col-span-2">
           <div className="rounded-lg border border-gray-200 bg-gray-50/60 p-4">
             <div className="flex items-baseline justify-between">
               <h4 className="text-xs font-medium uppercase tracking-wide text-gray-500">Sample point</h4>
@@ -294,14 +393,23 @@ export default function GarminActivityMapCard({
               </div>
             )}
           </div>
-        </div>
+        </div>}
 
         {selectedActivity && detail && (
-          <div className="lg:col-span-5">
-            <MileSplits splits={splits} hasMeasuredPower={!selectedActivity.powerSource?.startsWith("estimated_")} />
+          <div className={imageStatus === "copying" ? undefined : "lg:col-span-5"}>
+            <MileSplits
+              splits={splits}
+              hasMeasuredPower={!selectedActivity.powerSource?.startsWith("estimated_")}
+              exporting={imageStatus === "copying"}
+            />
           </div>
         )}
       </div>
+      {imageError && (
+        <p data-export-ignore="true" role="alert" className="border-t border-red-100 bg-red-50 px-5 py-2 text-xs text-red-700">
+          Image export failed: {imageError}
+        </p>
+      )}
     </div>
   );
 }
@@ -309,9 +417,11 @@ export default function GarminActivityMapCard({
 function MileSplits({
   splits,
   hasMeasuredPower,
+  exporting,
 }: {
   splits: ActivitySplit[];
   hasMeasuredPower: boolean;
+  exporting: boolean;
 }): React.ReactNode {
   return (
     <section className="overflow-hidden rounded-lg border border-gray-200">
@@ -327,7 +437,7 @@ function MileSplits({
           Splits are unavailable because this trace does not contain enough valid speed data.
         </p>
       ) : (
-        <div className="overflow-x-auto">
+        <div className={exporting ? "overflow-visible" : "overflow-x-auto"}>
           <table className="w-full min-w-[690px] text-left text-xs">
             <thead className="bg-gray-50 text-[10px] uppercase tracking-wide text-gray-500">
               <tr>
