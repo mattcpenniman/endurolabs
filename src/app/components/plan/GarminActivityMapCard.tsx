@@ -23,6 +23,7 @@ export interface GarminActivityMapCardProps {
   detailUrlPrefix?: string;
   shareBaseUrl?: string | null;
   onCreateShareLink?: () => Promise<string | null>;
+  showControls?: boolean;
 }
 
 // Module-level cache so an activity trace is fetched at most
@@ -95,6 +96,7 @@ export default function GarminActivityMapCard({
   detailUrlPrefix = "/api/activities",
   shareBaseUrl = null,
   onCreateShareLink,
+  showControls = true,
 }: GarminActivityMapCardProps): React.ReactNode {
   const cardRef = useRef<HTMLDivElement | null>(null);
   const eligible = activities
@@ -245,7 +247,7 @@ export default function GarminActivityMapCard({
     <div ref={cardRef} className="overflow-hidden rounded-xl border border-gray-200 bg-white shadow-sm">
       <div className="flex flex-col gap-4 border-b border-gray-200 bg-white px-5 py-4 md:flex-row md:items-center md:justify-between">
         <CardHeader />
-        <div data-export-ignore="true" className="flex min-w-0 flex-col gap-2 sm:flex-row sm:items-center">
+        {showControls && <div data-export-ignore="true" className="flex min-w-0 flex-col gap-2 sm:flex-row sm:items-center">
           <label className="min-w-0 sm:w-72">
             <span className="sr-only">Choose a run</span>
             <select
@@ -278,7 +280,7 @@ export default function GarminActivityMapCard({
               {shareStatus === "copying" ? "Creating..." : shareStatus === "copied" ? "Link copied" : shareStatus === "error" ? "Try again" : "Share"}
             </button>
           </div>
-        </div>
+        </div>}
       </div>
 
       <div className={imageStatus === "copying" ? "space-y-5 p-5" : "grid gap-5 p-5 lg:grid-cols-5"}>

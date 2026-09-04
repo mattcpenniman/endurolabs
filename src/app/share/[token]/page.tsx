@@ -98,6 +98,30 @@ export default async function SharedPlanPage({
     : [];
   const sharedActivity = activityRow ? serializeRunActivity(activityRow) : null;
 
+  if (requestedActivityId && !sharedActivity) {
+    notFound();
+  }
+
+  if (sharedActivity) {
+    return (
+      <main className="section-padding">
+        <div className="mx-auto w-full max-w-5xl px-4 sm:px-6">
+          <div className="mb-5">
+            <p className="text-xs font-semibold uppercase tracking-wide text-enduro-700">Shared run</p>
+            <h1 className="mt-1 text-3xl font-bold text-gray-900">{sharedActivity.activityName}</h1>
+            <p className="mt-2 text-sm text-gray-600">{sharedActivity.localDate} · Read-only activity details</p>
+          </div>
+          <GarminActivityMapCard
+            activities={[sharedActivity]}
+            activityId={sharedActivity.id}
+            detailUrlPrefix={`/api/share/${token}/activities`}
+            showControls={false}
+          />
+        </div>
+      </main>
+    );
+  }
+
   return (
     <main className="section-padding">
       <div className="container-narrow">
@@ -108,21 +132,6 @@ export default async function SharedPlanPage({
             {plan.totalWeeks} weeks · Peak {plan.peakWeeklyMileage} mi/week · Race day {formatPlanDate(plan.raceDay)}
           </p>
         </div>
-
-        {sharedActivity && (
-          <section className="mb-8">
-            <div className="mb-3">
-              <p className="text-xs font-semibold uppercase tracking-wide text-enduro-700">Shared run</p>
-              <h2 className="mt-1 text-2xl font-bold text-gray-900">Run details</h2>
-            </div>
-            <GarminActivityMapCard
-              activities={[sharedActivity]}
-              activityId={sharedActivity.id}
-              detailUrlPrefix={`/api/share/${token}/activities`}
-              shareBaseUrl={`/share/${token}`}
-            />
-          </section>
-        )}
 
         <div className="mb-8 grid gap-6 lg:grid-cols-3">
           <div className="lg:col-span-2">
