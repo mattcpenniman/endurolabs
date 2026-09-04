@@ -141,6 +141,7 @@ async function processHistoryPass(job: typeof garminSyncJobs.$inferSelect, clien
         target: [runActivities.userId, runActivities.source, runActivities.providerActivityId],
         set: {
           ...activity,
+          eventType: sql`coalesce(excluded.event_type, ${runActivities.eventType})`,
           averagePower: sql`coalesce(excluded.average_power, ${runActivities.averagePower})`,
           powerSource: sql`case
             when excluded.average_power is null and ${runActivities.averagePower} is not null

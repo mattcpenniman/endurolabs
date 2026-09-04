@@ -9,6 +9,7 @@ export interface RunActivity {
   powerSource?: string;
   activityName: string;
   activityType: string;
+  eventType: string | null;
   localDate: string;
   startTimeLocal: string;
   startTimeGmt: string;
@@ -47,6 +48,10 @@ export interface GarminConnectionStatus {
   lastSyncAt?: string | null;
   lastError?: string | null;
   activities: RunActivity[];
+}
+
+export interface RaceListResponse {
+  races: RunActivity[];
 }
 
 export interface ActivityChartSample {

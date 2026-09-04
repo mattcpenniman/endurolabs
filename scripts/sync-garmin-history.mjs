@@ -91,13 +91,13 @@ try {
     if (!activity.activityId || Number.isNaN(startTimeGmt.getTime())) continue;
     const now = new Date();
     await sql`insert into run_activities (
-      user_id, provider_activity_id, source, power_source, activity_name, activity_type,
+      user_id, provider_activity_id, source, power_source, activity_name, activity_type, event_type,
       local_date, start_time_local, start_time_gmt, distance_meters, duration_seconds,
       moving_duration_seconds, elevation_gain_meters, average_heart_rate, max_heart_rate,
       average_cadence, average_power, calories, device_name, synced_at, updated_at
     ) values (
       ${connection.userId}, ${String(activity.activityId)}, 'garmin', ${String(activity.manufacturer ?? "").toLowerCase().includes("apple") ? "apple_watch" : "garmin"},
-      ${activity.activityName?.trim() || "Garmin run"}, ${activity.activityType?.typeKey || "running"},
+      ${activity.activityName?.trim() || "Garmin run"}, ${activity.activityType?.typeKey || "running"}, ${activity.eventType?.typeKey || null},
       ${activity.startTimeLocal.slice(0, 10)}, ${activity.startTimeLocal}, ${startTimeGmt},
       ${Math.max(0, rounded(activity.distance) ?? 0)}, ${Math.max(0, rounded(activity.duration) ?? 0)},
       ${rounded(activity.movingDuration)}, ${rounded(activity.elevationGain)}, ${rounded(activity.averageHR)},
@@ -107,6 +107,7 @@ try {
     ) on conflict (user_id, source, provider_activity_id) do update set
       power_source = excluded.power_source,
       activity_name = excluded.activity_name, activity_type = excluded.activity_type,
+      event_type = coalesce(excluded.event_type, run_activities.event_type),
       local_date = excluded.local_date, start_time_local = excluded.start_time_local,
       start_time_gmt = excluded.start_time_gmt, distance_meters = excluded.distance_meters,
       duration_seconds = excluded.duration_seconds, moving_duration_seconds = excluded.moving_duration_seconds,

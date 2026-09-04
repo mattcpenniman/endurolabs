@@ -119,6 +119,7 @@ export const runActivities = pgTable("run_activities", {
   powerSource: varchar("power_source", { length: 32 }).default("garmin").notNull(),
   activityName: varchar("activity_name", { length: 255 }).notNull(),
   activityType: varchar("activity_type", { length: 64 }).notNull(),
+  eventType: varchar("event_type", { length: 32 }),
   localDate: varchar("local_date", { length: 10 }).notNull(),
   startTimeLocal: varchar("start_time_local", { length: 32 }).notNull(),
   startTimeGmt: timestamp("start_time_gmt").notNull(),
@@ -146,6 +147,8 @@ export const runActivities = pgTable("run_activities", {
   detailLastAttemptAt: timestamp("detail_last_attempt_at"),
   detailLastError: text("detail_last_error"),
   detailNextRetryAt: timestamp("detail_next_retry_at"),
+  shareToken: text("share_token"),
+  sharedAt: timestamp("shared_at"),
   syncedAt: timestamp("synced_at").defaultNow().notNull(),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
@@ -154,6 +157,7 @@ export const runActivities = pgTable("run_activities", {
   index("run_activities_user_date_idx").on(table.userId, table.localDate),
   index("run_activities_plan_idx").on(table.planId),
   index("run_activities_detail_queue_idx").on(table.userId, table.source, table.detailFetchStatus, table.startTimeGmt),
+  uniqueIndex("run_activities_share_token_unique").on(table.shareToken),
 ]);
 
 export const planRunLogs = pgTable("plan_run_logs", {

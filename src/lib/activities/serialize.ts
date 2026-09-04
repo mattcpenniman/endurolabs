@@ -15,6 +15,7 @@ export function serializeRunActivity(row: typeof runActivities.$inferSelect): Ru
     powerSource: row.powerSource,
     activityName: row.activityName,
     activityType: row.activityType,
+    eventType: row.eventType,
     localDate: row.localDate,
     startTimeLocal: row.startTimeLocal,
     startTimeGmt: row.startTimeGmt.toISOString(),

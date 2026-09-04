@@ -54,6 +54,30 @@ describe("Garmin activities", () => {
     expect(activity.averagePower).toBe(279);
   });
 
+  it("extracts Garmin race events and preserves the May 2 race date", () => {
+    const activity = normalizeGarminActivity({
+      activityId: 12347,
+      activityName: "Marathon",
+      activityType: { typeKey: "street_running" },
+      eventType: { typeKey: "race" },
+      startTimeLocal: "2026-05-02 07:00:00",
+      startTimeGMT: "2026-05-02 11:00:00",
+    });
+
+    expect(activity.eventType).toBe("race");
+    expect(activity.localDate).toBe("2026-05-02");
+  });
+
+  it("leaves the event type null when Garmin omits it", () => {
+    const activity = normalizeGarminActivity({
+      activityId: 12348,
+      startTimeLocal: "2026-05-03 07:00:00",
+      startTimeGMT: "2026-05-03 11:00:00",
+    });
+
+    expect(activity.eventType).toBeNull();
+  });
+
   it("records Apple-origin power forwarded through Garmin", () => {
     const activity = normalizeGarminActivity({
       activityId: 12346,

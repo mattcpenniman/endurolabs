@@ -373,6 +373,7 @@ function run(date: string, distanceMiles: number, pace: number, hr: number | nul
     source: "garmin",
     activityName: "Test run",
     activityType: "street_running",
+    eventType: null,
     localDate: date,
     startTimeLocal: `${date} 07:00:00`,
     startTimeGmt: new Date(`${date}T07:00:00Z`).toISOString(),

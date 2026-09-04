@@ -55,11 +55,11 @@ export default function Header() {
 
   return (
     <header className="sticky top-0 z-50 border-b border-[var(--color-border)] bg-[var(--color-bg)]/80 backdrop-blur-sm">
-      <div className="container-narrow flex h-16 items-center justify-between">
+      <div className="container-narrow flex flex-col gap-2 py-3 sm:h-16 sm:flex-row sm:items-center sm:justify-between sm:gap-4 sm:py-0">
         <Link href="/" className="flex items-center gap-2">
           <span className="text-2xl font-bold text-enduro-700">EnduroLab</span>
         </Link>
-        <nav className="flex items-center gap-6 text-sm font-medium" style={{ color: "var(--color-text-secondary)" }}>
+        <nav className="scrollbar-thin flex w-full items-center gap-4 overflow-x-auto pb-1 text-sm font-medium sm:w-auto sm:gap-6 sm:overflow-visible sm:pb-0" style={{ color: "var(--color-text-secondary)" }}>
           <Link href="/" className="hover:text-enduro-600">
             Home
           </Link>
@@ -72,6 +72,9 @@ export default function Header() {
           <a href="/stats" className="hover:text-enduro-600">
             Stats
           </a>
+          <Link href="/races" className="hover:text-enduro-600">
+            Races
+          </Link>
           {user && (
             <Link href="/profile" className="hover:text-enduro-600">
               Profile

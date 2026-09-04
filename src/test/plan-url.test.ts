@@ -31,6 +31,12 @@ describe("plan URL state", () => {
       "activity-1",
     )).toBe("https://example.com/share/token-1?source=card&runmap=activity-1");
   });
+
+  it("targets an activity on a tokenized public race URL", () => {
+    expect(buildSharedRunUrl("https://example.com/race/race-token", "race-1")).toBe(
+      "https://example.com/race/race-token?runmap=race-1"
+    );
+  });
 });
 
 describe("internal redirects", () => {

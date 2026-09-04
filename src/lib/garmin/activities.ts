@@ -10,6 +10,7 @@ export interface GarminActivityPayload {
   startTimeLocal: string;
   startTimeGMT: string;
   activityType?: { typeKey?: string };
+  eventType?: { typeKey?: string };
   distance?: number;
   duration?: number;
   movingDuration?: number;
@@ -28,6 +29,7 @@ export interface NormalizedGarminActivity {
   powerSource: "garmin" | "apple_watch";
   activityName: string;
   activityType: string;
+  eventType: string | null;
   localDate: string;
   startTimeLocal: string;
   startTimeGmt: Date;
@@ -73,6 +75,7 @@ export function normalizeGarminActivity(activity: GarminActivityPayload): Normal
     powerSource: activity.manufacturer?.toLowerCase().includes("apple") ? "apple_watch" : "garmin",
     activityName: activity.activityName?.trim() || "Garmin run",
     activityType: activity.activityType?.typeKey ?? "running",
+    eventType: activity.eventType?.typeKey ?? null,
     localDate,
     startTimeLocal: activity.startTimeLocal,
     startTimeGmt,
