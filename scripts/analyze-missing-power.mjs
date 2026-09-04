@@ -280,7 +280,7 @@ try {
       : null;
 
     const estimates = [];
-    for (const activity of activities.filter((item) => item.averagePower === null)) {
+    for (const activity of activities) {
       const summarySeconds = activity.movingDurationSeconds ?? activity.durationSeconds;
       const point = {
         speed: summarySeconds > 0 ? activity.distanceMeters / summarySeconds : null,
@@ -316,8 +316,8 @@ try {
           if (estimate.estimatedPower === null) continue;
           const updated = await transaction`
             update run_activities
-            set average_power = ${estimate.estimatedPower}, power_source = 'estimated_speed_v1', updated_at = now()
-            where id = ${estimate.id} and plan_id = ${plan.id} and average_power is null
+            set calculated_power = ${estimate.estimatedPower}, updated_at = now()
+            where id = ${estimate.id} and plan_id = ${plan.id}
             returning id
           `;
           appliedActivities += updated.length;

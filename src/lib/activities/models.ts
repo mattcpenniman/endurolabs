@@ -21,7 +21,10 @@ export interface RunActivity {
   averageHeartRate: number | null;
   maxHeartRate: number | null;
   averageCadence: number | null;
+  garminPower: number | null;
+  calculatedPower: number | null;
   averagePower: number | null;
+  averagePowerEstimated: boolean;
   calories: number | null;
   deviceName: string | null;
   planId: string | null;

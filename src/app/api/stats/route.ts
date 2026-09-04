@@ -21,6 +21,7 @@ import {
 import { getCurrentUser } from "@/lib/auth";
 import { MarathonPlan } from "@/lib/training/models";
 import { RunActivity } from "@/lib/activities/models";
+import { resolveSummaryPower } from "@/lib/activities/serialize";
 import { comparePlans } from "@/lib/analytics/plan-comparison";
 import {
   analyzePlanFitness,
@@ -271,11 +272,12 @@ function serializeDecoupling(
 
 function serializeActivity(row: typeof runActivities.$inferSelect): RunActivity {
   const distanceMiles = Math.max(0, row.distanceMeters) / 1609.344;
+  const power = resolveSummaryPower(row);
   return {
     id: row.id,
     providerActivityId: row.providerActivityId,
     source: row.source,
-    powerSource: row.powerSource,
+    powerSource: power.displayPowerSource,
     activityName: row.activityName,
     activityType: row.activityType,
     eventType: row.eventType,
@@ -290,7 +292,10 @@ function serializeActivity(row: typeof runActivities.$inferSelect): RunActivity 
     averageHeartRate: row.averageHeartRate,
     maxHeartRate: row.maxHeartRate,
     averageCadence: row.averageCadence,
-    averagePower: row.averagePower,
+    garminPower: power.garminPower,
+    calculatedPower: power.calculatedPower,
+    averagePower: power.averagePower,
+    averagePowerEstimated: power.averagePowerEstimated,
     calories: row.calories,
     deviceName: row.deviceName,
     planId: row.planId,
@@ -321,7 +326,8 @@ function primaryPowerSource(rows: Array<typeof runActivities.$inferSelect>): str
   const sampleTotals = new Map<string, number>();
   for (const row of rows) {
     if (
-      row.sampleCount === 0
+      row.powerSource.startsWith("estimated_")
+      || row.sampleCount === 0
       || (row.qualityScore !== null && row.qualityScore < ANALYTICS_QUALITY_THRESHOLD)
     ) continue;
     sampleTotals.set(row.powerSource, (sampleTotals.get(row.powerSource) ?? 0) + row.sampleCount);
@@ -368,7 +374,10 @@ async function loadPlanActuals(userId: string, planId: string): Promise<{
       averageHeartRate: null,
       maxHeartRate: null,
       averageCadence: null,
+      garminPower: null,
+      calculatedPower: null,
       averagePower: null,
+      averagePowerEstimated: false,
       calories: null,
       deviceName: null,
       planId,

@@ -118,10 +118,8 @@ try {
     imported += 1;
   }
 
-  // Auto-fill summary power for any race that still has none, using the
-  // athlete's measured speed→power model. Guarded by average_power IS NULL
-  // so measured summaries and prior estimates are never overwritten.
-  let estimatedRaces = 0;
+  // Keep a calculated fallback for every activity, independent of Garmin power.
+  let calculatedActivities = 0;
   const measured = await sql`
     select distance_meters as dist, duration_seconds as dur, moving_duration_seconds as mov, average_power as p
     from run_activities
@@ -138,19 +136,20 @@ try {
     if (variance > 0) {
       const slope = points.reduce((a, b) => a + (b.speed - meanX) * (b.power - meanY), 0) / variance;
       const intercept = meanY - slope * meanX;
-      const [applied] = await sql`
+      const applied = await sql`
         update run_activities
-        set average_power = round((${intercept} + ${slope} * (distance_meters::double precision
+        set calculated_power = round((${intercept} + ${slope} * (distance_meters::double precision
           / greatest(coalesce(moving_duration_seconds, duration_seconds), 1))))::int,
-            power_source = 'estimated_speed_v1', updated_at = now()
-        where user_id = ${connection.userId} and source = 'garmin' and event_type = 'race'
-          and average_power is null and duration_seconds > 0
+            average_power = case when power_source like 'estimated_%' then null else average_power end,
+            power_source = case when power_source like 'estimated_%' then 'garmin' else power_source end,
+            updated_at = now()
+        where user_id = ${connection.userId} and source = 'garmin' and duration_seconds > 0
         returning id
       `;
-      estimatedRaces = applied.length;
+      calculatedActivities = applied.length;
     }
   }
-  console.log(JSON.stringify({ user: connection.email, since, fetched: fetched.length, runs: runs.length, imported, estimatedRaces }, null, 2));
+  console.log(JSON.stringify({ user: connection.email, since, fetched: fetched.length, runs: runs.length, imported, calculatedActivities }, null, 2));
 } catch (error) {
   console.error("Garmin history sync failed:", error.message);
   process.exitCode = 1;

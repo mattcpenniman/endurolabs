@@ -1,13 +1,12 @@
 // ============================================================
-// EnduroLab - Auto summary power estimate (races lacking sensor power)
+// EnduroLab - Auto summary power calculation
 // ============================================================
-// Reuses the athlete's measured speed/power summary model to fill
-// average_power only where the stored value is still null. The update is
-// guarded by `average_power is null`, so it is idempotent and can never
-// replace a measured summary or a previously-estimate row.
+// Garmin power and calculated power are stored independently. This keeps
+// provider sync authoritative while allowing every activity to have a
+// consistent modeled fallback.
 // ============================================================
 
-import { and, eq, gt, isNotNull, isNull, notLike, sql } from "drizzle-orm";
+import { and, eq, gt, isNotNull, notLike, or, sql } from "drizzle-orm";
 import { db } from "@/lib/db/client";
 import { runActivities } from "@/lib/db/schema";
 import { fitSpeedPowerModel } from "@/lib/analytics/modeled-power";
@@ -44,31 +43,34 @@ export async function loadSummaryPowerModel(userId: string): Promise<SummarySpee
 }
 
 /**
- * Fill average_power for the user's race activities that still have none.
+ * Refresh calculated_power for every valid activity belonging to the user.
  * Uses the fitted speed→power model (speed = distance / moving duration,
- * falling back to total duration) and tags the values
- * `estimated_speed_v1`. Only rows where `average_power is null` are
- * touched, so measured summaries and earlier estimates are preserved and
- * repeated syncs are safe.
+ * falling back to total duration). The legacy estimated-power representation
+ * is repaired at the same time by removing modeled values from average_power.
  */
-export async function applyRaceSummaryPowerEstimate(
+export async function applyCalculatedSummaryPower(
   userId: string,
   model: SummarySpeedPowerModel,
 ): Promise<number> {
+  const calculation = sql`round((${model.intercept} + ${model.slope} * (distance_meters::double precision
+    / greatest(coalesce(moving_duration_seconds, duration_seconds), 1))))::int`;
   const updated = await db
     .update(runActivities)
     .set({
-      averagePower: sql`round((${model.intercept} + ${model.slope} * (distance_meters::double precision
-        / greatest(coalesce(moving_duration_seconds, duration_seconds), 1))))::int`,
-      powerSource: "estimated_speed_v1",
+      calculatedPower: calculation,
+      averagePower: sql`case when ${runActivities.powerSource} like 'estimated_%' then null else ${runActivities.averagePower} end`,
+      powerSource: sql`case when ${runActivities.powerSource} like 'estimated_%' then 'garmin' else ${runActivities.powerSource} end`,
       updatedAt: new Date(),
     })
     .where(and(
       eq(runActivities.userId, userId),
       eq(runActivities.source, "garmin"),
-      eq(runActivities.eventType, "race"),
-      isNull(runActivities.averagePower),
       gt(runActivities.durationSeconds, 0),
-    ));
-  return updated[2] as unknown as number ?? 0;
+      or(
+        sql`${runActivities.calculatedPower} is distinct from ${calculation}`,
+        sql`${runActivities.powerSource} like 'estimated_%'`,
+      ),
+    ))
+    .returning({ id: runActivities.id });
+  return updated.length;
 }

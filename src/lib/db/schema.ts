@@ -131,6 +131,7 @@ export const runActivities = pgTable("run_activities", {
   maxHeartRate: integer("max_heart_rate"),
   averageCadence: integer("average_cadence"),
   averagePower: integer("average_power"),
+  calculatedPower: integer("calculated_power"),
   calories: integer("calories"),
   deviceName: varchar("device_name", { length: 255 }),
   planId: uuid("plan_id").references(() => plans.id, { onDelete: "set null" }),

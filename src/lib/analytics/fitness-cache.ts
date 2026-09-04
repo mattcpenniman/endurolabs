@@ -7,7 +7,7 @@
 
 import "server-only";
 
-import { and, asc, eq, gte, inArray, lt } from "drizzle-orm";
+import { and, asc, eq, gte, inArray, isNotNull, isNull, like, lt, or } from "drizzle-orm";
 import { db } from "@/lib/db/client";
 import { activitySamples, fitnessSnapshots, runActivities } from "@/lib/db/schema";
 import { ANALYTICS_QUALITY_THRESHOLD } from "@/lib/analytics/activity-quality";
@@ -119,7 +119,10 @@ export async function loadModeledFitnessWindowData(
     updatedAt: runActivities.updatedAt,
   }).from(runActivities).where(and(
     eq(runActivities.userId, userId),
-    eq(runActivities.powerSource, "estimated_speed_v1"),
+    or(
+      and(isNull(runActivities.averagePower), isNotNull(runActivities.calculatedPower)),
+      like(runActivities.powerSource, "estimated_%"),
+    ),
     eq(runActivities.excludedFromAnalytics, false),
     gte(runActivities.localDate, window.startDate),
     lt(runActivities.localDate, nextDate(window.endDate)),

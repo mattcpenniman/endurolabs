@@ -127,7 +127,7 @@ function buildWeekActuals(
     averageHeartRate: weightedAverage(runs, (run) => run.averageHeartRate),
     averagePower: weightedAverage(runs, (run) => run.averagePower),
     averagePowerEstimated: runs.some((run) => (
-      run.averagePower !== null && run.powerSource?.startsWith("estimated_")
+      run.averagePower !== null && run.averagePowerEstimated
     )),
     elevationGainMeters: runs.reduce((sum, run) => sum + (run.elevationGainMeters ?? 0), 0),
     totalDurationSeconds: runs.reduce((sum, run) => sum + run.durationSeconds, 0),
