@@ -7,7 +7,8 @@ import { and, asc, eq } from "drizzle-orm";
 import { getCurrentUser } from "@/lib/auth";
 import { db } from "@/lib/db/client";
 import { activitySamples, runActivities } from "@/lib/db/schema";
-import { downsampleActivitySamples } from "@/lib/activities/activity-chart";
+import { downsampleActivitySamples, normalizeActivityCadence } from "@/lib/activities/activity-chart";
+import { buildActivityMileSplits } from "@/lib/activities/activity-splits";
 
 export async function GET(
   _request: NextRequest,
@@ -17,7 +18,12 @@ export async function GET(
   if (!user) return NextResponse.json({ error: "Authentication required" }, { status: 401 });
 
   const { id } = await context.params;
-  const [activity] = await db.select({ id: runActivities.id })
+  const [activity] = await db.select({
+    id: runActivities.id,
+    distanceMeters: runActivities.distanceMeters,
+    durationSeconds: runActivities.durationSeconds,
+    powerSource: runActivities.powerSource,
+  })
     .from(runActivities)
     .where(and(eq(runActivities.id, id), eq(runActivities.userId, user.id)))
     .limit(1);
@@ -37,7 +43,19 @@ export async function GET(
     .where(eq(activitySamples.activityId, id))
     .orderBy(asc(activitySamples.elapsedSeconds));
 
-  return NextResponse.json({ samples: downsampleActivitySamples(samples) });
+  const splits = buildActivityMileSplits({
+    summaryDistanceMeters: activity.distanceMeters,
+    durationSeconds: activity.durationSeconds,
+    hasMeasuredPower: !activity.powerSource.startsWith("estimated_"),
+    samples,
+  });
+
+  const displaySamples = samples.map((sample) => ({
+    ...sample,
+    cadence: normalizeActivityCadence(sample.cadence),
+  }));
+
+  return NextResponse.json({ samples: downsampleActivitySamples(displaySamples), splits });
 }
 
 export async function PATCH(

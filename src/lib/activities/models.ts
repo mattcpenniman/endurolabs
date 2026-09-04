@@ -65,6 +65,22 @@ export interface ActivityChartPoint extends ActivityChartSample {
   paceMinutesPerMile: number | null;
 }
 
+export interface ActivitySplit {
+  number: number;
+  distanceMiles: number;
+  durationSeconds: number;
+  elapsedSeconds: number;
+  paceMinutesPerMile: number | null;
+  averageHeartRate: number | null;
+  /** Null unless the source is measured sensor power. */
+  averagePower: number | null;
+  averageCadence: number | null;
+  averageTemperatureCelsius: number | null;
+  elevationGainMeters: number;
+  elevationLossMeters: number;
+}
+
 export interface ActivityDetailResponse {
   samples: ActivityChartSample[];
+  splits: ActivitySplit[];
 }

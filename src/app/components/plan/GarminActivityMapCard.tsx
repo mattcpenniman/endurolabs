@@ -9,7 +9,7 @@
 // elevation, temperature) fetched from the sample trace API.
 
 import React, { useEffect, useMemo, useState } from "react";
-import type { ActivityChartSample, ActivityDetailResponse, RunActivity } from "@/lib/activities/models";
+import type { ActivityDetailResponse, ActivitySplit, RunActivity } from "@/lib/activities/models";
 import GarminActivityLeafletMap from "@/app/components/plan/GarminActivityLeafletMap";
 
 const METERS_PER_MILE = 1609.344;
@@ -20,51 +20,50 @@ export interface GarminActivityMapCardProps {
   onActivityChange?: (activityId: string) => void;
 }
 
-type SampleDetail = ActivityChartSample;
-
 // Module-level cache so an activity trace is fetched at most
 // once per tab, across any number of card mounts.
-const activitySampleCache = new Map<string, SampleDetail[]>();
+const activityDetailCache = new Map<string, ActivityDetailResponse>();
 
-function useActivitySamples(activityId: string | null): SampleDetail[] | null {
-  const [samples, setSamples] = useState<SampleDetail[] | null>(
-    activityId ? activitySampleCache.get(activityId) ?? null : null
+function useActivityDetail(activityId: string | null): ActivityDetailResponse | null {
+  const [detail, setDetail] = useState<ActivityDetailResponse | null>(
+    activityId ? activityDetailCache.get(activityId) ?? null : null
   );
 
   useEffect(() => {
     if (!activityId) {
-      setSamples(null);
+      setDetail(null);
       return;
     }
-    const cached = activitySampleCache.get(activityId);
+    const cached = activityDetailCache.get(activityId);
     if (cached) {
-      setSamples(cached);
+      setDetail(cached);
       return;
     }
 
     let cancelled = false;
-    setSamples(null);
+    setDetail(null);
     fetch(`/api/activities/${activityId}`)
       .then(async (response) => {
         const body = (await response.json()) as ActivityDetailResponse & { error?: string };
         if (!response.ok) throw new Error(body.error ?? "Failed to load activity detail");
-        return body.samples;
+        return body;
       })
-      .then((detail) => {
+      .then((body) => {
         if (cancelled) return;
-        activitySampleCache.set(activityId, detail);
-        setSamples(detail);
+        activityDetailCache.set(activityId, body);
+        setDetail(body);
       })
       .catch(() => {
         if (cancelled) return;
-        activitySampleCache.set(activityId, []);
-        setSamples([]);
+        const empty = { samples: [], splits: [] };
+        activityDetailCache.set(activityId, empty);
+        setDetail(empty);
       });
 
     return () => { cancelled = true; };
   }, [activityId]);
 
-  return samples;
+  return detail;
 }
 
 function formatElapsed(totalSeconds: number): string {
@@ -99,7 +98,9 @@ export default function GarminActivityMapCard({
   const [selectedIndex, setSelectedIndex] = useState<number | null>(null);
 
   const selectedActivity = eligible.find((activity) => activity.id === selectedActivityId) ?? null;
-  const samples = useActivitySamples(selectedActivityId);
+  const detail = useActivityDetail(selectedActivityId);
+  const samples = detail?.samples ?? null;
+  const splits = detail?.splits ?? [];
 
   const elevationDomain = useMemo(() => {
     if (!samples) return null;
@@ -251,6 +252,7 @@ export default function GarminActivityMapCard({
               <RouteMetric label="Quality" value={selectedActivity.qualityScore != null ? `${selectedActivity.qualityScore}/100` : "--"} />
             </div>
           )}
+
         </div>
 
         {/* Selected point detail */}
@@ -293,8 +295,86 @@ export default function GarminActivityMapCard({
             )}
           </div>
         </div>
+
+        {selectedActivity && detail && (
+          <div className="lg:col-span-5">
+            <MileSplits splits={splits} hasMeasuredPower={!selectedActivity.powerSource?.startsWith("estimated_")} />
+          </div>
+        )}
       </div>
     </div>
+  );
+}
+
+function MileSplits({
+  splits,
+  hasMeasuredPower,
+}: {
+  splits: ActivitySplit[];
+  hasMeasuredPower: boolean;
+}): React.ReactNode {
+  return (
+    <section className="overflow-hidden rounded-lg border border-gray-200">
+      <div className="flex items-baseline justify-between gap-3 border-b border-gray-200 bg-slate-50 px-4 py-3">
+        <div>
+          <h4 className="text-xs font-semibold uppercase tracking-wide text-gray-700">Mile splits</h4>
+          <p className="mt-0.5 text-[11px] text-gray-500">Calculated from the full recorded trace.</p>
+        </div>
+        <span className="text-[10px] text-gray-400">Elevation: gain / loss</span>
+      </div>
+      {splits.length === 0 ? (
+        <p className="px-4 py-5 text-sm text-gray-500">
+          Splits are unavailable because this trace does not contain enough valid speed data.
+        </p>
+      ) : (
+        <div className="overflow-x-auto">
+          <table className="w-full min-w-[690px] text-left text-xs">
+            <thead className="bg-gray-50 text-[10px] uppercase tracking-wide text-gray-500">
+              <tr>
+                <th className="px-3 py-2 font-medium">Mile</th>
+                <th className="px-3 py-2 font-medium">Split</th>
+                <th className="px-3 py-2 font-medium">Pace</th>
+                <th className="px-3 py-2 font-medium">Avg HR</th>
+                <th className="px-3 py-2 font-medium">Avg power</th>
+                <th className="px-3 py-2 font-medium">Cadence</th>
+                <th className="px-3 py-2 font-medium">Elevation</th>
+                <th className="px-3 py-2 font-medium">Temp</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-gray-100">
+              {splits.map((split) => (
+                <tr key={split.number} className="tabular-nums text-gray-700">
+                  <td className="px-3 py-2.5 font-semibold text-gray-900">
+                    {split.number}
+                    {split.distanceMiles < 0.995 && (
+                      <span className="ml-1 font-normal text-gray-400">({split.distanceMiles.toFixed(2)} mi)</span>
+                    )}
+                  </td>
+                  <td className="px-3 py-2.5">
+                    <span className="font-medium text-gray-900">{formatElapsed(split.durationSeconds)}</span>
+                    <span className="block text-[10px] text-gray-400">{formatElapsed(split.elapsedSeconds)} elapsed</span>
+                  </td>
+                  <td className="px-3 py-2.5 font-medium text-enduro-800">
+                    {split.paceMinutesPerMile !== null ? `${formatPace(split.paceMinutesPerMile)}/mi` : "--"}
+                  </td>
+                  <td className="px-3 py-2.5">{split.averageHeartRate !== null ? `${Math.round(split.averageHeartRate)} bpm` : "--"}</td>
+                  <td className="px-3 py-2.5">
+                    {hasMeasuredPower && split.averagePower !== null ? `${Math.round(split.averagePower)} W` : "--"}
+                  </td>
+                  <td className="px-3 py-2.5">{split.averageCadence !== null ? `${Math.round(split.averageCadence)} spm` : "--"}</td>
+                  <td className="px-3 py-2.5">
+                    <span className="text-emerald-700">+{Math.round(split.elevationGainMeters)} m</span>
+                    <span className="ml-1 text-gray-400">/</span>
+                    <span className="ml-1 text-rose-700">-{Math.round(split.elevationLossMeters)} m</span>
+                  </td>
+                  <td className="px-3 py-2.5">{split.averageTemperatureCelsius !== null ? `${Math.round(split.averageTemperatureCelsius)} °C` : "--"}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </section>
   );
 }
 

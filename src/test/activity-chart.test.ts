@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { buildActivityChartData, downsampleActivitySamples } from "@/lib/activities/activity-chart";
+import {
+  buildActivityChartData,
+  downsampleActivitySamples,
+  normalizeActivityCadence,
+} from "@/lib/activities/activity-chart";
 import type { ActivityChartSample } from "@/lib/activities/models";
 
 function sample(elapsedSeconds: number, speedMetersPerSecond = 3): ActivityChartSample {
@@ -32,5 +36,11 @@ describe("activity chart helpers", () => {
     expect(result[0].paceMinutesPerMile).toBeCloseTo(8);
     expect(result[1].paceMinutesPerMile).toBeNull();
     expect(result[2].paceMinutesPerMile).toBeNull();
+  });
+
+  it("converts single-leg cadence without doubling full cadence", () => {
+    expect(normalizeActivityCadence(85)).toBe(170);
+    expect(normalizeActivityCadence(170)).toBe(170);
+    expect(normalizeActivityCadence(20)).toBeNull();
   });
 });
