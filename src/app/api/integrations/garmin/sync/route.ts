@@ -15,6 +15,7 @@ import { GarminActivityPayload, matchActivityToPlan, normalizeGarminActivity } f
 import { ingestGarminActivityDetail, mapWithConcurrency, recomputeStoredActivityQuality } from "@/lib/garmin/sample-ingestion";
 import { recomputeFitnessSnapshotsForActivities } from "@/lib/analytics/fitness-cache";
 import { reconcileManualActivityMerges } from "@/lib/activities/manual-merge-persistence";
+import { applyRaceSummaryPowerEstimate, loadSummaryPowerModel } from "@/lib/activities/summary-power-estimate";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -167,6 +168,9 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       });
     }
     if (normalized.length > 0) await reconcileManualActivityMerges(user.id, planId ?? undefined);
+
+    const summaryPowerModel = await loadSummaryPowerModel(user.id);
+    if (summaryPowerModel) await applyRaceSummaryPowerEstimate(user.id, summaryPowerModel);
 
     const detailCutoff = new Date(syncThrough.getTime() - RECENT_DETAIL_DAYS * 86_400_000);
     const detailLimit = Math.min(Math.max(Math.round(body.detailLimit ?? 10), 0), 20);

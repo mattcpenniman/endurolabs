@@ -17,6 +17,7 @@ import {
 import { GarminActivityPayload, isRunningActivity, normalizeGarminActivity } from "@/lib/garmin/activities";
 import { ingestGarminActivityDetail, mapWithConcurrency } from "@/lib/garmin/sample-ingestion";
 import { reconcileManualActivityMerges } from "@/lib/activities/manual-merge-persistence";
+import { applyRaceSummaryPowerEstimate, loadSummaryPowerModel } from "@/lib/activities/summary-power-estimate";
 
 const DETAIL_BATCH_SIZE = 10;
 const HISTORY_PAGE_SIZE = 200;
@@ -155,6 +156,8 @@ async function processHistoryPass(job: typeof garminSyncJobs.$inferSelect, clien
     imported += 1;
   }
   if (imported > 0) await reconcileManualActivityMerges(job.userId);
+  const summaryPowerModel = await loadSummaryPowerModel(job.userId);
+  if (summaryPowerModel) await applyRaceSummaryPowerEstimate(job.userId, summaryPowerModel);
   const oldest = payloads.at(-1)?.startTimeLocal?.slice(0, 10);
   const complete = page.length < HISTORY_PAGE_SIZE || Boolean(oldest && oldest < parameters.since);
   await db.update(garminSyncJobs).set({
