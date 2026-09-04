@@ -8,6 +8,7 @@
 
 import { FormEvent, useState } from "react";
 import { useRouter } from "next/navigation";
+import { isSafeInternalRedirect } from "@/lib/plan-url";
 
 export default function LoginPage(): React.ReactNode {
   const router = useRouter();
@@ -34,7 +35,7 @@ export default function LoginPage(): React.ReactNode {
       }
 
       const redirectTo = new URLSearchParams(window.location.search).get("redirect") ?? "/plan";
-      router.push(redirectTo.startsWith("/") ? redirectTo : "/plan");
+      router.push(isSafeInternalRedirect(redirectTo) ? redirectTo : "/plan");
       router.refresh();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Unable to sign in");

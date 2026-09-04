@@ -1275,6 +1275,9 @@ export default function WeeklyPlanCard({
                               && activity.plannedWorkoutId === entry.plannedWorkoutId
                             )
                           : undefined;
+                        const canViewRunMap = Boolean(
+                          onActivityClick && syncedActivity && (syncedActivity.sampleCount ?? 0) > 0
+                        );
                         const defaultActualMileage = syncedActivity?.distanceMiles ?? entry.plannedMileage;
                         const draft = runDrafts[entry.runId] ?? createDefaultRunDraft(defaultActualMileage);
                         const isLastEntry = index === runEntries.length - 1;
@@ -1360,15 +1363,15 @@ export default function WeeklyPlanCard({
 
                             {syncedActivity && (
                               <div
-                                className={`mt-3 rounded-lg border border-sky-100 bg-sky-50 p-3 ${onActivityClick ? "cursor-pointer hover:border-sky-300 hover:bg-sky-100/70 transition-colors" : ""}`}
-                                role={onActivityClick ? "button" : undefined}
-                                tabIndex={onActivityClick ? 0 : undefined}
-                                onClick={onActivityClick ? () => onActivityClick(syncedActivity.id) : undefined}
-                                onKeyDown={onActivityClick
+                                className={`mt-3 rounded-lg border border-sky-100 bg-sky-50 p-3 ${canViewRunMap ? "cursor-pointer hover:border-sky-300 hover:bg-sky-100/70 transition-colors" : ""}`}
+                                role={canViewRunMap ? "button" : undefined}
+                                tabIndex={canViewRunMap ? 0 : undefined}
+                                onClick={canViewRunMap ? () => onActivityClick?.(syncedActivity.id) : undefined}
+                                onKeyDown={canViewRunMap
                                   ? (event) => {
                                       if (event.key === "Enter" || event.key === " ") {
                                         event.preventDefault();
-                                        onActivityClick(syncedActivity.id);
+                                        onActivityClick?.(syncedActivity.id);
                                       }
                                     }
                                   : undefined}
@@ -1386,7 +1389,7 @@ export default function WeeklyPlanCard({
                                   {syncedActivity.averagePower && <span>{syncedActivity.averagePower} W avg</span>}
                                   {syncedActivity.elevationGainMeters !== null && <span>{Math.round(syncedActivity.elevationGainMeters * 3.28084).toLocaleString()} ft gain</span>}
                                 </div>
-                                {onActivityClick && (
+                                {canViewRunMap && (
                                   <p className="mt-2 text-[11px] font-medium text-sky-800">
                                     View run map →
                                   </p>

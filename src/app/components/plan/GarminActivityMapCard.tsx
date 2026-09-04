@@ -21,7 +21,8 @@ const MAX_ZOOM = 14;
 
 export interface GarminActivityMapCardProps {
   activities: RunActivity[];
-  defaultActivityId?: string | null;
+  activityId?: string | null;
+  onActivityChange?: (activityId: string) => void;
 }
 
 interface SampleDetail {
@@ -101,14 +102,19 @@ function elevationHue(value: number, min: number, max: number): string {
   return `hsl(${hue} 55% 45%)`;
 }
 
-export default function GarminActivityMapCard({ activities, defaultActivityId }: GarminActivityMapCardProps): React.ReactNode {
+export default function GarminActivityMapCard({
+  activities,
+  activityId,
+  onActivityChange,
+}: GarminActivityMapCardProps): React.ReactNode {
   const eligible = activities
     .filter((activity) => (activity.sampleCount ?? 0) > 0)
     .sort((a, b) => b.startTimeGmt.localeCompare(a.startTimeGmt));
 
-  const [selectedActivityId, setSelectedActivityId] = useState<string | null>(
-    () => defaultActivityId ?? eligible[0]?.id ?? null
+  const [localActivityId, setLocalActivityId] = useState<string | null>(
+    () => activityId ?? eligible[0]?.id ?? null
   );
+  const selectedActivityId = activityId === undefined ? localActivityId : activityId;
   const [selectedIndex, setSelectedIndex] = useState<number | null>(null);
 
   // View transform: zoom (k) and pan (tx, ty) in viewBox units.
@@ -169,7 +175,12 @@ export default function GarminActivityMapCard({ activities, defaultActivityId }:
     : null;
 
   const handleActivityChange = (id: string): void => {
-    setSelectedActivityId(id || null);
+    if (!id) return;
+    if (onActivityChange) {
+      onActivityChange(id);
+    } else {
+      setLocalActivityId(id);
+    }
     setSelectedIndex(null);
   };
 

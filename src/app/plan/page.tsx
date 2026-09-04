@@ -29,6 +29,7 @@ import { generateRaceDayPlan } from "@/lib/training/race-day-plan";
 import { calculatePaceZones, calculatePowerZones } from "@/lib/training/zone-calculator";
 import { analyzeProgress, areAllPhaseRunsLogged, dailyLogsToWeeklyLogs } from "@/lib/training/progress-tracker";
 import { adjustWeeklyIntensityPercent } from "@/lib/training/intensity-adjustments";
+import { buildPlanUrl, PlanUrlUpdates } from "@/lib/plan-url";
 
 // Shape of a saved plan row from the database
 interface SavedPlanRow {
@@ -183,6 +184,9 @@ function PlanPageContent(): React.ReactNode {
   const router = useRouter();
   const searchParams = useSearchParams();
   const requestedPlanTab = parsePlanTab(searchParams.get("tab"));
+  const requestedPlanId = searchParams.get("plan");
+  const requestedRunMapActivityId = searchParams.get("runmap");
+  const resolvedRequestedPlanTab = requestedPlanTab ?? (requestedRunMapActivityId ? "schedule" : null);
   const [plan, setPlan] = useState<MarathonPlan | null>(null);
   const [isCheckingAuth, setIsCheckingAuth] = useState(true);
   const [isLoading, setIsLoading] = useState(false);
@@ -196,20 +200,10 @@ function PlanPageContent(): React.ReactNode {
   const [runsPerWeek, setRunsPerWeek] = useState<number | null>(null);
   const [weeksOverride, setWeeksOverride] = useState<number | null>(null);
   const [planName, setPlanName] = useState("");
-  const [activePlanTab, setActivePlanTab] = useState<PlanTab>(() => requestedPlanTab ?? "overview");
+  const [activePlanTab, setActivePlanTab] = useState<PlanTab>(() => resolvedRequestedPlanTab ?? "overview");
   const [dailyLogRefresh, setDailyLogRefresh] = useState(0);
   const [dailyLogs, setDailyLogs] = useState<DailyLog[]>([]);
   const [garminConnection, setGarminConnection] = useState<GarminConnectionStatus>(EMPTY_GARMIN_STATUS);
-  const [garminMapActivityId, setGarminMapActivityId] = useState<string | null>(null);
-
-  useEffect(() => {
-    if (!garminMapActivityId) return;
-    const onKey = (event: KeyboardEvent) => {
-      if (event.key === "Escape") setGarminMapActivityId(null);
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [garminMapActivityId]);
   const [shareToken, setShareToken] = useState<string | null>(null);
   const [shareLinkUrl, setShareLinkUrl] = useState<string | null>(null);
   const [shareStatus, setShareStatus] = useState<string | null>(null);
@@ -217,10 +211,36 @@ function PlanPageContent(): React.ReactNode {
   const [pendingCurrentPlanFocus, setPendingCurrentPlanFocus] = useState(false);
   const [hasAttemptedCurrentPlanLoad, setHasAttemptedCurrentPlanLoad] = useState(false);
   const [currentPlanRequestCount, setCurrentPlanRequestCount] = useState(0);
+  const [attemptedRequestedPlanId, setAttemptedRequestedPlanId] = useState<string | null>(null);
 
   const currentView = searchParams.get("view");
-  const isListView = currentView === "list";
-  const isCurrentPlanView = currentView === "current";
+  const isListView = currentView === "list" && !requestedPlanId;
+  const isCurrentPlanView = currentView === "current" && !requestedPlanId;
+
+  const updatePlanRoute = (
+    updates: PlanUrlUpdates,
+    method: "push" | "replace" = "replace"
+  ): void => {
+    const route = buildPlanUrl(searchParams, updates, window.location.hash);
+    router[method](route, { scroll: false });
+  };
+
+  const openRunMap = (activityId: string): void => {
+    updatePlanRoute({ runmap: activityId }, "push");
+  };
+
+  const closeRunMap = (): void => {
+    updatePlanRoute({ runmap: null });
+  };
+
+  useEffect(() => {
+    if (!requestedRunMapActivityId) return;
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === "Escape") closeRunMap();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [requestedRunMapActivityId]);
 
   useEffect(() => {
     let isMounted = true;
@@ -229,7 +249,8 @@ function PlanPageContent(): React.ReactNode {
       const authRes = await fetch("/api/auth/me");
 
       if (!authRes.ok) {
-        router.replace("/login?redirect=/plan");
+        const redirect = `${window.location.pathname}${window.location.search}${window.location.hash}`;
+        router.replace(`/login?redirect=${encodeURIComponent(redirect)}`);
         return;
       }
 
@@ -246,7 +267,8 @@ function PlanPageContent(): React.ReactNode {
 
     loadAuthenticatedPlans().catch(() => {
       if (isMounted) {
-        router.replace("/login?redirect=/plan");
+        const redirect = `${window.location.pathname}${window.location.search}${window.location.hash}`;
+        router.replace(`/login?redirect=${encodeURIComponent(redirect)}`);
       }
     });
 
@@ -270,14 +292,15 @@ function PlanPageContent(): React.ReactNode {
     return (await response.json()) as DailyLog[];
   };
 
-  const loadGarminConnection = async (): Promise<GarminConnectionStatus> => {
-    const response = await fetch("/api/integrations/garmin");
+  const loadGarminConnection = async (planId?: string): Promise<GarminConnectionStatus> => {
+    const query = planId ? `?planId=${encodeURIComponent(planId)}` : "";
+    const response = await fetch(`/api/integrations/garmin${query}`);
     if (!response.ok) throw new Error("Failed to load Garmin connection");
     return (await response.json()) as GarminConnectionStatus;
   };
 
   const refreshGarminConnection = async (): Promise<void> => {
-    setGarminConnection(await loadGarminConnection());
+    setGarminConnection(await loadGarminConnection(plan?.id));
   };
 
   useEffect(() => {
@@ -306,7 +329,7 @@ function PlanPageContent(): React.ReactNode {
       body: JSON.stringify({ planId: plan.id }),
     })
       .catch(() => null)
-      .then(() => loadGarminConnection())
+      .then(() => loadGarminConnection(plan.id))
       .then((status) => {
         if (isMounted) setGarminConnection(status);
       })
@@ -487,7 +510,7 @@ function PlanPageContent(): React.ReactNode {
       setExpectedTempF(nextPlan.runnerProfile.expectedRaceTempF ?? 50);
       setExpandedWeeks(new Set());
       setActivePlanTab("overview");
-      router.replace("/plan");
+      router.replace("/plan?view=current&tab=overview");
     } catch (err) {
       setError(err instanceof Error ? err.message : "An unexpected error occurred");
     } finally {
@@ -519,7 +542,7 @@ function PlanPageContent(): React.ReactNode {
         setPlan(savedPlan);
         setDailyLogs([]);
         await persistCurrentPlan(savedPlan.id);
-        router.replace("/plan");
+        router.replace("/plan?view=current&tab=overview");
       }
     } catch {
       // Silently fail — plan is still usable in session
@@ -567,7 +590,11 @@ function PlanPageContent(): React.ReactNode {
         setActivePlanTab("overview");
       }
       if (options.updateRoute !== false) {
-        router.replace(options.focusCurrentSchedule ? "/plan?view=current" : "/plan");
+        router.replace(
+          options.focusCurrentSchedule
+            ? "/plan?view=current&tab=schedule"
+            : buildPlanUrl(new URLSearchParams(), { plan: saved.id, tab: options.tab ?? "overview" })
+        );
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to load plan");
@@ -1157,6 +1184,10 @@ function PlanPageContent(): React.ReactNode {
   }, [isCurrentPlanView, activePlanId]);
 
   useEffect(() => {
+    setAttemptedRequestedPlanId(null);
+  }, [requestedPlanId]);
+
+  useEffect(() => {
     const handleOpenCurrentPlan = () => {
       setHasAttemptedCurrentPlanLoad(false);
       setCurrentPlanRequestCount((value) => value + 1);
@@ -1165,6 +1196,26 @@ function PlanPageContent(): React.ReactNode {
     window.addEventListener(OPEN_CURRENT_PLAN_EVENT, handleOpenCurrentPlan);
     return () => window.removeEventListener(OPEN_CURRENT_PLAN_EVENT, handleOpenCurrentPlan);
   }, []);
+
+  useEffect(() => {
+    if (!requestedPlanId || isCheckingAuth || isLoading || attemptedRequestedPlanId === requestedPlanId) {
+      return;
+    }
+
+    setAttemptedRequestedPlanId(requestedPlanId);
+    if (plan?.id === requestedPlanId) {
+      setActivePlanTab(resolvedRequestedPlanTab ?? "overview");
+      setPendingCurrentPlanFocus(false);
+      return;
+    }
+
+    handleLoadPlan(requestedPlanId, {
+      updateRoute: false,
+      tab: resolvedRequestedPlanTab ?? "overview",
+    }).catch(() => {
+      // Errors are handled inside handleLoadPlan.
+    });
+  }, [attemptedRequestedPlanId, isCheckingAuth, isLoading, plan?.id, requestedPlanId, resolvedRequestedPlanTab]);
 
   useEffect(() => {
     if (!isCurrentPlanView || isCheckingAuth || isLoading || hasAttemptedCurrentPlanLoad) {
@@ -1178,8 +1229,8 @@ function PlanPageContent(): React.ReactNode {
     }
 
     if (plan?.id === activePlanId) {
-      if (requestedPlanTab) {
-        setActivePlanTab(requestedPlanTab);
+      if (resolvedRequestedPlanTab) {
+        setActivePlanTab(resolvedRequestedPlanTab);
         setPendingCurrentPlanFocus(false);
       } else {
         focusCurrentSchedule(plan, dailyLogs);
@@ -1190,21 +1241,28 @@ function PlanPageContent(): React.ReactNode {
 
     setHasAttemptedCurrentPlanLoad(true);
     handleLoadPlan(activePlanId, {
-      focusCurrentSchedule: !requestedPlanTab,
+      focusCurrentSchedule: !resolvedRequestedPlanTab,
       updateRoute: false,
-      tab: requestedPlanTab,
+      tab: resolvedRequestedPlanTab,
     }).catch(() => {
       // Errors are handled inside handleLoadPlan.
     });
-  }, [activePlanId, currentPlanRequestCount, dailyLogs, hasAttemptedCurrentPlanLoad, isCheckingAuth, isCurrentPlanView, isLoading, plan, requestedPlanTab]);
+  }, [activePlanId, currentPlanRequestCount, dailyLogs, hasAttemptedCurrentPlanLoad, isCheckingAuth, isCurrentPlanView, isLoading, plan, resolvedRequestedPlanTab]);
 
   useEffect(() => {
-    if (activePlanTab !== "settings" || window.location.hash !== "#garmin-detail-sync") return;
+    const targetId = window.location.hash.slice(1);
+    if (!targetId) return;
     const timeoutId = window.setTimeout(() => {
-      document.getElementById("garmin-detail-sync")?.scrollIntoView({ behavior: "smooth", block: "start" });
+      document.getElementById(targetId)?.scrollIntoView({ behavior: "smooth", block: "start" });
     }, 120);
     return () => window.clearTimeout(timeoutId);
   }, [activePlanTab, plan]);
+
+  useEffect(() => {
+    if (!plan || !resolvedRequestedPlanTab || activePlanTab === resolvedRequestedPlanTab) return;
+    setActivePlanTab(resolvedRequestedPlanTab);
+    setPendingCurrentPlanFocus(false);
+  }, [activePlanTab, plan, resolvedRequestedPlanTab]);
 
   useEffect(() => {
     if (!pendingCurrentPlanFocus || !plan || activePlanTab !== "schedule") return;
@@ -1460,7 +1518,10 @@ function PlanPageContent(): React.ReactNode {
         <div className="container-narrow text-center">
           <p className="text-red-600">{error}</p>
           <button
-            onClick={() => setPlan(null)}
+            onClick={() => {
+              setPlan(null);
+              router.replace("/plan");
+            }}
             className="mt-4 rounded-lg bg-enduro-600 px-6 py-2 text-sm font-medium text-white hover:bg-enduro-700"
           >
             Try Again
@@ -1516,6 +1577,10 @@ function PlanPageContent(): React.ReactNode {
   const calculatedMaxLongRun = plan.weeks.length > 0
     ? Math.max(...plan.weeks.map((week) => week.longRunDistance))
     : 0;
+  const planActivities = garminConnection.activities.filter((activity) => activity.planId === plan.id);
+  const runMapActivity = planActivities.find(
+    (activity) => activity.id === requestedRunMapActivityId && (activity.sampleCount ?? 0) > 0
+  ) ?? null;
   const configuredAppUrl = process.env.NEXT_PUBLIC_APP_URL?.replace(/\/$/, "");
   const shareUrl = shareLinkUrl ?? (shareToken
     ? `${configuredAppUrl ?? (typeof window !== "undefined" ? window.location.origin : "")}/share/${shareToken}`
@@ -1620,6 +1685,7 @@ function PlanPageContent(): React.ReactNode {
               onClick={() => {
                 setPlan(null);
                 setPlanName("");
+                router.replace("/plan");
               }}
               className="rounded-lg bg-enduro-600 px-4 py-2 text-sm font-medium text-white hover:bg-enduro-700"
             >
@@ -1639,7 +1705,11 @@ function PlanPageContent(): React.ReactNode {
             <button
               key={tab.id}
               type="button"
-              onClick={() => setActivePlanTab(tab.id as PlanTab)}
+              onClick={() => {
+                const nextTab = tab.id as PlanTab;
+                setActivePlanTab(nextTab);
+                updatePlanRoute({ tab: nextTab });
+              }}
               className={`flex-1 rounded-md px-4 py-2 text-sm font-medium transition-colors ${
                 activePlanTab === tab.id
                   ? "bg-white text-enduro-700 shadow-sm"
@@ -1655,29 +1725,37 @@ function PlanPageContent(): React.ReactNode {
           <>
             {/* Overview + Zones */}
             <div className="mb-8 grid gap-6 lg:grid-cols-3">
-              <div className="lg:col-span-2">
+              <div id="plan-overview" className="scroll-mt-24 lg:col-span-2">
                 <PlanOverviewCard plan={plan} />
               </div>
-              <div>
+              <div id="pace-zones" className="scroll-mt-24">
                 <PaceZonesCard paceZones={currentPaceZones} powerZones={currentPowerZones} />
               </div>
             </div>
 
             {/* Charts */}
             <div className="mb-8 grid gap-6 lg:grid-cols-2">
-              <MileageTrendChart plan={plan} dailyLogs={dailyLogs} activities={garminConnection.activities} />
-              <LongRunProgressionChart plan={plan} />
+              <div id="mileage-trend" className="scroll-mt-24">
+                <MileageTrendChart plan={plan} dailyLogs={dailyLogs} activities={garminConnection.activities} />
+              </div>
+              <div id="long-run-progression" className="scroll-mt-24">
+                <LongRunProgressionChart plan={plan} />
+              </div>
             </div>
             <div className="mb-8 grid gap-6 lg:grid-cols-2">
-              <IntensityDistributionChart plan={plan} />
-              <RunTrendChart plan={plan} activities={garminConnection.activities} />
+              <div id="intensity-distribution" className="scroll-mt-24">
+                <IntensityDistributionChart plan={plan} />
+              </div>
+              <div id="run-trend" className="scroll-mt-24">
+                <RunTrendChart plan={plan} activities={garminConnection.activities} />
+              </div>
             </div>
           </>
         ) : activePlanTab === "schedule" ? (
           <>
 
             {/* Weekly plan */}
-            <div className="mb-8">
+            <div id="weekly-schedule" className="mb-8 scroll-mt-24">
               <div className="mb-4 flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
                 <div>
                   <h2 className="text-2xl font-bold text-gray-900">Weekly Schedule</h2>
@@ -1761,7 +1839,7 @@ function PlanPageContent(): React.ReactNode {
                               isExpanded={expandedWeeks.has(week.weekNumber)}
                               onToggle={() => toggleWeek(week.weekNumber)}
                               dailyLogs={dailyLogs}
-                              activities={garminConnection.activities.filter((activity) => activity.planId === plan.id)}
+                              activities={planActivities}
                               onDailyLogSaved={() => setDailyLogRefresh((value) => value + 1)}
                               intensityTargetPercents={currentIntensityTargetPercents}
                               onIntensityTargetChange={handleAdjustIntensityTarget}
@@ -1769,7 +1847,7 @@ function PlanPageContent(): React.ReactNode {
                               focusDate={focusDate}
                               onWeekUpdate={handleWeekUpdate}
                               onMileageChange={handleAdjustWeeklyMileage}
-                              onActivityClick={(activityId) => setGarminMapActivityId(activityId)}
+                              onActivityClick={openRunMap}
                             />
                           ))}
                         </div>
@@ -1802,7 +1880,7 @@ function PlanPageContent(): React.ReactNode {
             )}
           </>
         ) : activePlanTab === "race" ? (
-          <div className="mb-8">
+          <div id="race-day-plan" className="mb-8 scroll-mt-24">
             <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
               <h2 className="text-2xl font-bold text-gray-900">Race Day Plan</h2>
               <div className="flex flex-wrap gap-3">
@@ -1888,7 +1966,7 @@ function PlanPageContent(): React.ReactNode {
             />
           </div>
         ) : activePlanTab === "scorecard" ? (
-          <div className="mb-8">
+          <div id="scorecard" className="mb-8 scroll-mt-24">
             <div className="mb-6">
               <h2 className="text-2xl font-bold text-gray-900">Sub-3 Score Card</h2>
               <p className="text-sm text-gray-500">
@@ -1910,7 +1988,7 @@ function PlanPageContent(): React.ReactNode {
                 connection={garminConnection}
                 onChanged={refreshGarminConnection}
               />
-              <div className="rounded-lg border border-gray-200 bg-white p-5 md:col-span-2">
+              <div id="mileage-targets" className="scroll-mt-24 rounded-lg border border-gray-200 bg-white p-5 md:col-span-2">
                 <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
                   <div>
                     <h3 className="text-sm font-semibold text-gray-900">Mileage targets</h3>
@@ -1991,7 +2069,7 @@ function PlanPageContent(): React.ReactNode {
                 </div>
               </div>
 
-              <div className="rounded-lg border border-gray-200 bg-white p-5 md:col-span-2">
+              <div id="intensity-targets" className="scroll-mt-24 rounded-lg border border-gray-200 bg-white p-5 md:col-span-2">
                 <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
                   <div>
                     <h3 className="text-sm font-semibold text-gray-900">Intensity targets</h3>
@@ -2028,7 +2106,7 @@ function PlanPageContent(): React.ReactNode {
                 </div>
               </div>
 
-              <div className="rounded-lg border border-gray-200 bg-white p-5">
+              <div id="heart-rate-anchors" className="scroll-mt-24 rounded-lg border border-gray-200 bg-white p-5">
                 <p className="block text-sm font-semibold text-gray-900">
                   Heart rate anchors
                 </p>
@@ -2079,7 +2157,7 @@ function PlanPageContent(): React.ReactNode {
                 </div>
               </div>
 
-              <div className="rounded-lg border border-gray-200 bg-white p-5">
+              <div id="rest-day-settings" className="scroll-mt-24 rounded-lg border border-gray-200 bg-white p-5">
                 <label htmlFor="rest-day" className="block text-sm font-semibold text-gray-900">
                   Rest day
                 </label>
@@ -2104,7 +2182,7 @@ function PlanPageContent(): React.ReactNode {
                 </select>
               </div>
 
-              <div className="rounded-lg border border-gray-200 bg-white p-5">
+              <div id="double-up-days" className="scroll-mt-24 rounded-lg border border-gray-200 bg-white p-5">
                 <p className="block text-sm font-semibold text-gray-900">
                   Double-up days
                 </p>
@@ -2147,7 +2225,7 @@ function PlanPageContent(): React.ReactNode {
                 </p>
               </div>
 
-              <div className="rounded-lg border border-gray-200 bg-white p-5 md:col-span-2">
+              <div id="share-access" className="scroll-mt-24 rounded-lg border border-gray-200 bg-white p-5 md:col-span-2">
                 <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
                   <div>
                     <h3 className="text-sm font-semibold text-gray-900">Share access</h3>
@@ -2217,10 +2295,10 @@ function PlanPageContent(): React.ReactNode {
         )}
       </div>
 
-      {garminMapActivityId && plan && (
+      {runMapActivity && (
         <div
           className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-slate-900/60 p-4 backdrop-blur-sm"
-          onClick={() => setGarminMapActivityId(null)}
+          onClick={closeRunMap}
           role="dialog"
           aria-modal="true"
         >
@@ -2235,7 +2313,7 @@ function PlanPageContent(): React.ReactNode {
               </div>
               <button
                 type="button"
-                onClick={() => setGarminMapActivityId(null)}
+                onClick={closeRunMap}
                 className="rounded-md px-2 py-1 text-sm font-medium text-gray-500 hover:bg-gray-100 hover:text-gray-900"
               >
                 ✕ Close
@@ -2243,11 +2321,9 @@ function PlanPageContent(): React.ReactNode {
             </div>
             <div className="max-h-[calc(90vh-64px)] overflow-y-auto">
               <GarminActivityMapCard
-                key={garminMapActivityId}
-                activities={garminConnection.activities.filter(
-                  (activity) => activity.planId === plan.id
-                )}
-                defaultActivityId={garminMapActivityId}
+                activities={planActivities}
+                activityId={runMapActivity.id}
+                onActivityChange={(activityId) => updatePlanRoute({ runmap: activityId })}
               />
             </div>
           </div>
