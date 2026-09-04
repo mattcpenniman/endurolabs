@@ -16,6 +16,7 @@ function getArg(name) {
 
 function printUsage() {
   console.error(`Usage:
+  npm run plan:create-from-garmin -- --email runner@example.com --analyze [--start YYYY-MM-DD --end YYYY-MM-DD]
   npm run plan:create-from-garmin -- --email runner@example.com --start YYYY-MM-DD --end YYYY-MM-DD --race-date YYYY-MM-DD --name "Race name"
   npm run plan:create-from-garmin -- --email runner@example.com --start YYYY-MM-DD --end YYYY-MM-DD --race-date YYYY-MM-DD --name "Race name" --apply`);
 }
@@ -37,6 +38,66 @@ function round(value, places = 2) {
   return Math.round(value * scale) / scale;
 }
 
+function dateKey(value) {
+  return typeof value === "string" ? value.slice(0, 10) : value.toISOString().slice(0, 10);
+}
+
+async function analyzeHistory(sql, userId, start, end) {
+  const activities = await sql`
+    select local_date as "localDate", activity_name as "activityName",
+      distance_meters as "distanceMeters"
+    from run_activities
+    where user_id = ${userId}
+      and (${start ?? null}::date is null or local_date::date >= ${start ?? null}::date)
+      and (${end ?? null}::date is null or local_date::date <= ${end ?? null}::date)
+    order by local_date asc
+  `;
+  if (activities.length === 0) throw new Error("No Garmin runs found in the requested date range");
+
+  const weekly = new Map();
+  const raceCandidates = [];
+  for (const activity of activities) {
+    const activityDate = dateKey(activity.localDate);
+    const activityDay = new Date(`${activityDate}T00:00:00Z`);
+    const daysSinceMonday = (activityDay.getUTCDay() + 6) % 7;
+    const weekStart = addDays(activityDate, -daysSinceMonday).slice(0, 10);
+    const miles = Number(activity.distanceMeters) / METERS_PER_MILE;
+    const summary = weekly.get(weekStart) ?? { runs: 0, miles: 0, longest: 0, races: [] };
+    summary.runs += 1;
+    summary.miles += miles;
+    summary.longest = Math.max(summary.longest, miles);
+    if (miles >= 25) {
+      summary.races.push(activity.activityName);
+      raceCandidates.push({ date: activityDate, name: activity.activityName, miles: round(miles) });
+    }
+    weekly.set(weekStart, summary);
+  }
+
+  const firstWeek = [...weekly.keys()][0];
+  const lastWeek = [...weekly.keys()].at(-1);
+  const rows = [];
+  let previousMiles = null;
+  for (let weekStart = firstWeek; weekStart <= lastWeek; weekStart = addDays(weekStart, 7).slice(0, 10)) {
+    const summary = weekly.get(weekStart) ?? { runs: 0, miles: 0, longest: 0, races: [] };
+    const miles = round(summary.miles, 1);
+    rows.push({
+      week: weekStart,
+      runs: summary.runs,
+      miles,
+      change: previousMiles === null ? "" : round(miles - previousMiles, 1),
+      longest: round(summary.longest, 1),
+      race: summary.races.join(", "),
+    });
+    previousMiles = miles;
+  }
+
+  console.table(rows);
+  if (raceCandidates.length > 0) {
+    console.log("Marathon-distance race candidates:");
+    console.table(raceCandidates);
+  }
+}
+
 function workoutType(date, raceDate, miles, name) {
   const normalizedName = name.toLowerCase();
   if (date === raceDate) return "marathon_pace";
@@ -47,13 +108,13 @@ function workoutType(date, raceDate, miles, name) {
   return "easy";
 }
 
-function makeWorkout(activities, date, raceDate, suffix) {
+function makeWorkout(activities, date, raceDate, raceName, suffix) {
   const miles = round(activities.reduce((sum, activity) => sum + activity.distanceMeters / METERS_PER_MILE, 0));
   const durationMinutes = round(activities.reduce((sum, activity) => sum + activity.durationSeconds, 0) / 60, 1);
   const combined = activities.length > 1;
   const type = workoutType(date, raceDate, miles, activities.map((activity) => activity.activityName).join(" "));
   const title = date === raceDate
-    ? `Newport Marathon - ${miles} mi`
+    ? `${raceName} - ${miles} mi`
     : combined
       ? `${miles} mi total (${activities.length} Garmin runs)`
       : `${miles} mi ${type === "long" ? "Long Run" : type === "recovery" ? "Recovery Run" : "Run"}`;
@@ -105,7 +166,7 @@ function makePlan(planId, template, activities, start, end, raceDate, raceName) 
       const groups = dayActivities.length > 2
         ? [dayActivities]
         : dayActivities.map((activity) => [activity]);
-      const workoutGroups = groups.map((group, index) => makeWorkout(group, key, raceDate, index + 1));
+      const workoutGroups = groups.map((group, index) => makeWorkout(group, key, raceDate, raceName, index + 1));
       for (const group of workoutGroups) {
         for (const activity of group.activities) {
           assignments.push({
@@ -158,7 +219,7 @@ function makePlan(planId, template, activities, start, end, raceDate, raceName) 
   const phaseDefinitions = [
     { phase: "base", name: "Historical Base", description: "Observed aerobic base mileage from Garmin.", focus: "Aerobic volume" },
     { phase: "marathon_build", name: "Historical Marathon Build", description: "Observed peak-volume marathon build from Garmin.", focus: "Volume and durability" },
-    { phase: "peak_taper", name: "Historical Taper + Race", description: "Observed taper and Newport race week from Garmin.", focus: "Taper and race" },
+    { phase: "peak_taper", name: "Historical Taper + Race", description: `Observed taper and ${raceName} race week from Garmin.`, focus: "Taper and race" },
   ];
   const phases = phaseDefinitions.map((definition, index) => {
     const phaseWeeks = weeks.filter((week) => week.phase === definition.phase);
@@ -200,7 +261,7 @@ function makePlan(planId, template, activities, start, end, raceDate, raceName) 
         feasibility: "realistic",
         reasoning: "Historical plan reconstructed from recorded Garmin mileage.",
         recommendedPeakMileage: Math.ceil(peakWeeklyMileage),
-        keyFactors: ["Actual Garmin mileage", "Observed long-run progression", "Completed Newport marathon"],
+        keyFactors: ["Actual Garmin mileage", "Observed long-run progression", `Completed ${raceName}`],
         timeline: `${totalWeeks} observed training weeks`,
       },
       adjustmentRules: [],
@@ -218,11 +279,16 @@ const end = getArg("end");
 const raceDate = getArg("race-date");
 const raceName = getArg("name")?.trim();
 const apply = process.argv.includes("--apply");
-if (!email || !isDate(start) || !isDate(end) || !isDate(raceDate) || !raceName || start > raceDate || raceDate > end) {
+const analyze = process.argv.includes("--analyze");
+const invalidAnalysisRange = analyze && (
+  Boolean(start) !== Boolean(end)
+  || (start && (!isDate(start) || !isDate(end) || start > end))
+);
+if (!email || invalidAnalysisRange || (!analyze && (!isDate(start) || !isDate(end) || !isDate(raceDate) || !raceName || start > raceDate || raceDate > end))) {
   printUsage();
   process.exit(1);
 }
-if (new Date(`${start}T00:00:00Z`).getUTCDay() !== 1 || new Date(`${end}T00:00:00Z`).getUTCDay() !== 0) {
+if (!analyze && (new Date(`${start}T00:00:00Z`).getUTCDay() !== 1 || new Date(`${end}T00:00:00Z`).getUTCDay() !== 0)) {
   throw new Error("Historical plans must start on Monday and end on Sunday");
 }
 
@@ -230,6 +296,9 @@ const sql = postgres(process.env.DATABASE_URL || "postgresql://enduro:endurodev@
 try {
   const [user] = await sql`select id, current_plan_id as "currentPlanId" from users where email = ${email} limit 1`;
   if (!user) throw new Error(`User not found: ${email}`);
+  if (analyze) {
+    await analyzeHistory(sql, user.id, start, end);
+  } else {
   const [templateRow] = await sql`select plan_data as "planData" from plans where id = ${user.currentPlanId} limit 1`;
   if (!templateRow) throw new Error("The user needs a current plan to provide profile and zone metadata");
   const activities = await sql`
@@ -275,6 +344,7 @@ try {
 
   console.log(JSON.stringify(report, null, 2));
   if (!apply) console.log("Run again with --apply to create the plan.");
+  }
 } finally {
   await sql.end();
 }
