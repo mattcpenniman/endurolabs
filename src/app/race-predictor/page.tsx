@@ -45,6 +45,9 @@ export default function RacePredictorPage(): React.ReactNode {
   const [customPrediction, setCustomPrediction] = useState<RacePredictorResult | null>(null);
   const [loading, setLoading] = useState(true);
   const [customLoading, setCustomLoading] = useState(false);
+  const [targetDate, setTargetDate] = useState("");
+  const [issuing, setIssuing] = useState(false);
+  const [issuedMessage, setIssuedMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -96,6 +99,36 @@ export default function RacePredictorPage(): React.ReactNode {
     }
   }
 
+  async function issueForecast(): Promise<void> {
+    if (!selected || !targetDate) {
+      setError("Choose a target race date before issuing the forecast.");
+      return;
+    }
+    setIssuing(true);
+    setError(null);
+    setIssuedMessage(null);
+    try {
+      const response = await fetch("/api/race-predictor", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          key: selected.key,
+          label: selected.label,
+          targetRaceName: selected.label,
+          targetDate,
+          targetDistanceMeters: selected.distanceMeters,
+        }),
+      });
+      const body = (await response.json()) as { snapshotId?: string; error?: string };
+      if (!response.ok) throw new Error(body.error ?? "Failed to issue forecast");
+      setIssuedMessage(`Forecast issued for ${formatDate(targetDate)}.`);
+    } catch (issueError) {
+      setError(issueError instanceof Error ? issueError.message : "Failed to issue forecast");
+    } finally {
+      setIssuing(false);
+    }
+  }
+
   if (loading) return <PredictorLoading />;
 
   if (error && !data) {
@@ -134,7 +167,7 @@ export default function RacePredictorPage(): React.ReactNode {
             <div>
               <p className="text-xs font-black uppercase tracking-[0.28em] text-lime-300">Race Predictor · {data.modelVersion}</p>
               <h1 className="mt-4 max-w-3xl text-4xl font-black tracking-[-0.04em] sm:text-6xl">Turn every finish into a sharper starting line.</h1>
-              <p className="mt-5 max-w-2xl text-sm leading-6 text-slate-300 sm:text-base">A distance-aware forecast built from {data.raceCount} prior Garmin-tagged races, weighted for relevance and recency.</p>
+              <p className="mt-5 max-w-2xl text-sm leading-6 text-slate-300 sm:text-base">A distance-aware forecast built from {data.raceCount} prior results, weighted for relevance and recency. {data.sourceCoverage.canonicalResults > 0 ? `${data.sourceCoverage.canonicalResults} use official result data; ${data.sourceCoverage.garminFallbacks} use Garmin fallbacks.` : "All currently use Garmin-tagged activity data."}</p>
             </div>
             <div className="rounded-3xl border border-white/10 bg-white/[0.06] p-5 backdrop-blur-sm">
               <div className="flex items-center justify-between gap-4">
@@ -211,6 +244,16 @@ export default function RacePredictorPage(): React.ReactNode {
                 <button type="submit" disabled={customLoading} className="w-full rounded-xl bg-enduro-700 px-4 py-3 text-sm font-black text-white transition hover:bg-enduro-800 disabled:opacity-50">{customLoading ? "Calculating…" : "Predict custom race"}</button>
               </form>
               {error && <p className="mt-3 text-xs text-red-600">{error}</p>}
+            </section>
+
+            <section className="rounded-3xl border border-[var(--color-border)] bg-[var(--color-bg)] p-6 shadow-sm">
+              <p className="text-xs font-black uppercase tracking-[0.2em] text-enduro-700">Prediction record</p>
+              <h2 className="mt-2 text-xl font-black">Issue an auditable forecast</h2>
+              <p className="mt-2 text-xs leading-5 text-[var(--color-text-secondary)]">Freezes the selected prediction and every source available now for honest later evaluation.</p>
+              <label className="mt-5 block text-xs font-bold text-[var(--color-text-secondary)]" htmlFor="target-race-date">Target race date</label>
+              <input id="target-race-date" type="date" min={data.asOf} value={targetDate} onChange={(event) => setTargetDate(event.target.value)} className="mt-2 w-full rounded-xl border border-[var(--color-border)] bg-[var(--color-bg-secondary)] px-4 py-3 font-mono font-bold outline-none focus:border-enduro-500 focus:ring-2 focus:ring-enduro-500/15" />
+              <button type="button" onClick={issueForecast} disabled={issuing || !targetDate} className="mt-3 w-full rounded-xl bg-slate-950 px-4 py-3 text-sm font-black text-white transition hover:bg-slate-800 disabled:opacity-50">{issuing ? "Issuing..." : `Issue ${selected.label} forecast`}</button>
+              {issuedMessage && <p className="mt-3 text-xs font-bold text-enduro-700">{issuedMessage}</p>}
             </section>
 
             <section className="rounded-3xl bg-enduro-950 p-6 text-white shadow-lg">

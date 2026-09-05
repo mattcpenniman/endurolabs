@@ -27,6 +27,7 @@ export const STANDARD_PREDICTION_DISTANCES = [
 export interface RacePredictorResult {
   key: string;
   label: string;
+  distanceMeters: number;
   distanceMiles: number;
   predictedSeconds: number;
   paceSecondsPerMile: number;
@@ -35,12 +36,18 @@ export interface RacePredictorResult {
   confidence: "limited" | "developing";
   meanMedianDisagreementPercent: number;
   strongestEvidence: RaceForecastEvidence[];
+  completeEvidence: RaceForecastEvidence[];
 }
 
 export interface RacePredictorResponse {
   asOf: string;
   modelVersion: "race-evidence-v1";
   raceCount: number;
+  sourceCoverage: {
+    canonicalResults: number;
+    verifiedResults: number;
+    garminFallbacks: number;
+  };
   predictions: RacePredictorResult[];
   validation: {
     baseline: RaceBaselineSummary | null;
@@ -61,6 +68,7 @@ export function buildRacePredictorResponse(input: {
   races: RaceAnalysisActivity[];
   asOf: string;
   distances: RacePredictionDistance[];
+  sourceCoverage?: RacePredictorResponse["sourceCoverage"];
 }): RacePredictorResponse {
   const predictions = input.distances.flatMap((distance): RacePredictorResult[] => {
     const forecast = buildRaceForecastWithHistoricalRange(
@@ -73,6 +81,7 @@ export function buildRacePredictorResponse(input: {
     return [{
       key: distance.key,
       label: distance.label,
+      distanceMeters: distance.distanceMeters,
       distanceMiles: Math.round(distanceMiles * 100) / 100,
       predictedSeconds: forecast.predictedSeconds,
       paceSecondsPerMile: Math.round(forecast.predictedSeconds / distanceMiles),
@@ -81,6 +90,7 @@ export function buildRacePredictorResponse(input: {
       confidence: forecast.historicalErrorRange?.confidence === "moderate" ? "developing" : "limited",
       meanMedianDisagreementPercent: forecast.meanMedianDisagreementPercent,
       strongestEvidence: forecast.evidence.slice(0, 5),
+      completeEvidence: forecast.evidence,
     }];
   });
   const analysis = analyzeRacePerformance({
@@ -92,6 +102,11 @@ export function buildRacePredictorResponse(input: {
     asOf: input.asOf,
     modelVersion: "race-evidence-v1",
     raceCount: analysis.dataCoverage.taggedRaces,
+    sourceCoverage: input.sourceCoverage ?? {
+      canonicalResults: 0,
+      verifiedResults: 0,
+      garminFallbacks: analysis.dataCoverage.taggedRaces,
+    },
     predictions,
     validation: {
       baseline: analysis.baselineSummary,

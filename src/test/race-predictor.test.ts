@@ -47,6 +47,12 @@ describe("race predictor response", () => {
       confidence: "low",
     });
     expect(response.validation.forecast?.comparisons).toBe(7);
+    expect(response.predictions[4].completeEvidence).toHaveLength(8);
+    expect(response.sourceCoverage).toEqual({
+      canonicalResults: 0,
+      verifiedResults: 0,
+      garminFallbacks: 8,
+    });
     expect(response.disclaimer).toContain("not a calibrated confidence interval");
   });
 
@@ -59,6 +65,7 @@ describe("race predictor response", () => {
     const prediction = response.predictions[0];
 
     expect(prediction.label).toBe("8 Mile Custom");
+    expect(prediction.distanceMeters).toBe(8 * 1609.344);
     expect(prediction.distanceMiles).toBe(8);
     expect(prediction.paceSecondsPerMile).toBe(Math.round(prediction.predictedSeconds / 8));
   });
