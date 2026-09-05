@@ -215,6 +215,44 @@ export const activitySamples = pgTable("activity_samples", {
   index("activity_samples_activity_idx").on(table.activityId),
 ]);
 
+export const activityAnalytics = pgTable("activity_analytics", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  activityId: uuid("activity_id")
+    .notNull()
+    .references(() => runActivities.id, { onDelete: "cascade" }),
+  algorithmVersion: varchar("algorithm_version", { length: 32 }).notNull(),
+  sourceSampleCount: integer("source_sample_count").notNull(),
+  sourceSamplesFetchedAt: timestamp("source_samples_fetched_at"),
+  metrics: jsonb("metrics").notNull(),
+  computedAt: timestamp("computed_at").defaultNow().notNull(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (table) => [
+  uniqueIndex("activity_analytics_activity_version_unique").on(table.activityId, table.algorithmVersion),
+  index("activity_analytics_activity_idx").on(table.activityId),
+]);
+
+export const activityMetricWindows = pgTable("activity_metric_windows", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  activityAnalyticsId: uuid("activity_analytics_id")
+    .notNull()
+    .references(() => activityAnalytics.id, { onDelete: "cascade" }),
+  windowStartSeconds: integer("window_start_seconds").notNull(),
+  sampleCount: integer("sample_count").notNull(),
+  heartRateAverage: doublePrecision("heart_rate_average"),
+  powerAverage: doublePrecision("power_average"),
+  speedAverage: doublePrecision("speed_average"),
+  elevationAverage: doublePrecision("elevation_average"),
+  cadenceMedian: doublePrecision("cadence_median"),
+  latitudeAverage: doublePrecision("latitude_average"),
+  longitudeAverage: doublePrecision("longitude_average"),
+  fitnessHeartRate: doublePrecision("fitness_heart_rate"),
+  fitnessPower: doublePrecision("fitness_power"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (table) => [
+  uniqueIndex("activity_metric_windows_analytics_start_unique").on(table.activityAnalyticsId, table.windowStartSeconds),
+  index("activity_metric_windows_analytics_idx").on(table.activityAnalyticsId),
+]);
+
 export const weightMeasurements = pgTable("weight_measurements", {
   id: uuid("id").primaryKey().defaultRandom(),
   userId: uuid("user_id")

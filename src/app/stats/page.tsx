@@ -130,18 +130,11 @@ export default function StatsPage() {
     setError(null);
     const params = new URLSearchParams({ currentPlanId });
     if (priorPlanId) params.set("priorPlanId", priorPlanId);
-    const load = async (): Promise<void> => {
-      let syncWarning: string | null = null;
-      const syncResponse = await fetch("/api/integrations/garmin/sync", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ planId: currentPlanId }),
-      });
-      if (!syncResponse.ok) {
-        const body = (await syncResponse.json().catch(() => ({}))) as { error?: string };
-        syncWarning = body.error ?? "Garmin refresh failed; showing stored stats.";
-      }
-
+    const loadStoredData = async (): Promise<{
+      data: StatsResponse;
+      connection: GarminConnectionStatus | null;
+      warning: string | null;
+    }> => {
       const [response, activityResponse] = await Promise.all([
         fetch(`/api/stats?${params.toString()}`),
         fetch(`/api/integrations/garmin?planId=${encodeURIComponent(currentPlanId)}`),
@@ -151,13 +144,39 @@ export default function StatsPage() {
       const connection = activityResponse.ok
         ? await activityResponse.json() as GarminConnectionStatus
         : null;
-      if (!activityResponse.ok) {
-        syncWarning = syncWarning ?? "Activity detail status could not be loaded.";
-      }
+      return {
+        data,
+        connection,
+        warning: activityResponse.ok ? null : "Activity detail status could not be loaded.",
+      };
+    };
+    const load = async (): Promise<void> => {
+      const initial = await loadStoredData();
       if (!cancelled) {
-        setStats(data);
-        setGarminConnection(connection);
-        setError(syncWarning);
+        setStats(initial.data);
+        setGarminConnection(initial.connection);
+        setError(initial.warning);
+        setLoading(false);
+      }
+
+      const syncResponse = await fetch("/api/integrations/garmin/sync", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ planId: currentPlanId }),
+      });
+      if (!syncResponse.ok) {
+        const body = (await syncResponse.json().catch(() => ({}))) as { error?: string };
+        if (!cancelled) {
+          setError(body.error ?? "Garmin refresh failed; showing stored stats.");
+        }
+        return;
+      }
+
+      const refreshed = await loadStoredData();
+      if (!cancelled) {
+        setStats(refreshed.data);
+        setGarminConnection(refreshed.connection);
+        setError(refreshed.warning);
       }
     };
     load()

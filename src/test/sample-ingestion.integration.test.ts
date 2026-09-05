@@ -57,8 +57,12 @@ suite("sample ingestion PostgreSQL integration", () => {
     expect(await upsertActivitySamples(fixtureActivityId, samples(true))).toBe(41);
     const [row] = await sql`select sample_count as "sampleCount", detail_fetch_status as status from run_activities where id = ${fixtureActivityId}`;
     const [{ count }] = await sql`select count(*)::int as count from activity_samples where activity_id = ${fixtureActivityId}`;
+    const [analytics] = await sql`select id, source_sample_count as "sourceSampleCount" from activity_analytics where activity_id = ${fixtureActivityId}`;
+    const [{ windowCount }] = await sql`select count(*)::int as "windowCount" from activity_metric_windows where activity_analytics_id = ${analytics.id}`;
     expect(count).toBe(41);
     expect(row).toMatchObject({ sampleCount: 41, status: "success" });
+    expect(analytics.sourceSampleCount).toBe(41);
+    expect(windowCount).toBe(41);
   });
 
   it("persists a below-threshold score when heart rate is absent", async () => {
