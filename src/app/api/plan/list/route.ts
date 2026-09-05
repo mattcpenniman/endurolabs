@@ -6,9 +6,11 @@
 
 import { NextResponse } from "next/server";
 import { db } from "@/lib/db/client";
-import { plans } from "@/lib/db/schema";
-import { desc, eq } from "drizzle-orm";
+import { planRunLogs, plans, runActivities } from "@/lib/db/schema";
+import { and, desc, eq, inArray, or } from "drizzle-orm";
 import { getCurrentUser } from "@/lib/auth";
+import type { MarathonPlan } from "@/lib/training/models";
+import { buildPlanListSummaries } from "@/lib/activities/plan-list-summary";
 
 export async function GET() {
   try {
@@ -24,7 +26,52 @@ export async function GET() {
       .where(eq(plans.userId, user.id))
       .orderBy(desc(plans.createdAt));
 
-    return NextResponse.json(allPlans);
+    if (allPlans.length === 0) return NextResponse.json([]);
+
+    const completedLogs = await db
+      .select({
+        planId: planRunLogs.planId,
+        actualMileage: planRunLogs.actualMileage,
+        mergedActivityId: planRunLogs.mergedActivityId,
+      })
+      .from(planRunLogs)
+      .where(and(
+        eq(planRunLogs.userId, user.id),
+        eq(planRunLogs.completed, 1),
+        inArray(planRunLogs.planId, allPlans.map((plan) => plan.id)),
+      ));
+    const mergedActivityIds = completedLogs
+      .map((log) => log.mergedActivityId)
+      .filter((id): id is string => id !== null);
+    const activityRows = await db
+      .select({
+        id: runActivities.id,
+        planId: runActivities.planId,
+        distanceMeters: runActivities.distanceMeters,
+        durationSeconds: runActivities.durationSeconds,
+        elevationGainMeters: runActivities.elevationGainMeters,
+      })
+      .from(runActivities)
+      .where(and(
+        eq(runActivities.userId, user.id),
+        eq(runActivities.excludedFromAnalytics, false),
+        mergedActivityIds.length > 0
+          ? or(
+              inArray(runActivities.planId, allPlans.map((plan) => plan.id)),
+              inArray(runActivities.id, mergedActivityIds),
+            )
+          : inArray(runActivities.planId, allPlans.map((plan) => plan.id)),
+      ));
+    const summaries = buildPlanListSummaries(
+      allPlans.map((plan) => ({ id: plan.id, planData: plan.planData as MarathonPlan })),
+      activityRows,
+      completedLogs,
+    );
+
+    return NextResponse.json(allPlans.map((plan) => ({
+      ...plan,
+      summary: summaries.get(plan.id),
+    })));
   } catch (error) {
     console.error("Failed to list plans:", error);
     return NextResponse.json(

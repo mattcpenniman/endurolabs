@@ -11,7 +11,8 @@
 import React from "react";
 import { useState, useEffect } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { RunnerProfile, MarathonPlan, DailyLog, WeeklyPlan } from "@/lib/training/models";
+import { RunnerProfile, MarathonPlan, DailyLog, WeeklyPlan, formatPace } from "@/lib/training/models";
+import type { PlanListSummary } from "@/lib/activities/plan-list-summary";
 import OnboardingForm from "@/app/components/onboarding/OnboardingForm";
 import PlanOverviewCard from "@/app/components/plan/PlanOverviewCard";
 import PaceZonesCard from "@/app/components/plan/PaceZonesCard";
@@ -43,6 +44,7 @@ interface SavedPlanRow {
   archivedAt: string | null;
   shareToken: string | null;
   sharedAt: string | null;
+  summary: PlanListSummary;
 }
 
 interface SavePlanResponse {
@@ -170,6 +172,56 @@ function toDateKey(date: string): string {
 
 function phaseExpansionKey(planId: string, firstWeek: number): string {
   return `${planId}:${firstWeek}`;
+}
+
+function formatPlanDate(value: string): string {
+  return new Date(`${value.slice(0, 10)}T12:00:00Z`).toLocaleDateString(undefined, {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+    timeZone: "UTC",
+  });
+}
+
+function PlanSummaryMetrics({ summary }: { summary: PlanListSummary }): React.ReactNode {
+  const hasActuals = summary.actualRunCount > 0;
+  const planned = Math.round(summary.plannedMileage * 10) / 10;
+  const actual = Math.round(summary.actualMileage * 10) / 10;
+
+  return (
+    <dl className="mt-3 grid grid-cols-2 gap-x-6 gap-y-3 sm:grid-cols-4">
+      <div>
+        <dt className="text-[11px] font-semibold uppercase tracking-wide text-gray-400">Total miles</dt>
+        <dd className="mt-0.5 font-mono text-sm font-semibold text-gray-800">
+          {planned.toLocaleString()} <span className="font-sans font-normal text-gray-400">plan</span>
+          <span className="mx-1 text-gray-300">/</span>
+          {hasActuals ? actual.toLocaleString() : "--"} <span className="font-sans font-normal text-gray-400">actual</span>
+        </dd>
+      </div>
+      <div>
+        <dt className="text-[11px] font-semibold uppercase tracking-wide text-gray-400">Actual elevation</dt>
+        <dd className="mt-0.5 font-mono text-sm font-semibold text-gray-800">
+          {summary.actualElevationGainMeters === null
+            ? "--"
+            : `${Math.round(summary.actualElevationGainMeters * 3.28084).toLocaleString()} ft`}
+        </dd>
+      </div>
+      <div>
+        <dt className="text-[11px] font-semibold uppercase tracking-wide text-gray-400">Average pace</dt>
+        <dd className="mt-0.5 font-mono text-sm font-semibold text-gray-800">
+          {summary.averagePaceMinutesPerMile === null
+            ? "--"
+            : `${formatPace(summary.averagePaceMinutesPerMile)} /mi`}
+        </dd>
+      </div>
+      <div>
+        <dt className="text-[11px] font-semibold uppercase tracking-wide text-gray-400">Actual runs</dt>
+        <dd className="mt-0.5 font-mono text-sm font-semibold text-gray-800">
+          {hasActuals ? summary.actualRunCount.toLocaleString() : "--"}
+        </dd>
+      </div>
+    </dl>
+  );
 }
 
 export default function PlanPage(): React.ReactNode {
@@ -1389,9 +1441,9 @@ function PlanPageContent(): React.ReactNode {
                   return (
                     <div
                       key={row.id}
-                      className="flex flex-col gap-3 rounded-lg border border-gray-200 bg-white p-4 hover:border-enduro-300 sm:flex-row sm:items-center sm:justify-between"
+                      className="flex flex-col gap-4 rounded-xl border border-gray-200 bg-white p-5 hover:border-enduro-300 sm:flex-row sm:items-center sm:justify-between"
                     >
-                      <div>
+                      <div className="min-w-0 flex-1">
                         <p className="flex flex-wrap items-center gap-2 font-medium text-gray-900">
                           {row.raceName || `Goal ${goalStr}`}
                           {activePlanId === row.id && (
@@ -1401,10 +1453,11 @@ function PlanPageContent(): React.ReactNode {
                           )}
                         </p>
                         <p className="text-sm text-gray-500">
-                          {row.planData.totalWeeks} weeks · Peak {row.planData.peakWeeklyMileage} mi/week · Created {created}
+                          {row.planData.totalWeeks} weeks · Peak {row.planData.peakWeeklyMileage} mi/week · Race {formatPlanDate(row.planData.raceDay)} · Created {created}
                         </p>
+                        <PlanSummaryMetrics summary={row.summary} />
                       </div>
-                      <div className="flex flex-wrap gap-2">
+                      <div className="flex shrink-0 flex-wrap gap-2">
                         <button
                           onClick={() => handleLoadPlan(row.id)}
                           className="rounded-lg bg-enduro-600 px-4 py-2 text-sm font-medium text-white hover:bg-enduro-700"
@@ -1456,17 +1509,18 @@ function PlanPageContent(): React.ReactNode {
                       return (
                         <div
                           key={row.id}
-                          className="flex flex-col gap-3 rounded-lg border border-gray-200 bg-white p-4 sm:flex-row sm:items-center sm:justify-between"
+                          className="flex flex-col gap-4 rounded-lg border border-gray-200 bg-white p-4 sm:flex-row sm:items-center sm:justify-between"
                         >
-                          <div>
+                          <div className="min-w-0 flex-1">
                             <p className="font-medium text-gray-900">
                               {row.raceName || `Goal ${goalStr}`}
                             </p>
                             <p className="text-sm text-gray-500">
-                              {row.planData.totalWeeks} weeks · Peak {row.planData.peakWeeklyMileage} mi/week · Created {created}
+                              {row.planData.totalWeeks} weeks · Peak {row.planData.peakWeeklyMileage} mi/week · Race {formatPlanDate(row.planData.raceDay)} · Created {created}
                             </p>
+                            <PlanSummaryMetrics summary={row.summary} />
                           </div>
-                          <div className="flex flex-wrap gap-2">
+                          <div className="flex shrink-0 flex-wrap gap-2">
                             <button
                               onClick={() => handleCopyPlan(row.id)}
                               disabled={isSaving}
