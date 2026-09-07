@@ -36,6 +36,8 @@ export interface CourseSeriesInput {
   name: string;
   role: CourseRole;
   points: CoursePoint[];
+  /** Where per-point elevation came from (defaults to the GPX file). */
+  elevationSource?: "gpx" | "open-elevation";
 }
 
 const METERS_PER_MILE = 1609.344;
@@ -112,6 +114,8 @@ export interface CourseMetrics {
   netFeet: number;
   elevationGainFeetPerMile: number | null;
   elevationCoverage: number;
+  /** "gpx" = from the uploaded file, "open-elevation" = backfilled DEM. */
+  elevationSource: "gpx" | "open-elevation";
   gradeBands: Array<{
     key: string;
     label: string;
@@ -141,6 +145,7 @@ function courseMetrics(input: CourseSeriesInput): CourseMetrics {
       ? Math.round((gainFeet / totalMiles) * 10) / 10
       : null,
     elevationCoverage: Math.round(elevation.elevationCoverage * 100) / 100,
+    elevationSource: input.elevationSource ?? "gpx",
     gradeBands: gradeBands(points),
   };
 }
@@ -303,6 +308,9 @@ export function buildCourseComparison(input: {
   });
 
   let note = "";
+  const demCaveat = target.elevationSource === "open-elevation"
+    ? " Elevation is backfilled from a 30 m digital elevation model (Open-Elevation), so small undulations are smoothed out."
+    : "";
   if (target.elevationGainFeetPerMile === null) {
     note = `${target.name} does not include elevation data in the GPX file, so no elevation comparison can be made. The distance profile is still available.`;
   } else if (athleteGainFpm === null) {
@@ -329,6 +337,7 @@ export function buildCourseComparison(input: {
       athleteGainFpm !== null ? ` versus your ${formatFeetPerMile(athleteGainFpm)}` : ""
     }. The profile differs in shape${gradeNote(gradeDistributionDelta)} but the net climbing per mile is similar to what you have trained on, so your race-forecast time should hold with normal variance.`;
   }
+  if (demCaveat) note += demCaveat;
 
   return {
     profiles,

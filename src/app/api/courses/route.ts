@@ -81,6 +81,8 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
         created: row.createdAt.toISOString(),
         pointCount: Array.isArray(row.points) ? row.points.length : 0,
         gradeBands: row.gradeBands,
+        elevationSource: row.elevationSource,
+        elevationBackfilledAt: row.elevationBackfilledAt?.toISOString() ?? null,
       })),
     });
   } catch (error) {

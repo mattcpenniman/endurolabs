@@ -235,6 +235,25 @@ describe("buildCourseComparison", () => {
     expect(note.length).toBeGreaterThan(60);
     expect(note).toMatch(/Berlin 2026/);
   });
+
+  it("discloses when elevation is DEM-backfilled rather than from the GPX", () => {
+    const target = syntheticCourse("Berlin 2026", 26.2, 0.006, 0, true);
+    const withDem = buildCourseComparison({
+      targetSeries: [{ ...target, elevationSource: "open-elevation" }],
+      athleteActivities: flatAthlete(),
+      athleteWeeks: weeks,
+    });
+    expect(withDem.target.elevationSource).toBe("open-elevation");
+    expect(withDem.difference.note).toMatch(/digital elevation model/i);
+
+    const fromGpx = buildCourseComparison({
+      targetSeries: [target],
+      athleteActivities: flatAthlete(),
+      athleteWeeks: weeks,
+    });
+    expect(fromGpx.target.elevationSource).toBe("gpx");
+    expect(fromGpx.difference.note).not.toMatch(/digital elevation model/i);
+  });
 });
 
 describe("gradeBands for courses (regression)", () => {

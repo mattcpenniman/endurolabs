@@ -60,6 +60,10 @@ function haversineMeters(
   return 2 * R * Math.asin(Math.min(1, Math.sqrt(h)));
 }
 
+function toElevationSource(value: unknown): "gpx" | "open-elevation" {
+  return value === "open-elevation" ? "open-elevation" : "gpx";
+}
+
 async function loadAthleteBaseline(userId: string): Promise<{
   activities: ElevationGradeActivityInput[];
   weeks: ElevationGradeWeekWindow[];
@@ -175,10 +179,10 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     if (!targetRow) return NextResponse.json({ error: "Target course not found" }, { status: 404 });
 
     const series: CourseSeriesInput[] = [
-      { name: targetRow.name, role: "target", points: toCoursePoints(targetRow.points) },
+      { name: targetRow.name, role: "target", points: toCoursePoints(targetRow.points), elevationSource: toElevationSource(targetRow.elevationSource) },
     ];
     if (referenceRow) {
-      series.push({ name: referenceRow.name, role: "training", points: toCoursePoints(referenceRow.points) });
+      series.push({ name: referenceRow.name, role: "training", points: toCoursePoints(referenceRow.points), elevationSource: toElevationSource(referenceRow.elevationSource) });
     }
 
     const baseline = await loadAthleteBaseline(user.id);
