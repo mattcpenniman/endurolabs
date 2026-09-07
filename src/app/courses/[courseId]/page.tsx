@@ -28,6 +28,7 @@ interface CourseRow {
   created: string;
   pointCount: number;
   gradeBands: BandRow[];
+  elevationSource: "gpx" | "open-elevation";
 }
 
 export default function CourseDetailPage(): React.ReactNode {
@@ -37,6 +38,9 @@ export default function CourseDetailPage(): React.ReactNode {
   const [course, setCourse] = useState<CourseRow | null>(null);
   const [allCourses, setAllCourses] = useState<CourseRow[]>([]);
   const [bands, setBands] = useState<BandRow[]>([]);
+  const [backfilling, setBackfilling] = useState(false);
+  const [backfillMessage, setBackfillMessage] = useState<string | null>(null);
+  const [backfillError, setBackfillError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -70,6 +74,30 @@ export default function CourseDetailPage(): React.ReactNode {
       : "";
     router.push(`/courses/${id}/compare?target=${encodeURIComponent(id)}${reference}`);
   }, [id, allCourses, router]);
+
+  const runBackfill = useCallback(async (): Promise<void> => {
+    setBackfilling(true);
+    setBackfillMessage(null);
+    setBackfillError(null);
+    try {
+      const response = await fetch(`/api/courses/${encodeURIComponent(id)}/elevation`, {
+        method: "POST",
+      });
+      const body = (await response.json()) as { message?: string; backfilled?: number } & { error?: string };
+      if (!response.ok) throw new Error(body.error ?? "Elevation backfill failed");
+      setBackfillMessage(body.message ?? "Elevation backfilled.");
+      const listResponse = await fetch("/api/courses");
+      const listBody = (await listResponse.json()) as { courses?: CourseRow[] };
+      const all = listBody.courses ?? [];
+      setAllCourses(all);
+      setCourse(all.find((row) => row.id === id) ?? null);
+      setBands(all.find((row) => row.id === id)?.gradeBands ?? []);
+    } catch (backfillCaught) {
+      setBackfillError(backfillCaught instanceof Error ? backfillCaught.message : "Elevation backfill failed");
+    } finally {
+      setBackfilling(false);
+    }
+  }, [id]);
 
   if (loading) {
     return (
@@ -127,6 +155,41 @@ export default function CourseDetailPage(): React.ReactNode {
             {course.pointCount.toLocaleString("en-US")} points
           </p>
         </header>
+
+        {course.elevationGainFeetPerMile === null ? (
+          <section className="rounded-[2rem] border border-enduro-300 bg-enduro-50 p-6">
+            <h2 className="text-xl font-semibold text-enduro-900">No elevation in this GPX</h2>
+            <p className="mt-1 max-w-2xl text-sm leading-6 text-enduro-900/80">
+              The uploaded file does not carry per-point elevation, which limits the elevation
+              comparison. You can backfill it from Open-Elevation (30 m digital elevation model).
+              The values are stored with this course, so the service is not re-queried on later
+              visits.
+            </p>
+            <div className="mt-4 flex flex-wrap items-center gap-3">
+              <button
+                type="button"
+                onClick={() => void runBackfill()}
+                disabled={backfilling}
+                className="rounded-lg bg-enduro-600 px-4 py-2 text-sm font-medium text-white hover:bg-enduro-700 disabled:opacity-50"
+              >
+                {backfilling ? "Backfilling…" : "Backfill missing elevation"}
+              </button>
+              {backfillMessage && (
+                <p className="text-sm text-enduro-800">{backfillMessage}</p>
+              )}
+              {backfillError && (
+                <p className="text-sm text-red-700">{backfillError}</p>
+              )}
+            </div>
+          </section>
+        ) : course.elevationSource === "open-elevation" ? (
+          <section className="rounded-[2rem] border border-[var(--color-border)] bg-[var(--color-bg)] p-4">
+            <p className="text-xs text-[var(--color-text-secondary)]">
+              Elevation for this course is backfilled from the Open-Elevation 30 m digital elevation
+              model (not a barometer/GPS trace), so small undulations are smoothed.
+            </p>
+          </section>
+        ) : null}
 
         {bands.length > 0 && (
           <section className="rounded-[2rem] border border-[var(--color-border)] bg-[var(--color-bg)] p-6">

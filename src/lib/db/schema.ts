@@ -396,6 +396,10 @@ export const courses = pgTable("courses", {
   elevationGainFeetPerMile: doublePrecision("elevation_gain_feet_per_mile"),
   /** Derived at upload time from the point trace. */
   gradeBands: jsonb("grade_bands").notNull(),
+  /** Where the per-point elevations came from: "gpx" (as uploaded) or
+   *  "open-elevation" (backfilled from the DEM service). */
+  elevationSource: varchar("elevation_source", { length: 32 }).default("gpx").notNull(),
+  elevationBackfilledAt: timestamp("elevation_backfilled_at"),
   sourceFilename: varchar("source_filename", { length: 255 }),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),

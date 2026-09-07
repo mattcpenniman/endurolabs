@@ -223,6 +223,12 @@ function NoteCard({
         A larger real-world difference comes from how well the climbs sit inside your training
         distribution (see the terrain mix chart below), not from a change in your fitness.
       </p>
+      {difference.elevationGainFeetPerMileTarget === null && (
+        <p className="mt-3 text-xs text-[var(--color-text-secondary)]">
+          No elevation data to work from: open the course page to backfill missing elevation from
+          Open-Elevation, then reload this comparison.
+        </p>
+      )}
     </section>
   );
 }
