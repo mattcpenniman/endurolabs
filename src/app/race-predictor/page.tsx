@@ -49,6 +49,7 @@ export default function RacePredictorPage(): React.ReactNode {
   const [issuing, setIssuing] = useState(false);
   const [issuedMessage, setIssuedMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [model, setModel] = useState<"evidence" | "readiness">("evidence");
 
   useEffect(() => {
     let cancelled = false;
@@ -67,10 +68,6 @@ export default function RacePredictorPage(): React.ReactNode {
       .finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
   }, [router]);
-
-  const selected = selectedKey === "custom"
-    ? customPrediction
-    : data?.predictions.find((prediction) => prediction.key === selectedKey) ?? data?.predictions[0] ?? null;
 
   async function predictCustom(event: React.FormEvent<HTMLFormElement>): Promise<void> {
     event.preventDefault();
@@ -97,6 +94,27 @@ export default function RacePredictorPage(): React.ReactNode {
     } finally {
       setCustomLoading(false);
     }
+  }
+
+  const selectedBase: RacePredictorResult | null = selectedKey === "custom"
+    ? customPrediction
+    : data?.predictions.find((prediction) => prediction.key === selectedKey) ?? data?.predictions[0] ?? null;
+  const activeSeconds = selectedBase?.readiness
+    ? (model === "readiness"
+      ? selectedBase.readiness.predictedSeconds
+      : selectedBase.predictedSeconds)
+    : selectedBase?.predictedSeconds ?? null;
+  const selected: (RacePredictorResult & { activePredictedSeconds: number }) | null = (
+    selectedBase && activeSeconds !== null
+      ? { ...selectedBase, activePredictedSeconds: activeSeconds }
+      : null
+  );
+
+  /** Seconds for the currently-selected model for a given prediction row. */
+  function activeSecondsFor(prediction: RacePredictorResult | null): number {
+    if (!prediction) return 0;
+    if (model === "readiness" && prediction.readiness) return prediction.readiness.predictedSeconds;
+    return prediction.predictedSeconds;
   }
 
   async function issueForecast(): Promise<void> {
@@ -175,20 +193,58 @@ export default function RacePredictorPage(): React.ReactNode {
                 <span className="rounded-full bg-lime-300/15 px-3 py-1 text-[10px] font-black uppercase tracking-wider text-lime-200">{selected.confidence}</span>
               </div>
               <p className="mt-4 text-sm font-bold text-slate-300">{selected.label}</p>
-              <p className="mt-1 font-mono text-5xl font-black tracking-tight text-white sm:text-6xl">{formatDuration(selected.predictedSeconds)}</p>
-              <p className="mt-3 font-mono text-sm text-lime-200">{formatDuration(selected.paceSecondsPerMile)}/mi</p>
+              <p className="mt-1 font-mono text-5xl font-black tracking-tight text-white sm:text-6xl">{formatDuration(selected.activePredictedSeconds)}</p>
+              <p className="mt-3 font-mono text-sm text-lime-200">{formatDuration(Math.round(selected.activePredictedSeconds / selected.distanceMiles))}/mi</p>
+              {model === "readiness" && selected.readiness && (
+                <p className="mt-2 text-[10px] font-bold uppercase tracking-wider text-lime-300/70">
+                  Readiness candidate · {selected.readiness.adjustmentPercent.toFixed(2)}%
+                </p>
+              )}
             </div>
           </div>
         </section>
 
+        {/* Model toggle */}
+        <div className="rounded-2xl border border-[var(--color-border)] bg-[var(--color-bg)] p-3 shadow-sm">
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+            <p className="text-xs font-bold uppercase tracking-[0.2em] text-[var(--color-text-secondary)]">Model</p>
+            <div className="inline-flex gap-1 rounded-xl bg-slate-100 p-1">
+              <button
+                type="button"
+                onClick={() => setModel("evidence")}
+                className={`rounded-lg px-4 py-2 text-xs font-black uppercase tracking-wider ${model === "evidence" ? "bg-white text-slate-950 shadow" : "text-slate-500"}`}
+              >
+                Race evidence
+              </button>
+              <button
+                type="button"
+                onClick={() => setModel("readiness")}
+                disabled={!selectedBase?.readiness}
+                className={`rounded-lg px-4 py-2 text-xs font-black uppercase tracking-wider disabled:opacity-40 ${model === "readiness" ? "bg-white text-slate-950 shadow" : "text-slate-500"}`}
+                title={selectedBase?.readiness ? "Volume + long-run + consistency adjustment" : "No adjustment effects for this distance"}
+              >
+                Readiness (3-factor)
+              </button>
+            </div>
+            <p className="text-xs text-[var(--color-text-secondary)]">
+              {model === "evidence"
+                ? "Weighted median of prior race finishes."
+                : "Bounded training effects applied to prior race finishes."}
+            </p>
+          </div>
+        </div>
+
         <section aria-label="Race distances" className="grid grid-cols-2 gap-3 md:grid-cols-3 lg:grid-cols-5">
-          {data.predictions.map((prediction) => (
-            <button key={prediction.key} type="button" onClick={() => setSelectedKey(prediction.key)} className={`rounded-2xl border p-4 text-left transition ${selectedKey === prediction.key ? "border-enduro-500 bg-enduro-950 text-white shadow-lg" : "border-[var(--color-border)] bg-[var(--color-bg)] hover:-translate-y-0.5 hover:border-enduro-400"}`}>
-              <p className={`text-[10px] font-black uppercase tracking-[0.18em] ${selectedKey === prediction.key ? "text-enduro-200" : "text-enduro-700"}`}>{prediction.label}</p>
-              <p className="mt-3 font-mono text-xl font-black">{formatDuration(prediction.predictedSeconds)}</p>
-              <p className={`mt-1 text-xs ${selectedKey === prediction.key ? "text-slate-300" : "text-[var(--color-text-secondary)]"}`}>{formatDuration(prediction.paceSecondsPerMile)}/mi</p>
-            </button>
-          ))}
+          {data.predictions.map((prediction) => {
+            const seconds = activeSecondsFor(prediction);
+            return (
+              <button key={prediction.key} type="button" onClick={() => setSelectedKey(prediction.key)} className={`rounded-2xl border p-4 text-left transition ${selectedKey === prediction.key ? "border-enduro-500 bg-enduro-950 text-white shadow-lg" : "border-[var(--color-border)] bg-[var(--color-bg)] hover:-translate-y-0.5 hover:border-enduro-400"}`}>
+                <p className={`text-[10px] font-black uppercase tracking-[0.18em] ${selectedKey === prediction.key ? "text-enduro-200" : "text-enduro-700"}`}>{prediction.label}</p>
+                <p className="mt-3 font-mono text-xl font-black">{formatDuration(seconds)}</p>
+                <p className={`mt-1 text-xs ${selectedKey === prediction.key ? "text-slate-300" : "text-[var(--color-text-secondary)]"}`}>{formatDuration(Math.round(seconds / prediction.distanceMiles))}/mi</p>
+              </button>
+            );
+          })}
         </section>
 
         <div className="grid gap-7 lg:grid-cols-[minmax(0,1.45fr)_minmax(320px,0.75fr)]">
@@ -219,12 +275,12 @@ export default function RacePredictorPage(): React.ReactNode {
             <section className="rounded-3xl border border-[var(--color-border)] bg-[var(--color-bg)] p-6 shadow-sm sm:p-8">
               <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
                 <div><p className="text-xs font-black uppercase tracking-[0.2em] text-enduro-700">Evidence ledger</p><h2 className="mt-2 text-2xl font-black">Why the model landed here</h2></div>
-                <p className="text-xs text-[var(--color-text-secondary)]">Top {selected.strongestEvidence.length} of {selected.evidenceCount} races</p>
+                <p className="text-xs text-[var(--color-text-secondary)]">{selected.completeEvidence.length} races in evidence</p>
               </div>
               <div className="mt-6 overflow-x-auto">
                 <table className="w-full min-w-[580px] text-left text-sm">
                   <thead className="border-b border-[var(--color-border)] text-[10px] font-black uppercase tracking-[0.16em] text-[var(--color-text-secondary)]"><tr><th className="pb-3">Race</th><th className="pb-3">Result</th><th className="pb-3">Equivalent</th><th className="pb-3 text-right">Weight</th></tr></thead>
-                  <tbody>{selected.strongestEvidence.map((evidence) => <tr key={evidence.raceId} className="border-b border-[var(--color-border)] last:border-0"><td className="py-4"><p className="font-bold">{evidence.distanceLabel}</p><p className="mt-1 text-xs text-[var(--color-text-secondary)]">{formatDate(evidence.raceDate)} · {evidence.ageDays} days ago</p></td><td className="py-4 font-mono">{formatDuration(evidence.actualSeconds)}</td><td className="py-4 font-mono font-bold text-enduro-700">{formatDuration(evidence.equivalentSeconds)}</td><td className="py-4 text-right font-mono text-xs">{evidence.combinedWeight.toFixed(3)}</td></tr>)}</tbody>
+                  <tbody>{selected.completeEvidence.map((evidence, index) => <tr key={evidence.raceId} className="border-b border-[var(--color-border)] last:border-0"><td className="py-4"><p className="font-bold">{evidence.distanceLabel}</p><p className="mt-1 text-xs text-[var(--color-text-secondary)]">{formatDate(evidence.raceDate)} · {evidence.ageDays} days ago</p><p className="mt-1 text-[10px] font-black uppercase tracking-wider text-enduro-700">{evidence.resultSource === "canonical" ? `${evidence.verificationStatus?.replace("-", " ") ?? "unverified"} official result` : "Garmin GPS fallback"}</p></td><td className="py-4 font-mono">{formatDuration(evidence.actualSeconds)}</td><td className="py-4 font-mono font-bold text-enduro-700">{formatDuration(evidence.equivalentSeconds)}</td><td className="py-4 text-right font-mono text-xs">{evidence.combinedWeight.toFixed(3)} · #{index + 1}</td></tr>)}</tbody>
                 </table>
               </div>
             </section>

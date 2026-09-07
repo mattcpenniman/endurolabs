@@ -4,6 +4,7 @@
 
 export type RaceResultStatus = "finish" | "dnf" | "dns";
 export type RaceResultVerification = "unverified" | "self-reported" | "verified";
+export type RaceClassification = "official" | "training_race" | "pacing_duty" | "bad_gps";
 
 export interface NewRaceResult {
   linkedActivityId: string | null;
@@ -15,6 +16,9 @@ export interface NewRaceResult {
   status: RaceResultStatus;
   source: string;
   verificationStatus: RaceResultVerification;
+  classification: RaceClassification;
+  predictionExcluded: boolean;
+  notes: string | null;
   courseId: string | null;
   elevationGainMeters: number | null;
   surface: string | null;
@@ -24,6 +28,20 @@ export interface NewRaceResult {
   precipitationMillimeters: number | null;
   placing: number | null;
   ageGroupPlacing: number | null;
+}
+
+/** Applies the fixed outcome-quality gate used by race forecasts. */
+export function isPredictionEligibleRaceResult(result: {
+  status: string;
+  classification: string;
+  predictionExcluded: boolean;
+  chipTimeSeconds: number | null;
+  gunTimeSeconds: number | null;
+}): boolean {
+  return result.status === "finish"
+    && result.classification === "official"
+    && !result.predictionExcluded
+    && (result.chipTimeSeconds ?? result.gunTimeSeconds ?? 0) > 0;
 }
 
 function optionalNumber(value: unknown, field: string, minimum: number | null): number | null {
@@ -58,6 +76,11 @@ export function parseNewRaceResult(value: unknown): NewRaceResult {
   if (verificationStatus !== "unverified" && verificationStatus !== "self-reported" && verificationStatus !== "verified") {
     throw new Error("verificationStatus is invalid");
   }
+  const classification = input.classification ?? "official";
+  if (classification !== "official" && classification !== "training_race"
+    && classification !== "pacing_duty" && classification !== "bad_gps") {
+    throw new Error("classification is invalid");
+  }
   const raceName = typeof input.raceName === "string" ? input.raceName.trim() : "";
   if (!raceName || raceName.length > 255) throw new Error("raceName is required and must be at most 255 characters");
   const raceDate = typeof input.raceDate === "string" ? input.raceDate : "";
@@ -82,6 +105,9 @@ export function parseNewRaceResult(value: unknown): NewRaceResult {
     status,
     source: typeof input.source === "string" && input.source.trim() ? input.source.trim().slice(0, 32) : "manual",
     verificationStatus,
+    classification,
+    predictionExcluded: typeof input.predictionExcluded === "boolean" ? input.predictionExcluded : false,
+    notes: typeof input.notes === "string" && input.notes.trim() ? input.notes.trim().slice(0, 2000) : null,
     courseId: typeof input.courseId === "string" && input.courseId.trim() ? input.courseId.trim().slice(0, 255) : null,
     elevationGainMeters: optionalInteger(input.elevationGainMeters, "elevationGainMeters", 0),
     surface: typeof input.surface === "string" && input.surface.trim() ? input.surface.trim().slice(0, 32) : null,

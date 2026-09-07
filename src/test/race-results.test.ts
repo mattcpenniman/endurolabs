@@ -3,7 +3,7 @@
 // ============================================================
 
 import { describe, expect, it } from "vitest";
-import { parseNewRaceResult } from "@/lib/races/results";
+import { isPredictionEligibleRaceResult, parseNewRaceResult } from "@/lib/races/results";
 
 describe("canonical race results", () => {
   it("normalizes a valid official finish", () => {
@@ -14,6 +14,8 @@ describe("canonical race results", () => {
       chipTimeSeconds: 10_800,
       status: "finish",
       verificationStatus: "verified",
+      classification: "official",
+      predictionExcluded: false,
       temperatureCelsius: 18.5,
       elevationGainMeters: 0,
       placing: 42,
@@ -27,6 +29,45 @@ describe("canonical race results", () => {
       elevationGainMeters: 0,
       placing: 42,
     });
+  });
+
+  it("records predeclared prediction classifications and notes", () => {
+    expect(parseNewRaceResult({
+      raceName: "Pacing assignment",
+      raceDate: "2026-10-04",
+      officialDistanceMeters: 21_097.5,
+      chipTimeSeconds: 7200,
+      status: "finish",
+      classification: "pacing_duty",
+      predictionExcluded: true,
+      notes: "Led the 2-hour pace group",
+    })).toMatchObject({
+      classification: "pacing_duty",
+      predictionExcluded: true,
+      notes: "Led the 2-hour pace group",
+    });
+    expect(() => parseNewRaceResult({
+      raceName: "Invalid classification",
+      raceDate: "2026-10-04",
+      officialDistanceMeters: 5000,
+      chipTimeSeconds: 1200,
+      status: "finish",
+      classification: "ignored-after-bad-race",
+    })).toThrow("classification is invalid");
+  });
+
+  it("only admits official, completed, non-excluded outcomes to forecasts", () => {
+    const official = parseNewRaceResult({
+      raceName: "Official 10K",
+      raceDate: "2026-10-04",
+      officialDistanceMeters: 10_000,
+      chipTimeSeconds: 2400,
+      status: "finish",
+    });
+    expect(isPredictionEligibleRaceResult(official)).toBe(true);
+    expect(isPredictionEligibleRaceResult({ ...official, classification: "training_race" })).toBe(false);
+    expect(isPredictionEligibleRaceResult({ ...official, predictionExcluded: true })).toBe(false);
+    expect(isPredictionEligibleRaceResult({ ...official, status: "dnf", chipTimeSeconds: null })).toBe(false);
   });
 
   it("rejects a finish without a finish time", () => {

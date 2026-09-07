@@ -8,7 +8,7 @@ export interface SpeedPowerModel {
   activityCount: number;
 }
 
-interface PowerActivitySummary {
+export interface PowerActivitySummary {
   distanceMeters: number;
   durationSeconds: number;
   movingDurationSeconds: number | null;

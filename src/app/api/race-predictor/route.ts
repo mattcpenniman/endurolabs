@@ -42,12 +42,19 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     if (!distances) {
       return NextResponse.json({ error: "Custom distance must be between 0.5 and 100 miles" }, { status: 400 });
     }
-    const evidence = await loadRaceEvidence(user.id, asOf);
+    // includeSameDay=true: the product view shows any race you finished *today*,
+    // including the one that just happened. Backtests remain strict.
+    const evidence = await loadRaceEvidence(user.id, asOf, {
+      includeSameDay: true,
+      includeTrainingActivities: true,
+    });
     return NextResponse.json(buildRacePredictorResponse({
       races: evidence.races,
+      activities: [...evidence.trainingActivities, ...evidence.races],
       asOf,
       distances,
       sourceCoverage: evidence.sourceCoverage,
+      includeSameDay: true,
     }));
   } catch (error) {
     console.error("Failed to build race predictions:", error);

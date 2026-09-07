@@ -8,6 +8,7 @@ import {
   buildRaceForecast,
   buildRacePlanFeatures,
   buildRaceTrainingFeatures,
+  buildTrainingAdjustedRaceForecast,
   predictEquivalentRaceSeconds,
   type RaceAnalysisActivity,
   type RaceAnalysisPlan,
@@ -110,6 +111,91 @@ describe("race performance analysis", () => {
     expect(features.calculatedPowerRuns).toBe(1);
   });
 
+  it("does not double-count canonical outcome-only rows as training", () => {
+    const features = buildRaceTrainingFeatures([
+      activity({ id: "garmin-race", localDate: "2026-04-01", eventType: null }),
+      activity({ id: "official-result", localDate: "2026-04-01", eventType: "race", trainingExcluded: true }),
+    ], "2026-05-01", 112);
+    expect(features.runs).toBe(1);
+    expect(features.miles).toBe(10);
+  });
+
+  it("builds fixed trailing windows, consistency, long-run, and taper features", () => {
+    const activities = [
+      activity({ id: "day-1", localDate: "2026-04-30", distanceMeters: 5 * METERS_PER_MILE, durationSeconds: 1800 }),
+      activity({ id: "day-7", localDate: "2026-04-24", distanceMeters: 20 * METERS_PER_MILE, durationSeconds: 7200 }),
+      activity({ id: "day-8", localDate: "2026-04-23", distanceMeters: 10 * METERS_PER_MILE }),
+      activity({ id: "day-35", localDate: "2026-03-27", distanceMeters: 10 * METERS_PER_MILE }),
+      activity({ id: "day-56", localDate: "2026-03-06", distanceMeters: 10 * METERS_PER_MILE }),
+      activity({ id: "day-112", localDate: "2026-01-09", distanceMeters: 10 * METERS_PER_MILE }),
+    ];
+    const features = buildRaceTrainingFeatures(activities, "2026-05-01", 112);
+    expect(features.milesLast7Days).toBe(25);
+    expect(features.milesLast28Days).toBe(35);
+    expect(features.milesLast56Days).toBe(55);
+    expect(features.milesLast112Days).toBe(65);
+    expect(features.longestRunMilesLast28Days).toBe(20);
+    expect(features.runsAtLeast12Miles).toBe(1);
+    expect(features.runsAtLeast20Miles).toBe(1);
+    expect(features.longestRunDurationHours).toBe(2);
+    expect(features.activeWeeks).toBeLessThanOrEqual(16);
+    expect(features.taperRatio7ToPrior28).toBe(5);
+    expect(features.taperRatio14ToPrior42).toBe(5.25);
+  });
+
+  it("uses no training adjustment for 5K and bounded durability effects for marathons", () => {
+    const sourceRace = activity({
+      id: "source-race",
+      localDate: "2025-09-01",
+      distanceMeters: 10_000,
+      durationSeconds: 2400,
+      eventType: "race",
+    });
+    const recentTraining = Array.from({ length: 8 }, (_, index) => activity({
+      id: `recent-${index}`,
+      localDate: `2025-12-${String(index + 1).padStart(2, "0")}`,
+      distanceMeters: index === 7 ? 20 * METERS_PER_MILE : 10 * METERS_PER_MILE,
+    }));
+    const activities = [sourceRace, ...recentTraining];
+    const fiveK = buildTrainingAdjustedRaceForecast(activities, [sourceRace], "2026-01-01", 5000);
+    const marathon = buildTrainingAdjustedRaceForecast(activities, [sourceRace], "2026-01-01", 42_195);
+
+    expect(fiveK?.adjustmentPercent).toBe(0);
+    expect(fiveK?.predictedSeconds).toBe(fiveK?.baseForecast.predictedSeconds);
+    expect(marathon?.adjustmentPercent).toBeLessThan(0);
+    expect(marathon?.adjustmentPercent).toBeGreaterThanOrEqual(-10);
+    expect(marathon?.predictedSeconds).toBeLessThan(marathon?.baseForecast.predictedSeconds ?? 0);
+  });
+
+  it("does not let same-day or future training alter a candidate", () => {
+    const sourceRace = activity({ id: "source", localDate: "2025-01-01", eventType: "race" });
+    const base = buildTrainingAdjustedRaceForecast([sourceRace], [sourceRace], "2026-01-01", 42_195);
+    const withFuture = buildTrainingAdjustedRaceForecast([
+      sourceRace,
+      activity({ id: "same-day", localDate: "2026-01-01", distanceMeters: 30 * METERS_PER_MILE }),
+      activity({ id: "future", localDate: "2026-01-02", distanceMeters: 30 * METERS_PER_MILE }),
+    ], [sourceRace], "2026-01-01", 42_195);
+    expect(withFuture).toEqual(base);
+  });
+
+  it("attenuates current readiness at longer forecast horizons", () => {
+    const sourceRace = activity({ id: "source", localDate: "2025-01-01", eventType: "race" });
+    const training = Array.from({ length: 10 }, (_, index) => activity({
+      id: `training-${index}`,
+      localDate: `2025-12-${String(index + 1).padStart(2, "0")}`,
+      distanceMeters: 15 * METERS_PER_MILE,
+    }));
+    const raceDay = buildTrainingAdjustedRaceForecast(
+      [sourceRace, ...training], [sourceRace], "2026-01-01", 42_195, 112, 0,
+    );
+    const twelveWeeks = buildTrainingAdjustedRaceForecast(
+      [sourceRace, ...training], [sourceRace], "2026-01-01", 42_195, 112, 84,
+    );
+    expect(raceDay?.adjustmentPercent).not.toBe(0);
+    expect(twelveWeeks?.adjustmentPercent).toBe(0);
+    expect(twelveWeeks?.predictedSeconds).toBe(twelveWeeks?.baseForecast.predictedSeconds);
+  });
+
   it("excludes logs recorded on or after the prediction date", () => {
     const features = buildRacePlanFeatures(plan(), "2026-05-01");
     expect(features.scheduledRuns).toBe(2);
@@ -147,10 +233,40 @@ describe("race performance analysis", () => {
     expect(result.historicalRaces[1].baseline?.sourceRaceId).toBe("race-10k");
     expect(result.baselineSummary?.comparisons).toBe(1);
     expect(result.forecastSummary?.comparisons).toBe(1);
+    expect(result.trainingAdjustedSummary?.comparisons).toBe(1);
+    expect(result.trainingAdjustedComparison?.commonComparisons).toBe(1);
+    expect(result.horizonEvaluations.map((evaluation) => evaluation.horizonDays)).toEqual([7, 28, 84]);
     expect(result.forecastComparison?.commonComparisons).toBe(1);
     expect(result.planTargets).toHaveLength(1);
     expect(result.planTargets[0].baseline?.sourceRaceId).toBe("race-half");
     expect(result.planTargets[0].training.runs).toBe(2);
+    expect(result.planTargets[0].trainingAdjustedForecast?.modelVersion).toBe("race-training-readiness-v1");
+  });
+
+  it("enables the experimental Power @ 140 fitness effect only when fitnessEnabled", () => {
+    const sourceRace = activity({ id: "source", localDate: "2025-10-01", distanceMeters: 42_195, durationSeconds: 12_600, eventType: "race" });
+    const fitness = [
+      { date: "2025-09-25", watts: 340, measured: true },
+      { date: "2025-11-05", watts: 330, measured: true },
+      { date: "2026-04-10", watts: 345, measured: true },
+    ];
+    const off = analyzeRacePerformance({
+      activities: [sourceRace, activity({ localDate: "2026-04-01" })],
+      plans: [plan()],
+      asOf: "2026-04-20",
+      fitness,
+      fitnessEnabled: false,
+    });
+    const on = analyzeRacePerformance({
+      activities: [sourceRace, activity({ localDate: "2026-04-01" })],
+      plans: [plan()],
+      asOf: "2026-04-20",
+      fitness,
+      fitnessEnabled: true,
+    });
+    expect(off.planTargets[0].trainingAdjustedForecast?.modelVersion).toBe("race-training-readiness-v1");
+    expect(off.planTargets[0].trainingAdjustedForecast?.effects.fitnessPercent).toBe(0);
+    expect(on.planTargets[0].trainingAdjustedForecast?.modelVersion).toBe("race-training-readiness-v2");
   });
 
   it("derives a historical-error range only from earlier rolling forecasts", () => {
@@ -171,5 +287,24 @@ describe("race performance analysis", () => {
     expect(result.historicalRaces[6].forecast?.historicalErrorRange?.errorObservations).toBe(5);
     expect(result.planTargets[0].forecast?.historicalErrorRange?.errorObservations).toBe(6);
     expect(result.planTargets[0].forecast?.historicalErrorRange?.confidence).toBe("low");
+    expect(result.planTargets[0].trainingAdjustedForecast?.historicalErrorRange?.errorObservations).toBe(6);
+  });
+
+  it("excludes invalid race outcomes from residuals and horizon reports", () => {
+    const validRaces = [
+      activity({ id: "first", localDate: "2025-01-01", eventType: "race" }),
+      activity({ id: "second", localDate: "2025-06-01", eventType: "race" }),
+    ];
+    const result = analyzeRacePerformance({
+      activities: [
+        ...validRaces,
+        activity({ id: "zero-time", localDate: "2025-07-01", eventType: "race", durationSeconds: 0 }),
+      ],
+      plans: [],
+      asOf: "2026-01-01",
+    });
+    expect(result.historicalRaces.map((race) => race.raceId)).toEqual(["first", "second"]);
+    expect(result.forecastSummary?.comparisons).toBe(1);
+    expect(result.horizonEvaluations.every((evaluation) => evaluation.base?.comparisons === 1)).toBe(true);
   });
 });

@@ -34,6 +34,9 @@ export interface RunActivity {
   matchConfidence: "high" | "medium" | "low" | null;
   qualityScore?: number | null;
   excludedFromAnalytics?: boolean;
+  predictionExcluded?: boolean;
+  raceClassification?: string | null;
+  raceNotes?: string | null;
   sampleCount: number;
   samplesFetchedAt: string | null;
   detailFetchStatus?: string | null;
@@ -55,6 +58,32 @@ export interface GarminConnectionStatus {
 
 export interface RaceListResponse {
   races: RunActivity[];
+  officialResults: RaceResultRecord[];
+}
+
+export interface RaceResultRecord {
+  id: string;
+  linkedActivityId: string | null;
+  raceName: string;
+  raceDate: string;
+  officialDistanceMeters: number;
+  chipTimeSeconds: number | null;
+  gunTimeSeconds: number | null;
+  status: "finish" | "dnf" | "dns";
+  source: string;
+  verificationStatus: "unverified" | "self-reported" | "verified";
+  classification: "official" | "training_race" | "pacing_duty" | "bad_gps";
+  predictionExcluded: boolean;
+  notes: string | null;
+  courseId: string | null;
+  elevationGainMeters: number | null;
+  surface: string | null;
+  temperatureCelsius: number | null;
+  dewPointCelsius: number | null;
+  windSpeedMetersPerSecond: number | null;
+  precipitationMillimeters: number | null;
+  placing: number | null;
+  ageGroupPlacing: number | null;
 }
 
 export interface ActivityChartSample {

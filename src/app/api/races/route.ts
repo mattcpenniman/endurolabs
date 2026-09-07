@@ -52,7 +52,19 @@ export async function POST(request: Request): Promise<NextResponse> {
         .limit(1);
       if (linkedActivity.length === 0) return NextResponse.json({ error: "Linked activity not found" }, { status: 404 });
     }
-    const [created] = await db.insert(raceResults).values({ userId: user.id, ...result }).returning();
+    const created = await db.transaction(async (transaction) => {
+      const [saved] = await transaction.insert(raceResults).values({ userId: user.id, ...result }).returning();
+      if (result.linkedActivityId) {
+        await transaction.update(runActivities).set({
+          raceClassification: result.classification,
+          raceNotes: result.notes,
+          predictionExcluded: result.classification !== "official" || result.predictionExcluded,
+          excludedFromAnalytics: result.classification === "bad_gps",
+          updatedAt: new Date(),
+        }).where(and(eq(runActivities.id, result.linkedActivityId), eq(runActivities.userId, user.id)));
+      }
+      return saved;
+    });
     return NextResponse.json({ result: created }, { status: 201 });
   } catch (error) {
     console.error("Failed to save race result:", error);

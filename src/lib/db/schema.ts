@@ -141,6 +141,9 @@ export const runActivities = pgTable("run_activities", {
   matchConfidence: varchar("match_confidence", { length: 16 }),
   qualityScore: integer("quality_score"),
   excludedFromAnalytics: boolean("excluded_from_analytics").default(false).notNull(),
+  predictionExcluded: boolean("prediction_excluded").default(false).notNull(),
+  raceClassification: varchar("race_classification", { length: 32 }),
+  raceNotes: text("race_notes"),
   sampleCount: integer("sample_count").default(0).notNull(),
   samplesFetchedAt: timestamp("samples_fetched_at"),
   detailFetchStatus: varchar("detail_fetch_status", { length: 32 }),
@@ -176,6 +179,9 @@ export const raceResults = pgTable("race_results", {
   status: varchar("status", { length: 16 }).notNull(),
   source: varchar("source", { length: 32 }).notNull(),
   verificationStatus: varchar("verification_status", { length: 32 }).notNull(),
+  classification: varchar("classification", { length: 32 }).default("official").notNull(),
+  predictionExcluded: boolean("prediction_excluded").default(false).notNull(),
+  notes: text("notes"),
   courseId: varchar("course_id", { length: 255 }),
   elevationGainMeters: integer("elevation_gain_meters"),
   surface: varchar("surface", { length: 32 }),
@@ -190,6 +196,20 @@ export const raceResults = pgTable("race_results", {
 }, (table) => [
   uniqueIndex("race_results_linked_activity_unique").on(table.linkedActivityId),
   index("race_results_user_date_idx").on(table.userId, table.raceDate),
+]);
+
+export const raceResultRevisions = pgTable("race_result_revisions", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  raceResultId: uuid("race_result_id")
+    .notNull()
+    .references(() => raceResults.id, { onDelete: "cascade" }),
+  userId: uuid("user_id")
+    .notNull()
+    .references(() => users.id, { onDelete: "cascade" }),
+  previousResult: jsonb("previous_result").notNull(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (table) => [
+  index("race_result_revisions_result_idx").on(table.raceResultId, table.createdAt),
 ]);
 
 export const racePredictionSnapshots = pgTable("race_prediction_snapshots", {
@@ -225,6 +245,12 @@ export const racePredictionSnapshots = pgTable("race_prediction_snapshots", {
 }, (table) => [
   index("race_prediction_snapshots_user_prediction_idx").on(table.userId, table.predictionAt),
   index("race_prediction_snapshots_plan_idx").on(table.planId),
+  uniqueIndex("race_prediction_snapshots_plan_horizon_unique").on(
+    table.planId,
+    table.targetDate,
+    table.forecastHorizonDays,
+    table.modelVersion,
+  ),
 ]);
 
 export const planRunLogs = pgTable("plan_run_logs", {

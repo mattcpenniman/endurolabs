@@ -55,6 +55,7 @@ describe("race prediction snapshots", () => {
       prediction,
       evidence: {
         races: [],
+        trainingActivities: [],
         maximumSourceTimestamp,
         sourceCoverage: {
           canonicalResults: 1,

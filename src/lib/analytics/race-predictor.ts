@@ -7,11 +7,15 @@
 import {
   analyzeRacePerformance,
   buildRaceForecastWithHistoricalRange,
+  buildTrainingAdjustedRaceForecast,
   type RaceAnalysisActivity,
+  type RaceAnalysisLog,
+  type RaceAnalysisPlan,
   type RaceBaselineSummary,
   type RaceForecastComparison,
   type RaceForecastEvidence,
   type RaceHistoricalErrorRange,
+  type RaceTrainingAdjustedPrediction,
 } from "./race-performance-analysis";
 
 const METERS_PER_MILE = 1609.344;
@@ -23,6 +27,19 @@ export const STANDARD_PREDICTION_DISTANCES = [
   { key: "half-marathon", label: "Half Marathon", distanceMeters: 21_097.5 },
   { key: "marathon", label: "Marathon", distanceMeters: 42_195 },
 ] as const;
+
+/** Readiness-adjusted forecast from the bounded training effects. */
+export interface RaceReadinessResult {
+  modelVersion: "race-training-readiness-v1" | "race-training-readiness-v2";
+  predictedSeconds: number;
+  adjustmentPercent: number;
+  effects: {
+    volumePercent: number;
+    longRunPercent: number;
+    consistencyPercent: number;
+    fitnessPercent: number;
+  };
+}
 
 export interface RacePredictorResult {
   key: string;
@@ -37,6 +54,9 @@ export interface RacePredictorResult {
   meanMedianDisagreementPercent: number;
   strongestEvidence: RaceForecastEvidence[];
   completeEvidence: RaceForecastEvidence[];
+  /** Volume + long-run + consistency readiness candidate (v1). Null when the
+   *  bounded effect is zero (e.g. 5K) or no training features exist. */
+  readiness?: RaceReadinessResult | null;
 }
 
 export interface RacePredictorResponse {
@@ -66,18 +86,29 @@ export interface RacePredictionDistance {
 /** Builds API-ready predictions and model validation from race history. */
 export function buildRacePredictorResponse(input: {
   races: RaceAnalysisActivity[];
+  /** All activities (runs + races) for training-feature effects. When absent,
+   *  the readiness block is omitted and the response degrades to evidence-only. */
+  activities?: RaceAnalysisActivity[];
+  plans?: RaceAnalysisPlan[];
+  logs?: RaceAnalysisLog[];
   asOf: string;
   distances: RacePredictionDistance[];
   sourceCoverage?: RacePredictorResponse["sourceCoverage"];
+  /** When true, races completed on the as-of date are included in evidence.
+   *  The /race-predictor product view sets this; backtests keep the default. */
+  includeSameDay?: boolean;
 }): RacePredictorResponse {
+  const activities = input.activities ?? input.races;
   const predictions = input.distances.flatMap((distance): RacePredictorResult[] => {
     const forecast = buildRaceForecastWithHistoricalRange(
       input.races,
       input.asOf,
       distance.distanceMeters,
+      input.includeSameDay === true,
     );
     if (!forecast) return [];
     const distanceMiles = distance.distanceMeters / METERS_PER_MILE;
+    const readiness = buildReadinessResult(activities, input.races, input.asOf, distance.distanceMeters);
     return [{
       key: distance.key,
       label: distance.label,
@@ -91,11 +122,12 @@ export function buildRacePredictorResponse(input: {
       meanMedianDisagreementPercent: forecast.meanMedianDisagreementPercent,
       strongestEvidence: forecast.evidence.slice(0, 5),
       completeEvidence: forecast.evidence,
+      readiness,
     }];
   });
   const analysis = analyzeRacePerformance({
-    activities: input.races,
-    plans: [],
+    activities,
+    plans: (input.plans ?? []),
     asOf: input.asOf,
   });
   return {
@@ -114,5 +146,37 @@ export function buildRacePredictorResponse(input: {
       comparison: analysis.forecastComparison,
     },
     disclaimer: "The 90% range reflects this athlete's prior rolling forecast errors. It is not a calibrated confidence interval and does not account for course, weather, health, or race-day execution.",
+  };
+}
+
+/** Bounded training-readiness effect for one target distance. */
+function buildReadinessResult(
+  activities: RaceAnalysisActivity[],
+  races: RaceAnalysisActivity[],
+  predictionDate: string,
+  targetDistanceMeters: number,
+  lookbackDays = 112,
+): RaceReadinessResult | null {
+  const adjusted = buildTrainingAdjustedRaceForecast(
+    activities,
+    races,
+    predictionDate,
+    targetDistanceMeters,
+    lookbackDays,
+    0,
+  );
+  if (!adjusted) return null;
+  const effects = adjusted.effects;
+  if (
+    effects.volumePercent === 0
+    && effects.longRunPercent === 0
+    && effects.consistencyPercent === 0
+    && effects.fitnessPercent === 0
+  ) return null;
+  return {
+    modelVersion: adjusted.modelVersion,
+    predictedSeconds: adjusted.predictedSeconds,
+    adjustmentPercent: adjusted.adjustmentPercent,
+    effects,
   };
 }
