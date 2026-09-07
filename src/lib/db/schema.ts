@@ -380,3 +380,25 @@ export const fitnessSnapshots = pgTable("fitness_snapshots", {
   ),
   index("fitness_snapshots_user_window_idx").on(table.userId, table.windowEnd),
 ]);
+
+export const courses = pgTable("courses", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  userId: uuid("user_id")
+    .notNull()
+    .references(() => users.id, { onDelete: "cascade" }),
+  name: varchar("name", { length: 255 }).notNull(),
+  /** Parsed track points: [lat, lon, ele|null] in order. */
+  points: jsonb("points").notNull(),
+  distanceMeters: integer("distance_meters").notNull(),
+  elevationGainMeters: integer("elevation_gain_meters"),
+  elevationLossMeters: integer("elevation_loss_meters"),
+  elevationNetMeters: integer("elevation_net_meters"),
+  elevationGainFeetPerMile: doublePrecision("elevation_gain_feet_per_mile"),
+  /** Derived at upload time from the point trace. */
+  gradeBands: jsonb("grade_bands").notNull(),
+  sourceFilename: varchar("source_filename", { length: 255 }),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+}, (table) => [
+  index("courses_user_idx").on(table.userId, table.createdAt),
+]);

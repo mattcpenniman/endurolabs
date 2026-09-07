@@ -72,6 +72,9 @@ export default function Header() {
           <a href="/stats" className="hover:text-enduro-600">
             Stats
           </a>
+          <Link href="/courses" className="hover:text-enduro-600">
+            Courses
+          </Link>
           <Link href="/races" className="hover:text-enduro-600">
             Races
           </Link>

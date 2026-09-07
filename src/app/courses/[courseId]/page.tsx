@@ -1,0 +1,185 @@
+// ============================================================
+// EnduroLab - Course Detail
+// ============================================================
+// /courses/<id> — summary of one saved course and the actions to
+// open the elevation comparison, optionally against another saved
+// course.
+
+"use client";
+
+import React, { useCallback, useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
+import { useParams } from "next/navigation";
+
+interface BandRow {
+  key: string;
+  label: string;
+  distanceMeters: number;
+  sharePercent: number;
+}
+
+interface CourseRow {
+  id: string;
+  name: string;
+  distanceMeters: number;
+  distanceMiles: number;
+  elevationGainFeet: number;
+  elevationGainFeetPerMile: number | null;
+  created: string;
+  pointCount: number;
+  gradeBands: BandRow[];
+}
+
+export default function CourseDetailPage(): React.ReactNode {
+  const params = useParams<{ courseId: string }>();
+  const router = useRouter();
+  const id = params?.courseId ?? "";
+  const [course, setCourse] = useState<CourseRow | null>(null);
+  const [allCourses, setAllCourses] = useState<CourseRow[]>([]);
+  const [bands, setBands] = useState<BandRow[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    const load = async (): Promise<void> => {
+      const response = await fetch("/api/courses");
+      if (response.status === 401) {
+        router.replace("/login?redirect=/courses");
+        return;
+      }
+      const body = (await response.json()) as { courses?: CourseRow[] } & { error?: string };
+      if (!response.ok) throw new Error(body.error ?? "Failed to load courses");
+      const list = body.courses ?? [];
+      if (!cancelled) {
+        setAllCourses(list);
+        const found = list.find((row) => row.id === id);
+        setCourse(found ?? null);
+        setBands(found?.gradeBands ?? []);
+      }
+    };
+    load()
+      .catch((err: Error) => { if (!cancelled) setError(err.message); })
+      .finally(() => { if (!cancelled) setLoading(false); });
+    return () => { cancelled = true; };
+  }, [id, router]);
+
+  const openComparison = useCallback((referenceId?: string): void => {
+    const reference = referenceId && allCourses.some((row) => row.id === referenceId)
+      ? `&reference=${encodeURIComponent(referenceId)}`
+      : "";
+    router.push(`/courses/${id}/compare?target=${encodeURIComponent(id)}${reference}`);
+  }, [id, allCourses, router]);
+
+  if (loading) {
+    return (
+      <div className="section-padding">
+        <div className="container-narrow animate-pulse space-y-4">
+          <div className="h-24 rounded-[2rem] bg-slate-200" />
+          <div className="h-64 rounded-[2rem] bg-slate-100" />
+        </div>
+      </div>
+    );
+  }
+
+  const otherCourses = allCourses.filter((row) => row.id !== id);
+
+  if (error || !course) {
+    return (
+      <div className="section-padding">
+        <div className="container-narrow space-y-4">
+          <button
+            type="button"
+            onClick={() => router.push("/courses")}
+            className="text-sm text-enduro-700 hover:underline"
+          >
+            Back to courses
+          </button>
+          <div className="rounded-[2rem] border border-red-200 bg-red-50 p-8 text-sm text-red-800">
+            {error ?? "Course not found."}
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="section-padding">
+      <div className="container-narrow space-y-6">
+        <button
+          type="button"
+          onClick={() => router.push("/courses")}
+          className="text-sm text-enduro-700 hover:underline"
+        >
+          Back to courses
+        </button>
+
+        <header className="rounded-[2rem] border border-[var(--color-border)] bg-[var(--color-bg)] p-8">
+          <h1 className="text-3xl font-bold text-enduro-700">{course.name}</h1>
+          <p className="mt-2 text-sm text-[var(--color-text-secondary)]">
+            {course.distanceMiles.toLocaleString("en-US", { maximumFractionDigits: 2 })} miles
+            {" · "}
+            {Math.round(course.elevationGainFeet).toLocaleString("en-US")} ft of total climbing
+            {course.elevationGainFeetPerMile !== null
+              ? ` (${Math.round(course.elevationGainFeetPerMile)} ft/mi)`
+              : " (no elevation in the GPX)"}
+            {" · "}
+            {course.pointCount.toLocaleString("en-US")} points
+          </p>
+        </header>
+
+        {bands.length > 0 && (
+          <section className="rounded-[2rem] border border-[var(--color-border)] bg-[var(--color-bg)] p-6">
+            <h2 className="text-xl font-semibold">Terrain mix</h2>
+            <div className="mt-3 flex flex-wrap gap-2">
+              {bands.filter((band) => band.sharePercent > 0).map((band) => (
+                <span
+                  key={band.key}
+                  className="rounded-full border border-[var(--color-border)] bg-[var(--color-bg-secondary)] px-3 py-1 text-xs"
+                >
+                  {band.label} — {band.sharePercent}%
+                </span>
+              ))}
+            </div>
+          </section>
+        )}
+
+        <section className="rounded-[2rem] border border-[var(--color-border)] bg-[var(--color-bg)] p-6">
+          <h2 className="text-xl font-semibold">Elevation comparison</h2>
+          <p className="mt-1 max-w-2xl text-sm text-[var(--color-text-secondary)]">
+            Compare this course against your stored running history to see the pace-expectation note
+            and time-pickup potential. Optionally overlay another saved course.
+          </p>
+          <div className="mt-4 flex flex-col gap-3 sm:flex-row sm:items-end">
+            {otherCourses.length > 0 ? (
+              <label className="flex-1 text-sm">
+                <span className="mb-1 block text-[var(--color-text-secondary)]">
+                  Overlay another course (optional)
+                </span>
+                <select
+                  id="courses-reference-select"
+                  className="w-full rounded-lg border border-[var(--color-border)] bg-[var(--color-bg-secondary)] px-3 py-2 text-sm"
+                >
+                  <option value="">Compare against stored history only</option>
+                  {otherCourses.map((row) => (
+                    <option key={row.id} value={row.id}>{row.name}</option>
+                  ))}
+                </select>
+              </label>
+            ) : null}
+            <button
+              type="button"
+              onClick={() => {
+                const select = document.getElementById("courses-reference-select") as HTMLSelectElement | null;
+                openComparison(select?.value || undefined);
+              }}
+              className="rounded-lg bg-enduro-600 px-5 py-2.5 text-sm font-medium text-white hover:bg-enduro-700"
+            >
+              Open comparison
+            </button>
+          </div>
+        </section>
+      </div>
+    </div>
+  );
+}
