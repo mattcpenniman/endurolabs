@@ -9,7 +9,10 @@
 import { and, eq, gt, isNotNull, notLike, or, sql } from "drizzle-orm";
 import { db } from "@/lib/db/client";
 import { runActivities } from "@/lib/db/schema";
-import { fitSpeedPowerModel } from "@/lib/analytics/modeled-power";
+import {
+  fitSpeedPowerModel,
+  MIN_VALID_MOVING_DURATION_RATIO,
+} from "@/lib/analytics/modeled-power";
 
 export interface SummarySpeedPowerModel {
   slope: number;
@@ -52,8 +55,14 @@ export async function applyCalculatedSummaryPower(
   userId: string,
   model: SummarySpeedPowerModel,
 ): Promise<number> {
+  const effectiveDuration = sql`case
+    when moving_duration_seconds >= duration_seconds::double precision * ${MIN_VALID_MOVING_DURATION_RATIO}
+      and moving_duration_seconds <= duration_seconds
+      then moving_duration_seconds
+    else duration_seconds
+  end`;
   const calculation = sql`round((${model.intercept} + ${model.slope} * (distance_meters::double precision
-    / greatest(coalesce(moving_duration_seconds, duration_seconds), 1))))::int`;
+    / greatest(${effectiveDuration}, 1))))::int`;
   const updated = await db
     .update(runActivities)
     .set({

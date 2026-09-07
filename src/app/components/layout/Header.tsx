@@ -75,6 +75,9 @@ export default function Header() {
           <Link href="/races" className="hover:text-enduro-600">
             Races
           </Link>
+          <Link href="/race-predictor" className="hover:text-enduro-600">
+            Predictor
+          </Link>
           {user && (
             <Link href="/profile" className="hover:text-enduro-600">
               Profile

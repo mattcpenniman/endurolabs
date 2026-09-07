@@ -28,6 +28,21 @@ export async function GET() {
 
     if (allPlans.length === 0) return NextResponse.json([]);
 
+    const normalizedPlans = allPlans.map((plan) => {
+      const planData = plan.planData as MarathonPlan;
+      const runnerProfile = planData.runnerProfile ?? plan.runnerProfile;
+
+      return {
+        ...plan,
+        runnerProfile,
+        planData: {
+          ...planData,
+          runnerProfile,
+          raceDay: planData.raceDay ?? runnerProfile.raceDate,
+        },
+      };
+    });
+
     const completedLogs = await db
       .select({
         planId: planRunLogs.planId,
@@ -38,7 +53,7 @@ export async function GET() {
       .where(and(
         eq(planRunLogs.userId, user.id),
         eq(planRunLogs.completed, 1),
-        inArray(planRunLogs.planId, allPlans.map((plan) => plan.id)),
+        inArray(planRunLogs.planId, normalizedPlans.map((plan) => plan.id)),
       ));
     const mergedActivityIds = completedLogs
       .map((log) => log.mergedActivityId)
@@ -57,18 +72,18 @@ export async function GET() {
         eq(runActivities.excludedFromAnalytics, false),
         mergedActivityIds.length > 0
           ? or(
-              inArray(runActivities.planId, allPlans.map((plan) => plan.id)),
+              inArray(runActivities.planId, normalizedPlans.map((plan) => plan.id)),
               inArray(runActivities.id, mergedActivityIds),
             )
-          : inArray(runActivities.planId, allPlans.map((plan) => plan.id)),
+          : inArray(runActivities.planId, normalizedPlans.map((plan) => plan.id)),
       ));
     const summaries = buildPlanListSummaries(
-      allPlans.map((plan) => ({ id: plan.id, planData: plan.planData as MarathonPlan })),
+      normalizedPlans.map((plan) => ({ id: plan.id, planData: plan.planData })),
       activityRows,
       completedLogs,
     );
 
-    return NextResponse.json(allPlans.map((plan) => ({
+    return NextResponse.json(normalizedPlans.map((plan) => ({
       ...plan,
       summary: summaries.get(plan.id),
     })));

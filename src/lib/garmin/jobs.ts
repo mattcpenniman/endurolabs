@@ -27,6 +27,7 @@ export interface DetailJobParameters {
   scope: "recent" | "older" | "all";
   days: number;
   through: string;
+  planId?: string;
 }
 
 export interface HistoryJobParameters {
@@ -79,6 +80,7 @@ async function processDetailPass(job: typeof garminSyncJobs.$inferSelect, client
   const conditions = and(
     eq(runActivities.userId, job.userId),
     eq(runActivities.source, "garmin"),
+    ...(parameters.planId ? [eq(runActivities.planId, parameters.planId)] : []),
     lte(runActivities.startTimeGmt, through),
     or(
       isNull(runActivities.detailFetchStatus),
@@ -254,6 +256,7 @@ export async function processGarminJob(jobId: string, maxPasses = 4): Promise<vo
         .where(and(
           eq(runActivities.userId, progress.userId),
           eq(runActivities.source, "garmin"),
+          ...(parameters.planId ? [eq(runActivities.planId, parameters.planId)] : []),
           eq(runActivities.detailFetchStatus, "failed"),
           lt(runActivities.detailAttemptCount, 3),
           lte(runActivities.startTimeGmt, new Date(parameters.through)),

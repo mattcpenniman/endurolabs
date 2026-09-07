@@ -300,6 +300,21 @@ describe("fitSpeedPowerModel", () => {
     expect(model?.slope).toBeCloseTo(100, 6);
     expect(model?.activityCount).toBe(5);
   });
+
+  it("falls back to total duration when moving duration is implausibly short", () => {
+    const measured = [2, 2.5, 3, 3.5, 4].map((speed, index) => ({
+      distanceMeters: speed * 1000,
+      durationSeconds: 1000,
+      movingDurationSeconds: index === 4 ? 15 : 1000,
+      averagePower: 50 + 100 * speed,
+      powerSource: "garmin",
+    }));
+
+    const model = fitSpeedPowerModel(measured);
+
+    expect(model?.intercept).toBeCloseTo(50, 6);
+    expect(model?.slope).toBeCloseTo(100, 6);
+  });
 });
 
 describe("analyzePlanFitness — weekly bucketing", () => {

@@ -7,7 +7,7 @@
 import React, { useEffect, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import GarminActivityMapCard from "@/app/components/plan/GarminActivityMapCard";
-import type { RaceListResponse, RunActivity } from "@/lib/activities/models";
+import type { RaceListResponse, RaceResultRecord, RunActivity } from "@/lib/activities/models";
 import {
   areComparableRaces,
   classifyRaceDistance,
@@ -56,9 +56,11 @@ function RacesPageContent(): React.ReactNode {
   const requestedRaceId = searchParams.get("race");
   const requestedDetailId = searchParams.get("runmap");
   const [races, setRaces] = useState<RunActivity[]>([]);
+  const [officialResults, setOfficialResults] = useState<RaceResultRecord[]>([]);
   const [comparisonId, setComparisonId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [editingResult, setEditingResult] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -77,7 +79,10 @@ function RacesPageContent(): React.ReactNode {
       const response = await fetch("/api/races");
       const body = (await response.json()) as RaceListResponse & { error?: string };
       if (!response.ok) throw new Error(body.error ?? "Failed to load races");
-      if (!cancelled) setRaces(body.races);
+      if (!cancelled) {
+        setRaces(body.races);
+        setOfficialResults(body.officialResults);
+      }
     };
     load()
       .catch((loadError: Error) => { if (!cancelled) setError(loadError.message); })
@@ -88,6 +93,7 @@ function RacesPageContent(): React.ReactNode {
   const selectedRace = races.find((race) => race.id === (requestedRaceId ?? requestedDetailId))
     ?? races[0]
     ?? null;
+  const selectedOfficialResult = officialResults.find((result) => result.linkedActivityId === selectedRace?.id) ?? null;
   const detailRace = races.find((race) => race.id === requestedDetailId && race.sampleCount > 0) ?? null;
   const comparableRaces = selectedRace
     ? races.filter((race) => race.id !== selectedRace.id && areComparableRaces(selectedRace, race))
@@ -144,6 +150,43 @@ function RacesPageContent(): React.ReactNode {
     const body = (await response.json()) as { shareUrl?: string; error?: string };
     if (!response.ok) throw new Error(body.error ?? "Failed to create race share link");
     return body.shareUrl ?? null;
+  }
+
+  async function saveRaceLabel(input: RaceLabelInput): Promise<void> {
+    if (!selectedRace) return;
+    const resultPayload = {
+      linkedActivityId: selectedRace.id,
+      raceName: input.raceName,
+      raceDate: selectedRace.localDate,
+      officialDistanceMeters: input.distanceMiles * 1609.344,
+      chipTimeSeconds: input.status === "finish" ? parseDuration(input.chipTime) : null,
+      status: input.status,
+      source: "manual",
+      verificationStatus: input.verificationStatus,
+      classification: input.classification,
+      predictionExcluded: input.predictionExcluded,
+      notes: input.notes,
+      surface: input.surface || null,
+    };
+    const resultResponse = await fetch(selectedOfficialResult ? `/api/races/${selectedOfficialResult.id}` : "/api/races", {
+      method: selectedOfficialResult ? "PATCH" : "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(resultPayload),
+    });
+    const resultBody = (await resultResponse.json()) as { result?: RaceResultRecord; error?: string };
+    if (!resultResponse.ok || !resultBody.result) throw new Error(resultBody.error ?? "Failed to save canonical result");
+    setOfficialResults((current) => [
+      resultBody.result as RaceResultRecord,
+      ...current.filter((result) => result.id !== resultBody.result?.id),
+    ]);
+    setRaces((current) => current.map((race) => race.id === selectedRace.id ? {
+      ...race,
+      raceClassification: input.classification,
+      raceNotes: input.notes || null,
+      predictionExcluded: input.classification !== "official" || input.predictionExcluded,
+      excludedFromAnalytics: input.classification === "bad_gps",
+    } : race));
+    setEditingResult(false);
   }
 
   if (loading) return <RaceLoading />;
@@ -270,6 +313,27 @@ function RacesPageContent(): React.ReactNode {
                 <RaceMetric label="Power" value={selectedRace.averagePower ? `${selectedRace.averagePower} W` : "--"} />
                 <RaceMetric label="Elevation" value={selectedRace.elevationGainMeters ? `${selectedRace.elevationGainMeters} m` : "--"} />
               </div>
+            </section>
+
+            <section className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm sm:p-6">
+              <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+                <div>
+                  <p className="text-xs font-bold uppercase tracking-[0.2em] text-enduro-700">Prediction evidence</p>
+                  <h2 className="mt-2 text-xl font-black text-gray-900">{selectedOfficialResult ? "Official result linked" : "Review this race label"}</h2>
+                  <p className="mt-1 text-sm text-gray-500">
+                    {selectedOfficialResult
+                      ? `${selectedOfficialResult.verificationStatus.replace("-", " ")} · ${formatDuration(selectedOfficialResult.chipTimeSeconds ?? selectedOfficialResult.gunTimeSeconds ?? 0)} · ${(selectedOfficialResult.officialDistanceMeters / 1609.344).toFixed(2)} mi`
+                      : "This Garmin time and GPS distance remain fallback evidence until an official result is linked."}
+                  </p>
+                </div>
+                <div className="flex items-center gap-3">
+                  <EvidenceBadge classification={selectedOfficialResult?.classification ?? selectedRace.raceClassification ?? "unreviewed"} excluded={selectedOfficialResult?.predictionExcluded ?? selectedRace.predictionExcluded ?? false} />
+                  <button type="button" onClick={() => setEditingResult(true)} className="rounded-xl bg-slate-950 px-4 py-2.5 text-sm font-bold text-white hover:bg-slate-800">
+                    {selectedOfficialResult ? "Correct result" : "Review result"}
+                  </button>
+                </div>
+              </div>
+              <p className="mt-4 border-t border-gray-100 pt-4 text-xs leading-5 text-gray-500">Only official or unreviewed finishes are forecast evidence. Training races, pacing duties, bad GPS records, DNF/DNS outcomes, and explicit exclusions are omitted by a fixed rule.</p>
             </section>
 
             <section className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm sm:p-6">
@@ -402,8 +466,112 @@ function RacesPageContent(): React.ReactNode {
           </div>
         </div>
       )}
+      {editingResult && selectedRace && (
+        <RaceResultEditor
+          race={selectedRace}
+          result={selectedOfficialResult}
+          onClose={() => setEditingResult(false)}
+          onSave={saveRaceLabel}
+        />
+      )}
     </div>
   );
+}
+
+type RaceClassification = "official" | "training_race" | "pacing_duty" | "bad_gps";
+
+interface RaceLabelInput {
+  raceName: string;
+  distanceMiles: number;
+  chipTime: string;
+  status: "finish" | "dnf" | "dns";
+  verificationStatus: "unverified" | "self-reported" | "verified";
+  classification: RaceClassification;
+  predictionExcluded: boolean;
+  surface: string;
+  notes: string;
+}
+
+function parseDuration(value: string): number {
+  const parts = value.trim().split(":").map(Number);
+  if (parts.some((part) => !Number.isFinite(part) || part < 0) || parts.length < 2 || parts.length > 3) {
+    throw new Error("Finish time must use M:SS or H:MM:SS");
+  }
+  const seconds = parts.length === 3
+    ? parts[0] * 3600 + parts[1] * 60 + parts[2]
+    : parts[0] * 60 + parts[1];
+  if (seconds <= 0 || parts.at(-1) as number >= 60 || (parts.length === 3 && parts[1] >= 60)) {
+    throw new Error("Finish time must use M:SS or H:MM:SS");
+  }
+  return Math.round(seconds);
+}
+
+function EvidenceBadge({ classification, excluded }: { classification: string; excluded: boolean }): React.ReactNode {
+  const eligible = !excluded && (classification === "official" || classification === "unreviewed");
+  return <span className={`rounded-full px-3 py-1 text-[10px] font-black uppercase tracking-wider ${eligible ? "bg-enduro-100 text-enduro-800" : "bg-amber-100 text-amber-900"}`}>{eligible ? classification : "excluded"}</span>;
+}
+
+function RaceResultEditor({ race, result, onClose, onSave }: {
+  race: RunActivity;
+  result: RaceResultRecord | null;
+  onClose: () => void;
+  onSave: (input: RaceLabelInput) => Promise<void>;
+}): React.ReactNode {
+  const [form, setForm] = useState<RaceLabelInput>({
+    raceName: result?.raceName ?? race.activityName,
+    distanceMiles: result ? Math.round(result.officialDistanceMeters / 1609.344 * 1000) / 1000 : race.distanceMiles,
+    chipTime: formatDuration(result?.chipTimeSeconds ?? race.durationSeconds),
+    status: result?.status ?? "finish",
+    verificationStatus: result?.verificationStatus ?? "self-reported",
+    classification: result?.classification ?? (race.raceClassification as RaceClassification | null) ?? "official",
+    predictionExcluded: result?.predictionExcluded ?? false,
+    surface: result?.surface ?? "road",
+    notes: result?.notes ?? race.raceNotes ?? "",
+  });
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const field = <K extends keyof RaceLabelInput>(key: K, value: RaceLabelInput[K]): void => setForm((current) => ({ ...current, [key]: value }));
+  const submit = async (event: React.FormEvent): Promise<void> => {
+    event.preventDefault();
+    setSaving(true);
+    setError(null);
+    try {
+      await onSave(form);
+    } catch (saveError) {
+      setError(saveError instanceof Error ? saveError.message : "Failed to save race result");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-[60] flex items-start justify-center overflow-y-auto bg-slate-950/75 p-3 backdrop-blur-sm sm:p-6" role="dialog" aria-modal="true" aria-label="Review race result" onClick={onClose}>
+      <form onSubmit={submit} onClick={(event) => event.stopPropagation()} className="my-4 w-full max-w-2xl rounded-3xl bg-white p-6 shadow-2xl sm:p-8">
+        <div className="flex items-start justify-between gap-4">
+          <div><p className="text-xs font-black uppercase tracking-[0.2em] text-enduro-700">Outcome quality</p><h2 className="mt-2 text-2xl font-black text-gray-950">Review {formatDate(race.localDate)}</h2></div>
+          <button type="button" onClick={onClose} className="rounded-lg px-3 py-2 text-sm font-bold text-gray-500 hover:bg-gray-100">Close</button>
+        </div>
+        <div className="mt-6 grid gap-4 sm:grid-cols-2">
+          <EditorField label="Race name"><input required value={form.raceName} onChange={(event) => field("raceName", event.target.value)} className="form-input" /></EditorField>
+          <EditorField label="Classification"><select value={form.classification} onChange={(event) => field("classification", event.target.value as RaceClassification)} className="form-input"><option value="official">Official race</option><option value="training_race">Training race</option><option value="pacing_duty">Pacing duty</option><option value="bad_gps">Bad GPS / invalid</option></select></EditorField>
+          <EditorField label="Official distance (miles)"><input type="number" min="0.01" step="0.001" required value={form.distanceMiles} onChange={(event) => field("distanceMiles", Number(event.target.value))} className="form-input font-mono" /></EditorField>
+          <EditorField label="Outcome"><select value={form.status} onChange={(event) => field("status", event.target.value as RaceLabelInput["status"])} className="form-input"><option value="finish">Finish</option><option value="dnf">DNF</option><option value="dns">DNS</option></select></EditorField>
+          <EditorField label="Official chip time"> <input disabled={form.status !== "finish"} required={form.status === "finish"} value={form.chipTime} onChange={(event) => field("chipTime", event.target.value)} placeholder="3:12:34" className="form-input font-mono disabled:bg-gray-100" /></EditorField>
+          <EditorField label="Verification"><select value={form.verificationStatus} onChange={(event) => field("verificationStatus", event.target.value as RaceLabelInput["verificationStatus"])} className="form-input"><option value="unverified">Unverified</option><option value="self-reported">Self-reported</option><option value="verified">Verified source</option></select></EditorField>
+          <EditorField label="Surface"><select value={form.surface} onChange={(event) => field("surface", event.target.value)} className="form-input"><option value="road">Road</option><option value="track">Track</option><option value="trail">Trail</option><option value="mixed">Mixed</option><option value="">Unknown</option></select></EditorField>
+          <label className="flex items-center gap-3 self-end rounded-xl border border-gray-200 px-4 py-3 text-sm font-bold text-gray-700"><input type="checkbox" checked={form.predictionExcluded} onChange={(event) => field("predictionExcluded", event.target.checked)} />Exclude from prediction</label>
+        </div>
+        <EditorField label="Execution and verification notes"><textarea value={form.notes} onChange={(event) => field("notes", event.target.value)} rows={3} placeholder="Course, weather, illness, pacing intent, GPS issue, or source URL" className="form-input resize-y" /></EditorField>
+        {error && <p className="mt-4 rounded-xl bg-red-50 px-4 py-3 text-sm text-red-700">{error}</p>}
+        <button type="submit" disabled={saving} className="mt-5 w-full rounded-xl bg-enduro-700 px-4 py-3 text-sm font-black text-white hover:bg-enduro-800 disabled:opacity-50">{saving ? "Saving..." : result ? "Save correction" : "Save reviewed result"}</button>
+        <p className="mt-3 text-xs leading-5 text-gray-500">Corrections affect future forecasts only. Previously issued prediction snapshots retain their original evidence.</p>
+      </form>
+    </div>
+  );
+}
+
+function EditorField({ label, children }: { label: string; children: React.ReactNode }): React.ReactNode {
+  return <label className="block text-xs font-bold text-gray-600"><span className="mb-1.5 block">{label}</span>{children}</label>;
 }
 
 function RaceLoading(): React.ReactNode {

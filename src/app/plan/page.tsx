@@ -174,7 +174,9 @@ function phaseExpansionKey(planId: string, firstWeek: number): string {
   return `${planId}:${firstWeek}`;
 }
 
-function formatPlanDate(value: string): string {
+function formatPlanDate(value: string | undefined): string {
+  if (!value) return "Not set";
+
   return new Date(`${value.slice(0, 10)}T12:00:00Z`).toLocaleDateString(undefined, {
     month: "short",
     day: "numeric",
@@ -1453,7 +1455,7 @@ function PlanPageContent(): React.ReactNode {
                           )}
                         </p>
                         <p className="text-sm text-gray-500">
-                          {row.planData.totalWeeks} weeks · Peak {row.planData.peakWeeklyMileage} mi/week · Race {formatPlanDate(row.planData.raceDay)} · Created {created}
+                          {row.planData.totalWeeks} weeks · Peak {row.planData.peakWeeklyMileage} mi/week · Race {formatPlanDate(row.planData.raceDay ?? row.runnerProfile.raceDate)} · Created {created}
                         </p>
                         <PlanSummaryMetrics summary={row.summary} />
                       </div>
@@ -1516,7 +1518,7 @@ function PlanPageContent(): React.ReactNode {
                               {row.raceName || `Goal ${goalStr}`}
                             </p>
                             <p className="text-sm text-gray-500">
-                              {row.planData.totalWeeks} weeks · Peak {row.planData.peakWeeklyMileage} mi/week · Race {formatPlanDate(row.planData.raceDay)} · Created {created}
+                              {row.planData.totalWeeks} weeks · Peak {row.planData.peakWeeklyMileage} mi/week · Race {formatPlanDate(row.planData.raceDay ?? row.runnerProfile.raceDate)} · Created {created}
                             </p>
                             <PlanSummaryMetrics summary={row.summary} />
                           </div>

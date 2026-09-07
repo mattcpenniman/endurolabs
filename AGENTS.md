@@ -92,6 +92,27 @@ src/
 - Per-activity modeled Power @ 140 is not approved: leave-one-activity-out MAE was 26.4 W, RMSE 34.0 W, and maximum error 64.7 W. Keep modeled Power @ 140 limited to weekly/plan trends and visually distinct from measured Power @ 140.
 - Re-run the exact downstream validation with `npm run power:p140-backtest -- --plan-id UUID`.
 
+## Race Performance Analysis
+
+- The next race-prediction workflow starts with the read-only CLI: `npm run race:analyze -- --email runner@example.com` or `npm run race:analyze -- --plan-id UUID`.
+- The authenticated product UI is `/race-predictor`; its API is `GET /api/race-predictor`. The endpoint returns 5K, 10K, 10-mile, half-marathon, and marathon forecasts, or a custom forecast with `?distanceMiles=N` (0.5-100 miles).
+- UI/API response construction lives in `src/lib/analytics/race-predictor.ts` and must reuse the same pure forecast functions as the CLI so displayed predictions and backtests cannot drift.
+- The Race Predictor labels uncertainty as a `90% historical range`, not a calibrated confidence interval. Keep the explanatory disclaimer visible anywhere the range is displayed.
+- Add `--as-of YYYY-MM-DD` for a historical cutoff, `--lookback-days N` for the training window (minimum 28, default 112), and `--json` for complete machine-readable feature rows.
+- The CLI builds one leakage-aware row per tagged historical race and current plan target. It reports trailing mileage, consistency, long-run exposure, elevation, HR/power coverage, plan intent/adherence, and a latest-prior-race Riegel baseline backtest.
+- Feature construction lives in `src/lib/analytics/race-performance-analysis.ts`; keep it pure and reuse it for future forecast models rather than rebuilding SQL-specific features.
+- The current `race-evidence-v1` candidate converts every eligible prior 5K-through-marathon result with Riegel, then takes a weighted median. Fixed weights use a 180-day recency half-life, exponential source/target-distance similarity, and a 1.5x same-distance multiplier; evidence older than five years is excluded.
+- The candidate is evaluated with expanding-window rolling origins against the latest-prior-race baseline. On the current primary-athlete dataset (15 comparable historical predictions), candidate MAE is 5:40 versus 8:20, mean absolute error is 5.43% versus 7.37%, and candidate results are 8 wins, 5 ties, and 2 losses. Treat this as athlete-specific exploratory validation, not population evidence.
+- Forecast ranges use the empirical 5th and 95th percentiles of strictly prior rolling log errors. They require at least five prior errors, are labeled low confidence below ten, and must be described as 90% historical-error ranges rather than calibrated prediction intervals.
+- Training and plan features are context only in `race-evidence-v1`; they do not adjust the point prediction. Do not fit coefficients to mutable historical plan data or this small set of correlated races.
+- All activity and log inputs must be strictly earlier than the prediction date. Never include the target race, future plan adherence, later fitness snapshots, current PR fields without an as-of date, or weather observed after a forecast was issued.
+- `run_activities.event_type = 'race'` is a Garmin-tagged GPS activity, not an official result. The current analysis has no chip time, official distance, DNF/DNS, course identity, or verified race-day weather.
+- Plan JSON and log rows are mutable. Historical rows expose `mutableAfterPrediction`; do not treat affected plan features as leakage-safe until immutable prediction snapshots exist.
+- The Riegel output is an auditable baseline, not the product forecast. It does not account for marathon durability, course, weather, fatigue, or execution.
+- `calculated_power` is derived from speed. The CLI reports its coverage separately but never uses it as independent evidence for a pace prediction.
+- Validate future models with rolling-origin race backtests and athlete-held-out folds. Compare against goal time, PR, latest same-distance race, and Riegel equivalents; report MAE/RMSE, bias, interval coverage, and probability calibration.
+- Do not display a goal-achievement probability until it is calibrated out of sample. The intended product output is predicted finish time, uncertainty interval, goal probability, confidence, and the strongest positive/negative drivers.
+
 ## Conventions
 
 ### Code Style
@@ -119,7 +140,7 @@ src/
 - Test Garmin payload mapping as pure logic; DB idempotency requires an integration test against PostgreSQL.
 
 ## Key Configuration
-- `package.json` scripts include app lifecycle, `db:push`, user/plan utilities, `seed:dev`, `garmin:history`, `samples:backfill`, `summaries:recompute`, and Vitest commands
+- `package.json` scripts include app lifecycle, `db:push`, user/plan utilities, `seed:dev`, `garmin:history`, `samples:backfill`, `summaries:recompute`, `race:analyze`, and Vitest commands
 - `tsconfig.json`: strict mode, `@/*` → `./src/*`, ES2017 target, bundler module resolution
 - `vitest.config.ts`: jsdom environment, React plugin, globals true
 - `next.config.js`: default (empty) config

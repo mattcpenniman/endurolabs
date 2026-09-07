@@ -141,6 +141,9 @@ export const runActivities = pgTable("run_activities", {
   matchConfidence: varchar("match_confidence", { length: 16 }),
   qualityScore: integer("quality_score"),
   excludedFromAnalytics: boolean("excluded_from_analytics").default(false).notNull(),
+  predictionExcluded: boolean("prediction_excluded").default(false).notNull(),
+  raceClassification: varchar("race_classification", { length: 32 }),
+  raceNotes: text("race_notes"),
   sampleCount: integer("sample_count").default(0).notNull(),
   samplesFetchedAt: timestamp("samples_fetched_at"),
   detailFetchStatus: varchar("detail_fetch_status", { length: 32 }),
@@ -159,6 +162,95 @@ export const runActivities = pgTable("run_activities", {
   index("run_activities_plan_idx").on(table.planId),
   index("run_activities_detail_queue_idx").on(table.userId, table.source, table.detailFetchStatus, table.startTimeGmt),
   uniqueIndex("run_activities_share_token_unique").on(table.shareToken),
+]);
+
+export const raceResults = pgTable("race_results", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  userId: uuid("user_id")
+    .notNull()
+    .references(() => users.id, { onDelete: "cascade" }),
+  linkedActivityId: uuid("linked_activity_id")
+    .references(() => runActivities.id, { onDelete: "set null" }),
+  raceName: varchar("race_name", { length: 255 }).notNull(),
+  raceDate: varchar("race_date", { length: 10 }).notNull(),
+  officialDistanceMeters: doublePrecision("official_distance_meters").notNull(),
+  chipTimeSeconds: integer("chip_time_seconds"),
+  gunTimeSeconds: integer("gun_time_seconds"),
+  status: varchar("status", { length: 16 }).notNull(),
+  source: varchar("source", { length: 32 }).notNull(),
+  verificationStatus: varchar("verification_status", { length: 32 }).notNull(),
+  classification: varchar("classification", { length: 32 }).default("official").notNull(),
+  predictionExcluded: boolean("prediction_excluded").default(false).notNull(),
+  notes: text("notes"),
+  courseId: varchar("course_id", { length: 255 }),
+  elevationGainMeters: integer("elevation_gain_meters"),
+  surface: varchar("surface", { length: 32 }),
+  temperatureCelsius: doublePrecision("temperature_celsius"),
+  dewPointCelsius: doublePrecision("dew_point_celsius"),
+  windSpeedMetersPerSecond: doublePrecision("wind_speed_meters_per_second"),
+  precipitationMillimeters: doublePrecision("precipitation_millimeters"),
+  placing: integer("placing"),
+  ageGroupPlacing: integer("age_group_placing"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+}, (table) => [
+  uniqueIndex("race_results_linked_activity_unique").on(table.linkedActivityId),
+  index("race_results_user_date_idx").on(table.userId, table.raceDate),
+]);
+
+export const raceResultRevisions = pgTable("race_result_revisions", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  raceResultId: uuid("race_result_id")
+    .notNull()
+    .references(() => raceResults.id, { onDelete: "cascade" }),
+  userId: uuid("user_id")
+    .notNull()
+    .references(() => users.id, { onDelete: "cascade" }),
+  previousResult: jsonb("previous_result").notNull(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (table) => [
+  index("race_result_revisions_result_idx").on(table.raceResultId, table.createdAt),
+]);
+
+export const racePredictionSnapshots = pgTable("race_prediction_snapshots", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  userId: uuid("user_id")
+    .notNull()
+    .references(() => users.id, { onDelete: "cascade" }),
+  planId: uuid("plan_id").references(() => plans.id, { onDelete: "set null" }),
+  targetRaceResultId: uuid("target_race_result_id")
+    .references(() => raceResults.id, { onDelete: "set null" }),
+  targetDate: varchar("target_date", { length: 10 }).notNull(),
+  targetDistanceMeters: doublePrecision("target_distance_meters").notNull(),
+  targetRaceName: varchar("target_race_name", { length: 255 }),
+  predictionAt: timestamp("prediction_at").notNull(),
+  forecastHorizonDays: integer("forecast_horizon_days").notNull(),
+  predictedSeconds: integer("predicted_seconds").notNull(),
+  range50LowerSeconds: integer("range_50_lower_seconds"),
+  range50UpperSeconds: integer("range_50_upper_seconds"),
+  range90LowerSeconds: integer("range_90_lower_seconds"),
+  range90UpperSeconds: integer("range_90_upper_seconds"),
+  goalSeconds: integer("goal_seconds"),
+  goalProbability: doublePrecision("goal_probability"),
+  modelVersion: varchar("model_version", { length: 64 }).notNull(),
+  featureVersion: varchar("feature_version", { length: 64 }).notNull(),
+  features: jsonb("features").notNull(),
+  evidence: jsonb("evidence").notNull(),
+  drivers: jsonb("drivers").notNull(),
+  prediction: jsonb("prediction").notNull(),
+  maximumSourceTimestamp: timestamp("maximum_source_timestamp"),
+  sensorCoverage: jsonb("sensor_coverage").notNull(),
+  dataConfidence: varchar("data_confidence", { length: 32 }).notNull(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (table) => [
+  index("race_prediction_snapshots_user_prediction_idx").on(table.userId, table.predictionAt),
+  index("race_prediction_snapshots_plan_idx").on(table.planId),
+  uniqueIndex("race_prediction_snapshots_plan_horizon_unique").on(
+    table.planId,
+    table.targetDate,
+    table.forecastHorizonDays,
+    table.modelVersion,
+  ),
 ]);
 
 export const planRunLogs = pgTable("plan_run_logs", {

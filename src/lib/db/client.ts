@@ -26,4 +26,8 @@ if (process.env.NODE_ENV !== "production") {
   globalForDb.db = db;
 }
 
+export async function endDb(): Promise<void> {
+  await conn.end({ timeout: 5 });
+}
+
 export { db };

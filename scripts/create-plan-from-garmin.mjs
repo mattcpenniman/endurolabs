@@ -326,7 +326,7 @@ try {
   };
 
   if (apply) {
-    await sql.begin(async (tx) => {
+    const detailJob = await sql.begin(async (tx) => {
       await tx`
         insert into plans (id,user_id,runner_profile,peak_mileage_override,weeks_override,plan_data,race_name)
         values (${planId},${user.id},${tx.json(historical.runnerProfile)},${Math.ceil(historical.plan.peakWeeklyMileage)},${historical.weeks.length},${tx.json(historical.plan)},${raceName})
@@ -339,7 +339,21 @@ try {
           where id=${assignment.activityId} and user_id=${user.id}
         `;
       }
+      const [connection] = await tx`
+        select id from garmin_connections
+        where user_id=${user.id} and status='connected'
+        limit 1
+      `;
+      if (!connection) return null;
+      const parameters = { scope: "all", days: 90, through: new Date().toISOString(), planId };
+      const [job] = await tx`
+        insert into garmin_sync_jobs (user_id,connection_id,kind,parameters)
+        values (${user.id},${connection.id},'detail',${tx.json(parameters)})
+        returning id
+      `;
+      return job;
     });
+    report.detailJobId = detailJob?.id ?? null;
   }
 
   console.log(JSON.stringify(report, null, 2));

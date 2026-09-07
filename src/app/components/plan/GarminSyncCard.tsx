@@ -234,7 +234,7 @@ export default function GarminSyncCard({ planId, connection, onChanged }: Garmin
             <button
               type="button"
               disabled={isWorking || isDetailWorking}
-              onClick={() => startJob("/api/integrations/garmin/samples", { scope: "all", days: 90 })}
+              onClick={() => startJob("/api/integrations/garmin/samples", { scope: "all", days: 90, planId })}
               className="rounded-lg border border-sky-950 bg-white px-4 py-2 text-sm font-semibold text-sky-950 hover:bg-sky-50 disabled:opacity-50"
             >
               {isDetailWorking ? "Syncing detail..." : "Sync detail"}

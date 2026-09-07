@@ -8,7 +8,7 @@ export interface SpeedPowerModel {
   activityCount: number;
 }
 
-interface PowerActivitySummary {
+export interface PowerActivitySummary {
   distanceMeters: number;
   durationSeconds: number;
   movingDurationSeconds: number | null;
@@ -16,12 +16,27 @@ interface PowerActivitySummary {
   powerSource: string;
 }
 
+export const MIN_VALID_MOVING_DURATION_RATIO = 0.5;
+
+export function summarySpeed(activity: Pick<
+  PowerActivitySummary,
+  "distanceMeters" | "durationSeconds" | "movingDurationSeconds"
+>): number {
+  const movingDuration = activity.movingDurationSeconds;
+  const duration = movingDuration !== null
+    && movingDuration >= activity.durationSeconds * MIN_VALID_MOVING_DURATION_RATIO
+    && movingDuration <= activity.durationSeconds
+    ? movingDuration
+    : activity.durationSeconds;
+  return activity.distanceMeters / duration;
+}
+
 /** Fit measured average activity power as a linear function of average speed. */
 export function fitSpeedPowerModel(activities: PowerActivitySummary[]): SpeedPowerModel | null {
   const points = activities
     .filter((activity) => activity.averagePower !== null && !activity.powerSource.startsWith("estimated_"))
     .map((activity) => ({
-      speed: activity.distanceMeters / (activity.movingDurationSeconds ?? activity.durationSeconds),
+      speed: summarySpeed(activity),
       power: activity.averagePower as number,
     }))
     .filter((point) => Number.isFinite(point.speed) && point.speed > 0);

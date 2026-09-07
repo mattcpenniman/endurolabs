@@ -14,11 +14,25 @@ const secret = process.env.GARMIN_WORKER_SECRET;
 if (!secret) throw new Error("GARMIN_WORKER_SECRET is required");
 
 let stopping = false;
+let lastSchedulerDate = null;
 process.on("SIGTERM", () => { stopping = true; });
 process.on("SIGINT", () => { stopping = true; });
 
 const sleep = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds));
 while (!stopping) {
+  const currentDate = new Date().toISOString().slice(0, 10);
+  if (lastSchedulerDate !== currentDate) {
+    try {
+      const schedulerResponse = await fetch(`${appUrl}/api/internal/race-prediction-scheduler`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${secret}` },
+      });
+      if (!schedulerResponse.ok) throw new Error(`Prediction scheduler returned ${schedulerResponse.status}`);
+      lastSchedulerDate = currentDate;
+    } catch (error) {
+      console.error("Prediction scheduler pass failed:", error.message);
+    }
+  }
   try {
     const response = await fetch(`${appUrl}/api/internal/garmin-worker`, {
       method: "POST",
