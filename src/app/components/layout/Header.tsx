@@ -66,12 +66,12 @@ export default function Header() {
           <button onClick={handleOpenCurrentPlan} className="hover:text-enduro-600">
             Current Plan
           </button>
-          <a href="/plan?view=list" className="hover:text-enduro-600">
+          <Link href="/plan?view=list" className="hover:text-enduro-600">
             My Plans
-          </a>
-          <a href="/stats" className="hover:text-enduro-600">
+          </Link>
+          <Link href="/stats" className="hover:text-enduro-600">
             Stats
-          </a>
+          </Link>
           <Link href="/courses" className="hover:text-enduro-600">
             Courses
           </Link>

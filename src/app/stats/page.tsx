@@ -9,6 +9,7 @@
 "use client";
 
 import React, { useCallback, useEffect, useMemo, useState } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useUnits } from "@/app/components/units/UnitsProvider";
 import {
@@ -239,7 +240,7 @@ export default function StatsPage() {
         <div className="container-narrow">
           <h1 className="text-3xl font-bold text-gray-900">Stats</h1>
           <p className="mt-2 text-gray-600">No saved plans yet. Create a training plan in
-            <a href="/plan" className="ml-1 text-enduro-600 underline">My Plans</a>.</p>
+            <Link href="/plan" className="ml-1 text-enduro-600 underline">My Plans</Link>.</p>
         </div>
       </div>
     );
