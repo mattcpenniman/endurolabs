@@ -8,14 +8,22 @@ import React from "react";
 import { notFound } from "next/navigation";
 import { and, eq, gt } from "drizzle-orm";
 import { db } from "@/lib/db/client";
-import { plans, runActivities } from "@/lib/db/schema";
+import { plans, runActivities, users } from "@/lib/db/schema";
 import PlanOverviewCard from "@/app/components/plan/PlanOverviewCard";
 import PaceZonesCard from "@/app/components/plan/PaceZonesCard";
 import GarminActivityMapCard from "@/app/components/plan/GarminActivityMapCard";
+import { UnitsProvider } from "@/app/components/units/UnitsProvider";
 import { serializeRunActivity } from "@/lib/activities/serialize";
 import { calculatePaceZones, calculatePowerZones } from "@/lib/training/zone-calculator";
-import { MarathonPlan, RunnerProfile, Workout, formatPace } from "@/lib/training/models";
+import { MarathonPlan, RunnerProfile, Workout } from "@/lib/training/models";
 import { formatPlanDate } from "@/lib/training/date-utils";
+import {
+  DEFAULT_UNIT_SYSTEM,
+  formatPaceForSystem,
+  paceUnitSuffix,
+  parseUnitSystem,
+  type UnitSystem,
+} from "@/lib/units/format";
 
 function formatMiles(distance: number): string {
   return Number.isInteger(distance) ? `${distance}` : `${distance.toFixed(2).replace(/0$/, "")}`;
@@ -29,7 +37,7 @@ function segmentDistanceLabel(segment: Workout["segments"][number]): string {
   return `${formatMiles(segment.distance)} mi`;
 }
 
-function WorkoutBlock({ workout, label }: { workout: Workout; label?: string }): React.ReactNode {
+function WorkoutBlock({ workout, label, units }: { workout: Workout; label?: string; units: UnitSystem }): React.ReactNode {
   return (
     <div className={label ? "mt-3 border-t border-gray-100 pt-3" : undefined}>
       {label && (
@@ -47,7 +55,7 @@ function WorkoutBlock({ workout, label }: { workout: Workout; label?: string }):
             <div key={`${workout.id}-${index}`} className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
               <span>
                 {segment.description}
-                {segment.pace && <span className="ml-2 text-gray-400">@ {formatPace(segment.pace)}/mi</span>}
+                {segment.pace && <span className="ml-2 text-gray-400">@ {formatPaceForSystem(segment.pace, units)}{paceUnitSuffix(units)}</span>}
               </span>
               <span className="font-semibold text-gray-700">{segmentDistanceLabel(segment)}</span>
             </div>
@@ -79,6 +87,11 @@ export default async function SharedPlanPage({
     notFound();
   }
 
+  const [ownerRow] = sharedPlan.userId
+    ? await db.select({ unitsSystem: users.unitsSystem }).from(users).where(eq(users.id, sharedPlan.userId)).limit(1)
+    : [];
+  const ownerUnits: UnitSystem = parseUnitSystem(ownerRow?.unitsSystem) ?? DEFAULT_UNIT_SYSTEM;
+
   const storedPlan = sharedPlan.planData as MarathonPlan;
   const runnerProfile = (storedPlan.runnerProfile ?? sharedPlan.runnerProfile) as RunnerProfile;
   const paceZones = calculatePaceZones(runnerProfile);
@@ -104,27 +117,30 @@ export default async function SharedPlanPage({
 
   if (sharedActivity) {
     return (
-      <main className="section-padding">
-        <div className="mx-auto w-full max-w-5xl px-4 sm:px-6">
-          <div className="mb-5">
-            <p className="text-xs font-semibold uppercase tracking-wide text-enduro-700">Shared run</p>
-            <h1 className="mt-1 text-3xl font-bold text-gray-900">{sharedActivity.activityName}</h1>
-            <p className="mt-2 text-sm text-gray-600">{sharedActivity.localDate} · Read-only activity details</p>
+      <UnitsProvider initialUnits={ownerUnits}>
+        <main className="section-padding">
+          <div className="mx-auto w-full max-w-5xl px-4 sm:px-6">
+            <div className="mb-5">
+              <p className="text-xs font-semibold uppercase tracking-wide text-enduro-700">Shared run</p>
+              <h1 className="mt-1 text-3xl font-bold text-gray-900">{sharedActivity.activityName}</h1>
+              <p className="mt-2 text-sm text-gray-600">{sharedActivity.localDate} · Read-only activity details</p>
+            </div>
+            <GarminActivityMapCard
+              activities={[sharedActivity]}
+              activityId={sharedActivity.id}
+              detailUrlPrefix={`/api/share/${token}/activities`}
+              showControls={false}
+            />
           </div>
-          <GarminActivityMapCard
-            activities={[sharedActivity]}
-            activityId={sharedActivity.id}
-            detailUrlPrefix={`/api/share/${token}/activities`}
-            showControls={false}
-          />
-        </div>
-      </main>
+        </main>
+      </UnitsProvider>
     );
   }
 
   return (
-    <main className="section-padding">
-      <div className="container-narrow">
+    <UnitsProvider initialUnits={ownerUnits}>
+      <main className="section-padding">
+        <div className="container-narrow">
         <div className="mb-8">
           <p className="text-xs font-semibold uppercase tracking-wide text-enduro-700">Read-only shared plan</p>
           <h1 className="mt-1 text-3xl font-bold text-gray-900">{planTitle}</h1>
@@ -195,10 +211,10 @@ export default async function SharedPlanPage({
                       {day.workout || day.secondaryWorkout ? (
                         <div>
                           {day.workout && (
-                            <WorkoutBlock workout={day.workout} label={day.secondaryWorkout ? "Primary" : undefined} />
+                            <WorkoutBlock workout={day.workout} label={day.secondaryWorkout ? "Primary" : undefined} units={ownerUnits} />
                           )}
                           {day.secondaryWorkout && (
-                            <WorkoutBlock workout={day.secondaryWorkout} label="Secondary" />
+                            <WorkoutBlock workout={day.secondaryWorkout} label="Secondary" units={ownerUnits} />
                           )}
                         </div>
                       ) : (
@@ -212,6 +228,7 @@ export default async function SharedPlanPage({
           </div>
         </section>
       </div>
-    </main>
+      </main>
+    </UnitsProvider>
   );
 }

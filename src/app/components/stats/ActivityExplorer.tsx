@@ -20,6 +20,13 @@ import type {
   RunActivity,
 } from "@/lib/activities/models";
 import { buildActivityChartData } from "@/lib/activities/activity-chart";
+import { useUnits } from "@/app/components/units/UnitsProvider";
+import {
+  formatPaceForSystem,
+  paceUnitAbbr,
+  paceUnitSuffix,
+  type UnitSystem,
+} from "@/lib/units/format";
 
 interface ActivityExplorerProps {
   activities: RunActivity[];
@@ -41,6 +48,7 @@ const TRACES: TraceDefinition[] = [
 ];
 
 export default function ActivityExplorer({ activities }: ActivityExplorerProps): React.ReactNode {
+  const { units } = useUnits();
   const availableActivities = activities.filter((activity) => activity.sampleCount > 0);
   const [selectedActivityId, setSelectedActivityId] = useState("");
   const [samples, setSamples] = useState<ActivityChartPoint[] | null>(null);
@@ -127,7 +135,7 @@ export default function ActivityExplorer({ activities }: ActivityExplorerProps):
           </div>
           <div className="grid gap-3 lg:grid-cols-2">
             {TRACES.map((trace) => (
-              <TraceChart key={trace.key} data={samples} trace={trace} />
+              <TraceChart key={trace.key} data={samples} trace={trace} units={units} />
             ))}
           </div>
         </div>
@@ -136,11 +144,16 @@ export default function ActivityExplorer({ activities }: ActivityExplorerProps):
   );
 }
 
-function TraceChart({ data, trace }: { data: ActivityChartPoint[]; trace: TraceDefinition }): React.ReactNode {
+function TraceChart({ data, trace, units }: {
+  data: ActivityChartPoint[];
+  trace: TraceDefinition;
+  units: UnitSystem;
+}): React.ReactNode {
+  const isPace = trace.key === "paceMinutesPerMile";
   return (
     <div className="rounded-lg border border-gray-100 bg-gray-50/60 p-3">
       <h3 className="text-xs font-semibold uppercase tracking-wide text-gray-600">
-        {trace.title} <span className="font-normal normal-case text-gray-400">({trace.key === "paceMinutesPerMile" ? "min/mi" : trace.unit})</span>
+        {trace.title} <span className="font-normal normal-case text-gray-400">({isPace ? `min/${paceUnitAbbr(units)}` : trace.unit})</span>
       </h3>
       <div className="mt-2 h-44">
         <ResponsiveContainer width="100%" height="100%">
@@ -157,12 +170,12 @@ function TraceChart({ data, trace }: { data: ActivityChartPoint[]; trace: TraceD
               width={42}
               domain={["auto", "auto"]}
               tick={{ fontSize: 10, fill: "#9ca3af" }}
-              tickFormatter={(value: number) => trace.key === "paceMinutesPerMile" ? formatPace(value) : Math.round(value).toString()}
+              tickFormatter={(value: number) => isPace ? formatPaceForSystem(value, units) : Math.round(value).toString()}
             />
             <Tooltip
               labelFormatter={(value) => formatElapsed(Number(value))}
               formatter={(value: number) => [
-                trace.key === "paceMinutesPerMile" ? `${formatPace(value)}${trace.unit}` : `${Math.round(value)} ${trace.unit}`,
+                isPace ? `${formatPaceForSystem(value, units)}${paceUnitSuffix(units)}` : `${Math.round(value)} ${trace.unit}`,
                 trace.title,
               ]}
             />
@@ -189,11 +202,4 @@ function formatElapsed(totalSeconds: number): string {
   return hours > 0
     ? `${hours}:${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`
     : `${minutes}:${String(seconds).padStart(2, "0")}`;
-}
-
-function formatPace(pace: number): string {
-  const totalSeconds = Math.round(pace * 60);
-  const minutes = Math.floor(totalSeconds / 60);
-  const seconds = totalSeconds % 60;
-  return `${minutes}:${String(seconds).padStart(2, "0")}`;
 }

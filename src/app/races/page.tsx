@@ -7,6 +7,7 @@
 import React, { useEffect, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import GarminActivityMapCard from "@/app/components/plan/GarminActivityMapCard";
+import { useUnits } from "@/app/components/units/UnitsProvider";
 import type { RaceListResponse, RaceResultRecord, RunActivity } from "@/lib/activities/models";
 import {
   areComparableRaces,
@@ -14,6 +15,12 @@ import {
   compareRaces,
   findDefaultComparisonRace,
 } from "@/lib/activities/race-comparison";
+import {
+  formatElevationGain,
+  paceMinPerMileForDisplay,
+  paceUnitSuffix,
+  type UnitSystem,
+} from "@/lib/units/format";
 
 function formatDate(date: string): string {
   return new Intl.DateTimeFormat("en-US", {
@@ -33,9 +40,9 @@ function formatDuration(totalSeconds: number): string {
     : `${minutes}:${String(remainder).padStart(2, "0")}`;
 }
 
-function formatPace(pace: number | null): string {
+function formatPace(pace: number | null, system: UnitSystem): string {
   if (pace === null) return "--";
-  return `${formatDuration(pace * 60)}/mi`;
+  return `${formatDuration(paceMinPerMileForDisplay(pace, system) * 60)}${paceUnitSuffix(system)}`;
 }
 
 function signed(value: number, digits = 0): string {
@@ -53,6 +60,7 @@ export default function RacesPage(): React.ReactNode {
 function RacesPageContent(): React.ReactNode {
   const router = useRouter();
   const searchParams = useSearchParams();
+  const { units } = useUnits();
   const requestedRaceId = searchParams.get("race");
   const requestedDetailId = searchParams.get("runmap");
   const [races, setRaces] = useState<RunActivity[]>([]);
@@ -272,7 +280,7 @@ function RacesPageContent(): React.ReactNode {
                       </div>
                       <div className={`mt-3 flex gap-4 font-mono text-xs ${selected ? "text-slate-200" : "text-gray-500"}`}>
                         <span>{formatDuration(race.durationSeconds)}</span>
-                        <span>{formatPace(race.averagePaceMinutesPerMile)}</span>
+                        <span>{formatPace(race.averagePaceMinutesPerMile, units)}</span>
                       </div>
                     </button>
                   );
@@ -307,11 +315,11 @@ function RacesPageContent(): React.ReactNode {
               </div>
               <div className="grid grid-cols-2 divide-x divide-y divide-gray-100 sm:grid-cols-3 lg:grid-cols-6 lg:divide-y-0">
                 <RaceMetric label="Finish" value={formatDuration(selectedRace.durationSeconds)} />
-                <RaceMetric label="Pace" value={formatPace(selectedRace.averagePaceMinutesPerMile)} />
+                <RaceMetric label="Pace" value={formatPace(selectedRace.averagePaceMinutesPerMile, units)} />
                 <RaceMetric label="Avg HR" value={selectedRace.averageHeartRate ? `${selectedRace.averageHeartRate} bpm` : "--"} />
                 <RaceMetric label="Max HR" value={selectedRace.maxHeartRate ? `${selectedRace.maxHeartRate} bpm` : "--"} />
                 <RaceMetric label="Power" value={selectedRace.averagePower ? `${selectedRace.averagePower} W` : "--"} />
-                <RaceMetric label="Elevation" value={selectedRace.elevationGainMeters ? `${selectedRace.elevationGainMeters} m` : "--"} />
+                <RaceMetric label="Elevation" value={formatElevationGain(selectedRace.elevationGainMeters, units)} />
               </div>
             </section>
 
@@ -370,8 +378,8 @@ function RacesPageContent(): React.ReactNode {
                     />
                     <DeltaCard
                       label="Average pace"
-                      value={comparison.paceImprovementMinutesPerMile === null ? "--" : formatPaceDelta(comparison.paceImprovementMinutesPerMile)}
-                      detail={`${formatPace(selectedRace.averagePaceMinutesPerMile)} vs ${formatPace(comparisonRace.averagePaceMinutesPerMile)}`}
+                      value={comparison.paceImprovementMinutesPerMile === null ? "--" : formatPaceDelta(comparison.paceImprovementMinutesPerMile, units)}
+                      detail={`${formatPace(selectedRace.averagePaceMinutesPerMile, units)} vs ${formatPace(comparisonRace.averagePaceMinutesPerMile, units)}`}
                       positive={(comparison.paceImprovementMinutesPerMile ?? 0) > 0}
                     />
                     <DeltaCard
@@ -424,7 +432,7 @@ function RacesPageContent(): React.ReactNode {
                         </td>
                         <td className="px-4 py-3 font-mono text-gray-600">{race.distanceMiles.toFixed(2)} mi</td>
                         <td className="px-4 py-3 font-mono font-bold text-gray-900">{formatDuration(race.durationSeconds)}</td>
-                        <td className="px-4 py-3 font-mono text-gray-700">{formatPace(race.averagePaceMinutesPerMile)}</td>
+                        <td className="px-4 py-3 font-mono text-gray-700">{formatPace(race.averagePaceMinutesPerMile, units)}</td>
                         <td className="px-4 py-3 font-mono text-gray-600">{race.averageHeartRate ?? "--"}</td>
                         <td className="px-4 py-3 font-mono text-gray-600">{race.averagePower ? `${race.averagePower} W` : "--"}</td>
                       </tr>
@@ -610,7 +618,7 @@ function formatTimeImprovement(seconds: number): string {
   return `${seconds > 0 ? "-" : "+"}${formatDuration(Math.abs(seconds))}`;
 }
 
-function formatPaceDelta(minutesPerMile: number): string {
+function formatPaceDelta(minutesPerMile: number, system: UnitSystem): string {
   if (minutesPerMile === 0) return "Even";
-  return `${minutesPerMile > 0 ? "-" : "+"}${formatDuration(Math.abs(minutesPerMile) * 60)}/mi`;
+  return `${minutesPerMile > 0 ? "-" : "+"}${formatDuration(Math.abs(paceMinPerMileForDisplay(minutesPerMile, system)) * 60)}${paceUnitSuffix(system)}`;
 }

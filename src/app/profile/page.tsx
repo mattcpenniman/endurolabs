@@ -6,6 +6,9 @@
 
 import React, { FormEvent, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
+import { useUnits } from "@/app/components/units/UnitsProvider";
+import { kilogramsToPounds, poundsToKilograms } from "@/lib/profile/weight";
+import type { UnitSystem } from "@/lib/units/format";
 
 interface ProfileResponse {
   profile: {
@@ -13,13 +16,16 @@ interface ProfileResponse {
     name: string | null;
     weightPounds: number | null;
     weightMeasuredAt: string | null;
+    unitsSystem: UnitSystem;
   };
 }
 
 export default function ProfilePage(): React.ReactNode {
   const router = useRouter();
+  const { units, setUnits } = useUnits();
   const [profile, setProfile] = useState<ProfileResponse["profile"] | null>(null);
   const [weight, setWeight] = useState("");
+  const [pendingUnits, setPendingUnits] = useState<UnitSystem>(units);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
@@ -38,11 +44,24 @@ export default function ProfilePage(): React.ReactNode {
       .then((body) => {
         if (!body) return;
         setProfile(body.profile);
-        setWeight(body.profile.weightPounds === null ? "" : body.profile.weightPounds.toFixed(1));
+        setPendingUnits(body.profile.unitsSystem);
+        setWeight(weightInput(body.profile.weightPounds, body.profile.unitsSystem));
       })
       .catch((loadError: Error) => setError(loadError.message))
       .finally(() => setLoading(false));
   }, [router]);
+
+  useEffect(() => {
+    if (profile && units !== pendingUnits) {
+      setPendingUnits(units);
+      setWeight(weightInput(profile.weightPounds, units));
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [units]);
+
+  const weightLabel = pendingUnits === "metric" ? "kg" : "lb";
+  const weightMin = pendingUnits === "metric" ? 23 : 50;
+  const weightMax = pendingUnits === "metric" ? 318 : 700;
 
   const handleSubmit = async (event: FormEvent<HTMLFormElement>): Promise<void> => {
     event.preventDefault();
@@ -50,15 +69,24 @@ export default function ProfilePage(): React.ReactNode {
     setMessage(null);
     setError(null);
     try {
-      const response = await fetch("/api/profile", {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ weightPounds: Number(weight) }),
-      });
-      const body = (await response.json()) as { error?: string; weightMeasuredAt?: string };
-      if (!response.ok) throw new Error(body.error ?? "Failed to save profile");
-      setProfile((current) => current ? { ...current, weightPounds: Number(weight), weightMeasuredAt: body.weightMeasuredAt ?? null } : current);
-      setMessage("Weight saved. Stats will use it for W/kg calculations.");
+      if (weight.trim() !== "") {
+        const inputWeight = Number(weight);
+        const weightPounds = pendingUnits === "metric"
+          ? kilogramsToPounds(inputWeight)
+          : inputWeight;
+        const response = await fetch("/api/profile", {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ weightPounds }),
+        });
+        const body = (await response.json()) as { error?: string; weightMeasuredAt?: string };
+        if (!response.ok) throw new Error(body.error ?? "Failed to save profile");
+        setProfile((current) => current ? { ...current, weightPounds, weightMeasuredAt: body.weightMeasuredAt ?? null } : current);
+      }
+      if (pendingUnits !== units) {
+        await setUnits(pendingUnits);
+      }
+      setMessage("Profile saved. Elevation and pace now render in your chosen units across EnduroLab.");
     } catch (saveError) {
       setError(saveError instanceof Error ? saveError.message : "Failed to save profile");
     } finally {
@@ -72,7 +100,7 @@ export default function ProfilePage(): React.ReactNode {
         <header>
           <p className="text-xs font-semibold uppercase tracking-[0.18em] text-enduro-700">Account</p>
           <h1 className="mt-2 text-3xl font-bold text-gray-900">Profile</h1>
-          <p className="mt-2 text-sm text-gray-600">Keep your body weight current for accurate power-to-weight stats.</p>
+          <p className="mt-2 text-sm text-gray-600">Keep your body weight current for accurate power-to-weight stats, and choose the units EnduroLab uses for elevation and pace.</p>
         </header>
 
         {loading ? (
@@ -89,15 +117,14 @@ export default function ProfilePage(): React.ReactNode {
               <div className="mt-2 flex rounded-lg border border-gray-300 bg-white focus-within:border-enduro-500 focus-within:ring-2 focus-within:ring-enduro-100">
                 <input
                   type="number"
-                  min="50"
-                  max="700"
+                  min={weightMin}
+                  max={weightMax}
                   step="0.1"
-                  required
                   value={weight}
                   onChange={(event) => setWeight(event.target.value)}
                   className="min-w-0 flex-1 rounded-l-lg px-3 py-2 text-gray-900 outline-none"
                 />
-                <span className="flex items-center border-l border-gray-200 px-3 text-sm text-gray-500">lb</span>
+                <span className="flex items-center border-l border-gray-200 px-3 text-sm text-gray-500">{weightLabel}</span>
               </div>
             </label>
             <p className="mt-2 text-xs text-gray-500">
@@ -105,6 +132,34 @@ export default function ProfilePage(): React.ReactNode {
                 ? `Last updated ${new Date(profile.weightMeasuredAt).toLocaleDateString()}.`
                 : "No body weight is on file."}
             </p>
+
+            <div className="mt-6 max-w-xs">
+              <p className="text-sm font-medium text-gray-800">
+                <label htmlFor="units-system">Elevation &amp; pace units</label>
+              </p>
+              <select
+                id="units-system"
+                value={pendingUnits}
+                onChange={(event) => {
+                  const next = event.target.value as UnitSystem;
+                  setPendingUnits(next);
+                  setWeight((current) => {
+                    if (current.trim() === "") return current;
+                    const parsed = Number(current);
+                    if (!Number.isFinite(parsed)) return current;
+                    return (next === "metric" ? poundsToKilograms(parsed) : kilogramsToPounds(parsed)).toFixed(1);
+                  });
+                }}
+                className="mt-2 w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 focus:border-enduro-500 focus:outline-none focus:ring-2 focus:ring-enduro-100"
+              >
+                <option value="imperial">Imperial — feet, min/mile</option>
+                <option value="metric">Metric — meters, min/km</option>
+              </select>
+              <p className="mt-2 text-xs text-gray-500">
+                Applies to elevation gain, altitude, climbing grade, and pace throughout EnduroLab.
+                Plan mileage stays in miles.
+              </p>
+            </div>
             {message && <p className="mt-4 text-sm text-enduro-700">{message}</p>}
             {error && <p className="mt-4 text-sm text-red-600">{error}</p>}
             <button
@@ -112,7 +167,7 @@ export default function ProfilePage(): React.ReactNode {
               disabled={saving}
               className="mt-5 rounded-lg bg-enduro-700 px-4 py-2 text-sm font-semibold text-white hover:bg-enduro-800 disabled:cursor-not-allowed disabled:opacity-60"
             >
-              {saving ? "Saving..." : "Save weight"}
+              {saving ? "Saving..." : "Save profile"}
             </button>
           </form>
         ) : null}
@@ -120,4 +175,9 @@ export default function ProfilePage(): React.ReactNode {
       </div>
     </div>
   );
+}
+
+function weightInput(weightPounds: number | null, system: UnitSystem): string {
+  if (weightPounds === null) return "";
+  return (system === "metric" ? poundsToKilograms(weightPounds) : weightPounds).toFixed(1);
 }

@@ -12,6 +12,7 @@ import { randomBytes, scryptSync, timingSafeEqual, createHash } from "crypto";
 import { and, eq, gt } from "drizzle-orm";
 import { db } from "@/lib/db/client";
 import { sessions, users } from "@/lib/db/schema";
+import { DEFAULT_UNIT_SYSTEM, parseUnitSystem, type UnitSystem } from "@/lib/units/format";
 
 export const SESSION_COOKIE_NAME = "endurlab_session";
 
@@ -23,6 +24,8 @@ export interface AuthenticatedUser {
   email: string;
   name: string | null;
   currentPlanId: string | null;
+  /** Display preference: "imperial" (ft, min/mi) or "metric" (m, min/km). */
+  unitsSystem: UnitSystem;
 }
 
 export function normalizeEmail(email: string): string {
@@ -108,11 +111,16 @@ export async function getCurrentUser(): Promise<AuthenticatedUser | null> {
       email: users.email,
       name: users.name,
       currentPlanId: users.currentPlanId,
+      unitsSystem: users.unitsSystem,
     })
     .from(sessions)
     .innerJoin(users, eq(sessions.userId, users.id))
     .where(and(eq(sessions.tokenHash, hashSessionToken(token)), gt(sessions.expiresAt, new Date())))
     .limit(1);
 
-  return row ?? null;
+  if (!row) return null;
+  return {
+    ...row,
+    unitsSystem: parseUnitSystem(row.unitsSystem) ?? DEFAULT_UNIT_SYSTEM,
+  };
 }

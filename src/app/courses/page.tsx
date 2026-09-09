@@ -8,6 +8,8 @@
 
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
+import { useUnits } from "@/app/components/units/UnitsProvider";
+import { formatElevationFeet, formatGrade } from "@/lib/units/format";
 
 interface CourseSummary {
   id: string;
@@ -22,6 +24,7 @@ interface CourseSummary {
 
 export default function CoursesPage(): React.ReactNode {
   const router = useRouter();
+  const { units } = useUnits();
   const [courses, setCourses] = useState<CourseSummary[] | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -186,10 +189,10 @@ export default function CoursesPage(): React.ReactNode {
                     <p className="text-xs text-[var(--color-text-secondary)]">
                       {course.distanceMiles.toLocaleString("en-US", { maximumFractionDigits: 2 })} mi
                       {course.elevationGainFeetPerMile !== null
-                        ? ` · ${Math.round(course.elevationGainFeetPerMile)} ft/mi climbing`
+                        ? ` · ${formatGrade(course.elevationGainFeetPerMile, units)} climbing`
                         : " · no elevation in GPX"}
                       {" · "}
-                      {Math.round(course.elevationGainFeet).toLocaleString("en-US")} ft of total gain
+                      {formatElevationFeet(course.elevationGainFeet, units)} of total gain
                       {" · "}
                       {formatDate(course.created)}
                     </p>

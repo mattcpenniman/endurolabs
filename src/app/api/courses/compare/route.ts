@@ -190,6 +190,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
       targetSeries: series,
       athleteActivities: baseline.activities,
       athleteWeeks: baseline.weeks,
+      units: user.unitsSystem,
     }));
   } catch (error) {
     console.error("Failed to compare courses:", error);

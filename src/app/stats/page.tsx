@@ -10,6 +10,13 @@
 
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
+import { useUnits } from "@/app/components/units/UnitsProvider";
+import {
+  paceMinPerMileForDisplay,
+  paceUnitAbbr,
+  paceUnitSuffix,
+  type UnitSystem,
+} from "@/lib/units/format";
 import type { RunnerProfile, MarathonPlan } from "@/lib/training/models";
 import type { GarminConnectionStatus } from "@/lib/activities/models";
 import {
@@ -80,6 +87,7 @@ interface StatsResponse {
 
 export default function StatsPage() {
   const router = useRouter();
+  const { units } = useUnits();
   const [authingDone, setAuthingDone] = useState(false);
   const [plans, setPlans] = useState<SavedPlanRow[]>([]);
   const [currentPlanId, setCurrentPlanId] = useState<string | null>(null);
@@ -446,7 +454,7 @@ export default function StatsPage() {
                 </p>
                 <p>
                   <strong className="font-medium text-gray-900">Elevation and grade</strong> — weekly elevation
-                  gain in feet per mile, plus observed pace, heart rate, and measured power across flat, climbing,
+                  gain in {units === "metric" ? "metres per kilometre" : "feet per mile"}, plus observed pace, heart rate, and measured power across flat, climbing,
                   and descending samples. Each qualifying activity needs at least six usable minutes and real
                   GPS, elevation, and speed coverage; results are suppressed until at least three activities
                   qualify. Grade-adjusted power is shown only for measured sensor power, never modeled value.
@@ -493,6 +501,7 @@ function PlanComparisonCard({ summary, title, highlight = true }: {
   title: string;
   highlight?: boolean;
 }) {
+  const { units } = useUnits();
   const tone = (v: number | null, lowerIsBetter = false) => {
     if (v === null) return "text-gray-400";
     if (v === 0) return "text-gray-500";
@@ -506,7 +515,7 @@ function PlanComparisonCard({ summary, title, highlight = true }: {
         <Row label="Planned" value={summary ? `${summary.plannedMileage.toFixed(1)} mi` : "--"} />
         <Row label="Actual" value={summary && summary.actualMileage > 0 ? `${summary.actualMileage.toFixed(1)} mi` : "--"} />
         <Row label="Adherence" value={summary?.adherence !== undefined && summary?.adherence !== null ? `${summary.adherence}%` : "--"} />
-        <Row label="Avg pace" value={fmtPace(summary?.averagePace ?? null)} />
+        <Row label="Avg pace" value={fmtPace(summary?.averagePace ?? null, units)} />
         <Row label="Avg HR" value={summary?.averageHeartRate ? `${Math.round(summary.averageHeartRate)} bpm` : "--"} />
         <Row label="Power @140" value={summary?.fitnessBest140 !== null && summary?.fitnessBest140 !== undefined ? `${Math.round(summary.fitnessBest140)} W` : "--"} tone={tone(0)} />
       </div>
@@ -523,14 +532,15 @@ function Row({ label, value, tone = "text-gray-900" }: { label: string; value: s
   );
 }
 
-function fmtPace(pace: number | null): string {
+function fmtPace(pace: number | null, system: UnitSystem): string {
   if (pace === null) return "--";
-  return `${formatPaceShort(pace)}/mi`;
+  return `${formatPaceShort(paceMinPerMileForDisplay(pace, system))}${paceUnitSuffix(system)}`;
 }
 
 // ─── Comparison table ─────────────────────────────────────
 
 function WeekComparisonTable({ comparison }: { comparison: PlanComparison }) {
+  const { units } = useUnits();
   return (
     <div className="overflow-x-auto rounded-xl border border-gray-200 bg-white shadow-sm">
       <div className="flex items-center justify-between border-b border-gray-200 px-5 py-3">
@@ -571,10 +581,10 @@ function WeekComparisonTable({ comparison }: { comparison: PlanComparison }) {
               <td className={`px-3 py-2 text-right tabular-nums font-medium ${deltaClass(row.deltaMileage)}`}>
                 {row.deltaMileage === null ? "--" : (row.deltaMileage > 0 ? "+" : "") + row.deltaMileage.toFixed(1)}
               </td>
-              <td className="px-3 py-2 text-right tabular-nums text-gray-900">{fmtPace(row.current?.averagePace ?? null)}</td>
-              <td className="px-3 py-2 text-right tabular-nums text-gray-700">{fmtPace(row.prior?.averagePace ?? null)}</td>
+              <td className="px-3 py-2 text-right tabular-nums text-gray-900">{fmtPace(row.current?.averagePace ?? null, units)}</td>
+              <td className="px-3 py-2 text-right tabular-nums text-gray-700">{fmtPace(row.prior?.averagePace ?? null, units)}</td>
               <td className={`px-3 py-2 text-right tabular-nums font-medium ${deltaClass(row.deltaPace === null ? null : -row.deltaPace)}`}>
-                {row.deltaPace === null ? "--" : (row.deltaPace > 0 ? "+" : "") + row.deltaPace.toFixed(2) + " min/mi"}
+                {row.deltaPace === null ? "--" : (row.deltaPace > 0 ? "+" : "") + paceMinPerMileForDisplay(row.deltaPace, units).toFixed(2) + ` min/${paceUnitAbbr(units)}`}
               </td>
               <td className="px-3 py-2 text-right tabular-nums text-gray-900">{row.current?.averageHeartRate ? `${Math.round(row.current.averageHeartRate)}` : "--"}</td>
               <td className="px-3 py-2 text-right tabular-nums text-gray-700">{row.prior?.averageHeartRate ? `${Math.round(row.prior.averageHeartRate)}` : "--"}</td>

@@ -11,8 +11,18 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import type { ActivityDetailResponse, ActivitySplit, RunActivity } from "@/lib/activities/models";
 import GarminActivityLeafletMap from "@/app/components/plan/GarminActivityLeafletMap";
+import { useUnits } from "@/app/components/units/UnitsProvider";
 import { buildSharedRunUrl } from "@/lib/plan-url";
 import { toBlob } from "html-to-image";
+import {
+  elevationMetersForDisplay,
+  elevationUnitAbbr,
+  formatAltitude,
+  formatElevationGain,
+  paceMinPerMileForDisplay,
+  paceUnitSuffix,
+  type UnitSystem,
+} from "@/lib/units/format";
 
 const METERS_PER_MILE = 1609.344;
 
@@ -81,9 +91,9 @@ function formatElapsed(totalSeconds: number): string {
   return `${minutes}:${String(seconds).padStart(2, "0")}`;
 }
 
-function formatPace(minutesPerMile: number | null): string {
+function formatPace(minutesPerMile: number | null, system: UnitSystem): string {
   if (minutesPerMile === null) return "--";
-  const totalSeconds = Math.round(minutesPerMile * 60);
+  const totalSeconds = Math.round(paceMinPerMileForDisplay(minutesPerMile, system) * 60);
   const minutes = Math.floor(totalSeconds / 60);
   const seconds = totalSeconds % 60;
   return `${minutes}:${String(seconds).padStart(2, "0")}`;
@@ -99,6 +109,7 @@ export default function GarminActivityMapCard({
   showControls = true,
 }: GarminActivityMapCardProps): React.ReactNode {
   const cardRef = useRef<HTMLDivElement | null>(null);
+  const { units } = useUnits();
   const eligible = activities
     .filter((activity) => (activity.sampleCount ?? 0) > 0)
     .sort((a, b) => b.startTimeGmt.localeCompare(a.startTimeGmt));
@@ -330,9 +341,9 @@ export default function GarminActivityMapCard({
 
             {elevationDomain && (
               <div className="flex items-center gap-2 border-t border-gray-200 bg-white px-3 py-2 text-[11px] text-gray-500">
-                <span>{Math.round(elevationDomain.min)} m</span>
+                <span>{Math.round(elevationMetersForDisplay(elevationDomain.min, units)).toLocaleString()} {elevationUnitAbbr(units)}</span>
                 <span className="mx-1 h-1.5 w-16 rounded-full bg-gradient-to-r from-emerald-600 via-amber-500 to-red-600" />
-                <span>{Math.round(elevationDomain.max)} m elevation</span>
+                <span>{Math.round(elevationMetersForDisplay(elevationDomain.max, units)).toLocaleString()} {elevationUnitAbbr(units)} elevation</span>
               </div>
             )}
           </div>
@@ -341,8 +352,8 @@ export default function GarminActivityMapCard({
             <div className="mt-4 grid grid-cols-3 gap-3 sm:grid-cols-4">
               <RouteMetric label="Distance" value={`${selectedActivity.distanceMiles.toFixed(1)} mi`} />
               <RouteMetric label="Time" value={selectedActivity.durationSeconds > 0 ? formatElapsed(selectedActivity.durationSeconds) : "--"} />
-              <RouteMetric label="Avg pace" value={derivedAveragePace ? `${formatPace(derivedAveragePace)}/mi` : "--"} />
-              <RouteMetric label="Elev. gain" value={selectedActivity.elevationGainMeters ? `${Math.round(selectedActivity.elevationGainMeters)} m` : "--"} />
+              <RouteMetric label="Avg pace" value={derivedAveragePace ? `${formatPace(derivedAveragePace, units)}${paceUnitSuffix(units)}` : "--"} />
+              <RouteMetric label="Elev. gain" value={formatElevationGain(selectedActivity.elevationGainMeters ?? null, units)} />
               <RouteMetric label="Avg HR" value={selectedActivity.averageHeartRate ? `${Math.round(selectedActivity.averageHeartRate)} bpm` : "--"} />
               <RouteMetric label="Max HR" value={selectedActivity.maxHeartRate ? `${Math.round(selectedActivity.maxHeartRate)} bpm` : "--"} />
               <RouteMetric label="Avg power" value={selectedActivity.averagePower ? `${Math.round(selectedActivity.averagePower)} W` : "--"} />
@@ -373,11 +384,11 @@ export default function GarminActivityMapCard({
                   <span className="font-medium tabular-nums text-gray-900">{formatElapsed(selectedSample.elapsedSeconds)}</span>
                 </div>
                 <div className="grid grid-cols-2 gap-x-4 gap-y-2 text-sm">
-                  <DetailMetric label="Pace" value={selectedPace ? `${formatPace(selectedPace)}/mi` : "--"} />
+                  <DetailMetric label="Pace" value={selectedPace ? `${formatPace(selectedPace, units)}${paceUnitSuffix(units)}` : "--"} />
                   <DetailMetric label="Heart rate" value={selectedSample.heartRate != null ? `${Math.round(selectedSample.heartRate)} bpm` : "--"} />
                   <DetailMetric label="Power" value={selectedSample.power != null ? `${Math.round(selectedSample.power)} W` : "--"} />
                   <DetailMetric label="Cadence" value={selectedSample.cadence != null ? `${Math.round(selectedSample.cadence)} spm` : "--"} />
-                  <DetailMetric label="Elevation" value={typeof selectedSample.elevationMeters === "number" ? `${selectedSample.elevationMeters.toFixed(1)} m` : "--"} />
+                  <DetailMetric label="Elevation" value={formatAltitude(typeof selectedSample.elevationMeters === "number" ? selectedSample.elevationMeters : null, units)} />
                   <DetailMetric label="Temperature" value={typeof selectedSample.temperatureCelsius === "number" ? `${Math.round(selectedSample.temperatureCelsius)} °C` : "--"} />
                 </div>
                 <p className="text-[11px] leading-4 text-gray-400">
@@ -403,6 +414,7 @@ export default function GarminActivityMapCard({
               splits={splits}
               hasMeasuredPower={!selectedActivity.powerSource?.startsWith("estimated_")}
               exporting={imageStatus === "copying"}
+              units={units}
             />
           </div>
         )}
@@ -420,10 +432,12 @@ function MileSplits({
   splits,
   hasMeasuredPower,
   exporting,
+  units,
 }: {
   splits: ActivitySplit[];
   hasMeasuredPower: boolean;
   exporting: boolean;
+  units: UnitSystem;
 }): React.ReactNode {
   return (
     <section className="overflow-hidden rounded-lg border border-gray-200">
@@ -467,7 +481,7 @@ function MileSplits({
                     <span className="block text-[10px] text-gray-400">{formatElapsed(split.elapsedSeconds)} elapsed</span>
                   </td>
                   <td className="px-3 py-2.5 font-medium text-enduro-800">
-                    {split.paceMinutesPerMile !== null ? `${formatPace(split.paceMinutesPerMile)}/mi` : "--"}
+                    {split.paceMinutesPerMile !== null ? `${formatPace(split.paceMinutesPerMile, units)}${paceUnitSuffix(units)}` : "--"}
                   </td>
                   <td className="px-3 py-2.5">{split.averageHeartRate !== null ? `${Math.round(split.averageHeartRate)} bpm` : "--"}</td>
                   <td className="px-3 py-2.5">
@@ -475,9 +489,9 @@ function MileSplits({
                   </td>
                   <td className="px-3 py-2.5">{split.averageCadence !== null ? `${Math.round(split.averageCadence)} spm` : "--"}</td>
                   <td className="px-3 py-2.5">
-                    <span className="text-emerald-700">+{Math.round(split.elevationGainMeters)} m</span>
+                    <span className="text-emerald-700">+{Math.round(elevationMetersForDisplay(split.elevationGainMeters, units)).toLocaleString()} {elevationUnitAbbr(units)}</span>
                     <span className="ml-1 text-gray-400">/</span>
-                    <span className="ml-1 text-rose-700">-{Math.round(split.elevationLossMeters)} m</span>
+                    <span className="ml-1 text-rose-700">-{Math.round(elevationMetersForDisplay(split.elevationLossMeters, units)).toLocaleString()} {elevationUnitAbbr(units)}</span>
                   </td>
                   <td className="px-3 py-2.5">{split.averageTemperatureCelsius !== null ? `${Math.round(split.averageTemperatureCelsius)} °C` : "--"}</td>
                 </tr>

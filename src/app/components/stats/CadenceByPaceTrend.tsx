@@ -16,6 +16,12 @@ import {
   YAxis,
 } from "recharts";
 import type { CadenceByPaceResult, CadencePaceBandTrend } from "@/lib/analytics/cadence-by-pace";
+import { useUnits } from "@/app/components/units/UnitsProvider";
+import {
+  formatPaceForSystem,
+  paceUnitSuffix,
+  type UnitSystem,
+} from "@/lib/units/format";
 
 interface CadenceByPaceTrendProps {
   current: CadenceByPaceResult;
@@ -36,7 +42,12 @@ function findBand(result: CadenceByPaceResult, key: string): CadencePaceBandTren
   return result.bands.find((band) => band.key === key);
 }
 
+function formatBandLabel(band: CadencePaceBandTrend, units: UnitSystem): string {
+  return `${formatPaceForSystem(band.minimumPaceSecondsPerMile / 60, units)}-${formatPaceForSystem(band.maximumPaceSecondsPerMile / 60, units)} ${paceUnitSuffix(units)}`;
+}
+
 export default function CadenceByPaceTrend({ current, prior }: CadenceByPaceTrendProps): React.ReactNode {
+  const { units } = useUnits();
   const [selectedKey, setSelectedKey] = useState<string | null>(null);
   const bands = useMemo(() => {
     const byKey = new Map<string, CadencePaceBandTrend>();
@@ -97,7 +108,7 @@ export default function CadenceByPaceTrend({ current, prior }: CadenceByPaceTren
               value={activeKey}
               onChange={(event) => setSelectedKey(event.target.value)}
             >
-              {bands.map((band) => <option key={band.key} value={band.key}>{band.label}</option>)}
+              {bands.map((band) => <option key={band.key} value={band.key}>{formatBandLabel(band, units)}</option>)}
             </select>
           </label>
         )}

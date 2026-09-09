@@ -7,7 +7,13 @@
 import React from "react";
 import { CartesianGrid, Legend, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { RunActivity } from "@/lib/activities/models";
-import { MarathonPlan, formatPace } from "@/lib/training/models";
+import { MarathonPlan } from "@/lib/training/models";
+import { useUnits } from "@/app/components/units/UnitsProvider";
+import {
+  formatPaceMinutes,
+  paceMinPerMileForDisplay,
+  paceUnitSuffix,
+} from "@/lib/units/format";
 
 interface RunTrendChartProps {
   plan: MarathonPlan;
@@ -15,6 +21,7 @@ interface RunTrendChartProps {
 }
 
 export default function RunTrendChart({ plan, activities }: RunTrendChartProps): React.ReactNode {
+  const { units } = useUnits();
   const data = plan.weeks.map((week) => {
     const start = week.startDate.slice(0, 10);
     const end = week.endDate.slice(0, 10);
@@ -22,8 +29,11 @@ export default function RunTrendChart({ plan, activities }: RunTrendChartProps):
     const timedRuns = runs.filter((activity) => activity.averagePaceMinutesPerMile !== null);
     const hrRuns = runs.filter((activity) => activity.averageHeartRate !== null);
     const pace = timedRuns.length > 0
-      ? timedRuns.reduce((sum, activity) => sum + (activity.averagePaceMinutesPerMile ?? 0) * activity.distanceMiles, 0) /
-        timedRuns.reduce((sum, activity) => sum + activity.distanceMiles, 0)
+      ? paceMinPerMileForDisplay(
+          timedRuns.reduce((sum, activity) => sum + (activity.averagePaceMinutesPerMile ?? 0) * activity.distanceMiles, 0) /
+          timedRuns.reduce((sum, activity) => sum + activity.distanceMiles, 0),
+          units,
+        )
       : undefined;
     const heartRate = hrRuns.length > 0
       ? Math.round(hrRuns.reduce((sum, activity) => sum + (activity.averageHeartRate ?? 0), 0) / hrRuns.length)
@@ -49,9 +59,9 @@ export default function RunTrendChart({ plan, activities }: RunTrendChartProps):
           <LineChart data={data}>
             <CartesianGrid strokeDasharray="3 3" stroke="#f3f4f6" />
             <XAxis dataKey="week" tick={{ fontSize: 12, fill: "#9ca3af" }} />
-            <YAxis yAxisId="pace" tick={{ fontSize: 12, fill: "#9ca3af" }} tickFormatter={(value: number) => formatPace(value)} reversed domain={["dataMin - 0.25", "dataMax + 0.25"]} />
+            <YAxis yAxisId="pace" tick={{ fontSize: 12, fill: "#9ca3af" }} tickFormatter={(value: number) => formatPaceMinutes(value)} reversed domain={["dataMin - 0.25", "dataMax + 0.25"]} />
             <YAxis yAxisId="hr" orientation="right" tick={{ fontSize: 12, fill: "#9ca3af" }} domain={["dataMin - 5", "dataMax + 5"]} />
-            <Tooltip formatter={(value: number, name: string) => name === "Pace" ? [`${formatPace(value)}/mi`, name] : [`${value} bpm`, name]} />
+            <Tooltip formatter={(value: number, name: string) => name === "Pace" ? [`${formatPaceMinutes(value)}${paceUnitSuffix(units)}`, name] : [`${value} bpm`, name]} />
             <Legend verticalAlign="top" height={28} />
             <Line yAxisId="pace" type="monotone" dataKey="pace" name="Pace" stroke="#0369a1" strokeWidth={2} connectNulls={false} />
             <Line yAxisId="hr" type="monotone" dataKey="heartRate" name="Heart rate" stroke="#e11d48" strokeWidth={2} connectNulls={false} />
