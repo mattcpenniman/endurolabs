@@ -11,6 +11,15 @@
 import React, { useEffect, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import CourseProfileChart from "@/app/components/courses/CourseProfileChart";
+import { useUnits } from "@/app/components/units/UnitsProvider";
+import {
+  formatGrade,
+  gradeForDisplay,
+  gradeUnitLabel,
+  paceUnitAbbr,
+  secondsPerMileForDisplay,
+  type UnitSystem,
+} from "@/lib/units/format";
 import {
   CourseComparisonResult,
 } from "@/lib/courses/comparison";
@@ -18,6 +27,7 @@ import {
 export default function CourseComparePage(): React.ReactNode {
   const params = useParams<{ courseId: string }>();
   const router = useRouter();
+  const { units } = useUnits();
   const targetId = params?.courseId ?? "";
   const [data, setData] = useState<CourseComparisonResult | null>(null);
   const [loading, setLoading] = useState(true);
@@ -101,12 +111,12 @@ export default function CourseComparePage(): React.ReactNode {
             {target.distanceMiles.toLocaleString("en-US", { maximumFractionDigits: 2 })} miles
             {" · "}
             {data.target.elevationGainFeetPerMile !== null
-              ? `${Math.round(data.target.elevationGainFeetPerMile)} ft of climbing per mile`
+              ? `${formatGrade(data.target.elevationGainFeetPerMile, units)} of climbing`
               : "elevation not present in GPX"}
             {" · "}
             vs. your stored racing
             {data.athlete.elevationGainFeetPerMile !== null
-              ? ` (${Math.round(data.athlete.elevationGainFeetPerMile)} ft/mi across ${data.athlete.qualifyingActivities} qualifying runs)`
+              ? ` (${formatGrade(data.athlete.elevationGainFeetPerMile, units)} across ${data.athlete.qualifyingActivities} qualifying runs)`
               : ""}
           </p>
         </header>
@@ -115,6 +125,7 @@ export default function CourseComparePage(): React.ReactNode {
           difference={data.difference}
           paceAdjustmentSecondsPerMile={paceDelta}
           equivalentSeconds={equivalent}
+          units={units}
         />
 
         <CourseProfileChart profiles={data.profiles} />
@@ -175,12 +186,14 @@ interface NoteCardProps {
   difference: CourseComparisonResult["difference"];
   paceAdjustmentSecondsPerMile: number | null;
   equivalentSeconds: number | null;
+  units: UnitSystem;
 }
 
 function NoteCard({
   difference,
   paceAdjustmentSecondsPerMile,
   equivalentSeconds,
+  units,
 }: NoteCardProps): React.ReactNode {
   const positive = paceAdjustmentSecondsPerMile !== null && paceAdjustmentSecondsPerMile > 0;
   const negative = paceAdjustmentSecondsPerMile !== null && paceAdjustmentSecondsPerMile < 0;
@@ -200,13 +213,13 @@ function NoteCard({
         {difference.deltaFeetPerMile !== null && (
           <span className="rounded-lg border border-[var(--color-border)] bg-white/70 px-3 py-1.5 text-xs">
             {difference.deltaFeetPerMile > 0 ? "+" : ""}
-            {Math.round(difference.deltaFeetPerMile).toLocaleString("en-US")} ft/mi vs. your racing
+            {Math.round(gradeForDisplay(difference.deltaFeetPerMile, units)).toLocaleString("en-US")} {gradeUnitLabel(units)} vs. your racing
           </span>
         )}
         {paceAdjustmentSecondsPerMile !== null && (
           <span className="rounded-lg border border-[var(--color-border)] bg-white/70 px-3 py-1.5 text-xs">
             ≈ {paceAdjustmentSecondsPerMile > 0 ? "+" : "-"}
-            {Math.abs(paceAdjustmentSecondsPerMile)} s/mi pace shift
+            {Math.round(Math.abs(secondsPerMileForDisplay(paceAdjustmentSecondsPerMile, units)))} s/{paceUnitAbbr(units)} pace shift
           </span>
         )}
         {equivalentSeconds !== null && (

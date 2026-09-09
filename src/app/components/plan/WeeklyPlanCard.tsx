@@ -10,10 +10,17 @@
 
 import React from "react";
 import { useState, useEffect, useMemo } from "react";
-import { DailyLog, WeeklyPlan, DailyPlan, Workout, WorkoutType, RunnerProfile, formatPace } from "@/lib/training/models";
+import { DailyLog, WeeklyPlan, DailyPlan, Workout, WorkoutType, RunnerProfile } from "@/lib/training/models";
 import { isWeekFullyLogged } from "@/lib/training/progress-tracker";
 import { formatPlanDate } from "@/lib/training/date-utils";
 import { RunActivity } from "@/lib/activities/models";
+import { useUnits } from "@/app/components/units/UnitsProvider";
+import {
+  formatElevationGain,
+  formatPaceForSystem,
+  paceUnitSuffix,
+  type UnitSystem,
+} from "@/lib/units/format";
 
 interface WeeklyPlanCardProps {
   planId: string;
@@ -140,7 +147,7 @@ function segmentDistanceLabel(segment: Workout["segments"][number]): string {
   return `${formatMiles(segment.distance)} mi`;
 }
 
-function renderWorkoutSegments(workout: Workout) {
+function renderWorkoutSegments(workout: Workout, units: UnitSystem) {
   if (workout.segments.length <= 1) return null;
 
   return (
@@ -155,7 +162,7 @@ function renderWorkoutSegments(workout: Workout) {
                 {segment.description}
               </span>
               {segment.pace && (
-                <span className="ml-2 text-gray-400">@ {formatPace(segment.pace)}/mi</span>
+                <span className="ml-2 text-gray-400">@ {formatPaceForSystem(segment.pace, units)}{paceUnitSuffix(units)}</span>
               )}
             </div>
             {distanceLabel && <span className="font-semibold text-gray-700">{distanceLabel}</span>}
@@ -446,6 +453,7 @@ export default function WeeklyPlanCard({
   onMileageChange,
   onActivityClick,
 }: WeeklyPlanCardProps) {
+  const { units } = useUnits();
   const [localDays, setLocalDays] = useState<DailyPlan[]>(
     [...week.days].sort((a, b) => dayDisplayOrder[a.dayOfWeek] - dayDisplayOrder[b.dayOfWeek])
   );
@@ -1357,7 +1365,7 @@ export default function WeeklyPlanCard({
                                   {entry.workout.totalDistance > 0 ? `${entry.workout.totalDistance} mi · ` : ""}
                                   {Math.floor(entry.workout.estimatedDuration / 60)}h {entry.workout.estimatedDuration % 60}min
                                 </p>
-                                {renderWorkoutSegments(entry.workout)}
+                                {renderWorkoutSegments(entry.workout, units)}
                               </>
                             )}
 
@@ -1384,10 +1392,10 @@ export default function WeeklyPlanCard({
                                 <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs text-sky-900">
                                   <span>{formatMiles(syncedActivity.distanceMiles)} mi</span>
                                   <span>{formatRunDuration(syncedActivity.durationSeconds)}</span>
-                                  {syncedActivity.averagePaceMinutesPerMile && <span>{formatPace(syncedActivity.averagePaceMinutesPerMile)}/mi</span>}
+                                  {syncedActivity.averagePaceMinutesPerMile && <span>{formatPaceForSystem(syncedActivity.averagePaceMinutesPerMile, units)}{paceUnitSuffix(units)}</span>}
                                   {syncedActivity.averageHeartRate && <span>{syncedActivity.averageHeartRate} bpm avg</span>}
                                   {syncedActivity.averagePower && <span>{syncedActivity.averagePower} W avg</span>}
-                                  {syncedActivity.elevationGainMeters !== null && <span>{Math.round(syncedActivity.elevationGainMeters * 3.28084).toLocaleString()} ft gain</span>}
+                                  {syncedActivity.elevationGainMeters !== null && <span>{formatElevationGain(syncedActivity.elevationGainMeters, units)} gain</span>}
                                 </div>
                                 {canViewRunMap && (
                                   <p className="mt-2 text-[11px] font-medium text-sky-800">

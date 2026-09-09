@@ -29,6 +29,12 @@ import {
   gradeBands,
   resampleProfile,
 } from "./gpx";
+import {
+  DEFAULT_UNIT_SYSTEM,
+  formatGrade,
+  secondsPerMileForDisplay,
+  type UnitSystem,
+} from "@/lib/units/format";
 
 export type CourseRole = "target" | "training";
 
@@ -97,7 +103,7 @@ export interface CourseComparisonResult {
     paceAdjustmentSecondsPerMile: number | null;
     paceAdjustmentPercent: number | null;
     equivalentTimeSeconds: number | null;
-    /** Plain-language reading, e.g. "Berlin gains 1,067 ft/mile more…". */
+    /** Plain-language reading, e.g. "Berlin gains 1,067 ft/mi more…" (or m/km per profile units). */
     note: string;
     /** True when the difference is within the equivalence tolerance. */
     withinTolerance: boolean;
@@ -223,12 +229,15 @@ function equivalentSecondsForMiles(miles: number, adjustmentSecondsPerMile: numb
  * @param athleteActivities Stored sample traces used to build the
  *        elevation/grade baseline.
  * @param athleteWeeks Windows for the elevation/grade analytics.
+ * @param units Display unit system for the plain-language note (defaults to imperial).
  */
 export function buildCourseComparison(input: {
   targetSeries: CourseSeriesInput[];
   athleteActivities: ElevationGradeActivityInput[];
   athleteWeeks: ElevationGradeWeekWindow[];
+  units?: UnitSystem;
 }): CourseComparisonResult {
+  const units = input.units ?? DEFAULT_UNIT_SYSTEM;
   const target = courseMetrics(input.targetSeries[0]);
   const profiles = input.targetSeries.map((series) => {
     const totalMeters = series.points.length > 0
@@ -308,34 +317,37 @@ export function buildCourseComparison(input: {
   });
 
   let note = "";
+  const perUnit = units === "metric" ? "km" : "mile";
+  const gradeText = (value: number): string => formatGrade(value, units);
+  const secondsText = (value: number): string => formatSeconds(secondsPerMileForDisplay(value, units));
   const demCaveat = target.elevationSource === "open-elevation"
     ? " Elevation is backfilled from a 30 m digital elevation model (Open-Elevation), so small undulations are smoothed out."
     : "";
   if (target.elevationGainFeetPerMile === null) {
     note = `${target.name} does not include elevation data in the GPX file, so no elevation comparison can be made. The distance profile is still available.`;
   } else if (athleteGainFpm === null) {
-    note = `${target.name} gains about ${formatFeetPerMile(target.elevationGainFeetPerMile)}. There is not yet enough qualifying sample history to benchmark the climbing against your recent racing, so treat the profile and terrain-mix chart as the primary reference for splits.${gradeNote(gradeDistributionDelta)}`;
+    note = `${target.name} gains about ${gradeText(target.elevationGainFeetPerMile)}. There is not yet enough qualifying sample history to benchmark the climbing against your recent racing, so treat the profile and terrain-mix chart as the primary reference for splits.${gradeNote(gradeDistributionDelta)}`;
   } else if (withinTolerance) {
-    note = `${target.name} gains about ${formatFeetPerMile(target.elevationGainFeetPerMile)} of elevation per mile${
-      athleteGainFpm !== null ? ` versus your recent racing (${formatFeetPerMile(athleteGainFpm)})` : ""
+    note = `${target.name} gains about ${gradeText(target.elevationGainFeetPerMile)} of elevation per ${perUnit}${
+      athleteGainFpm !== null ? ` versus your recent racing (${gradeText(athleteGainFpm)})` : ""
     } — the terrain is close enough that your pace expectations transfer directly. ${gradeNote(gradeDistributionDelta)}`;
   } else if ((paceAdjustmentPercent ?? 0) >= 0.005) {
     const grade = describeGradeDeltas(target.gradeBands, athleteShares);
-    note = `${target.name} gains ${formatFeetPerMile(target.elevationGainFeetPerMile)} per mile — ${formatFeetPerMile(delta!)} more than your recent racing${
-      athleteGainFpm !== null ? ` (${formatFeetPerMile(athleteGainFpm)})` : ""
-    }. Expect to lose roughly ${formatSeconds(paceAdjustmentSecondsPerMile!)} per mile${
+    note = `${target.name} gains ${gradeText(target.elevationGainFeetPerMile)} per ${perUnit} — ${gradeText(delta!)} more than your recent racing${
+      athleteGainFpm !== null ? ` (${gradeText(athleteGainFpm)})` : ""
+    }. Expect to lose roughly ${secondsText(paceAdjustmentSecondsPerMile!)} per ${perUnit}${
       equivalentTimeSeconds !== null ? ` (about ${formatDuration(equivalentTimeSeconds)} on the full distance)` : ""
     }${grade.length > 0 ? `; ${grade.join(", ")}` : ""}. Build the climbs into your splits rather than treating them as pace losses — that is where the time-pickup comes from on a hilly target.`;
   } else if ((paceAdjustmentPercent ?? 0) <= -0.005) {
-    note = `${target.name} is flatter than your recent racing: ${formatFeetPerMile(target.elevationGainFeetPerMile)} per mile${
-      athleteGainFpm !== null ? ` versus your ${formatFeetPerMile(athleteGainFpm)}` : ""
-    }. That is worth roughly ${formatSeconds(Math.abs(paceAdjustmentSecondsPerMile!))} per mile of time-pickup potential${
+    note = `${target.name} is flatter than your recent racing: ${gradeText(target.elevationGainFeetPerMile)} per ${perUnit}${
+      athleteGainFpm !== null ? ` versus your ${gradeText(athleteGainFpm)}` : ""
+    }. That is worth roughly ${secondsText(Math.abs(paceAdjustmentSecondsPerMile!))} per ${perUnit} of time-pickup potential${
       equivalentTimeSeconds !== null ? ` (${formatDuration(Math.abs(equivalentTimeSeconds))} on the full distance)` : ""
     }. Your forecast is fitness-based, so this upside is an execution opportunity — the flatness is not a fitness change.`;
   } else {
-    note = `${target.name} gains ${formatFeetPerMile(target.elevationGainFeetPerMile)} per mile${
-      athleteGainFpm !== null ? ` versus your ${formatFeetPerMile(athleteGainFpm)}` : ""
-    }. The profile differs in shape${gradeNote(gradeDistributionDelta)} but the net climbing per mile is similar to what you have trained on, so your race-forecast time should hold with normal variance.`;
+    note = `${target.name} gains ${gradeText(target.elevationGainFeetPerMile)} per ${perUnit}${
+      athleteGainFpm !== null ? ` versus your ${gradeText(athleteGainFpm)}` : ""
+    }. The profile differs in shape${gradeNote(gradeDistributionDelta)} but the net climbing per ${perUnit} is similar to what you have trained on, so your race-forecast time should hold with normal variance.`;
   }
   if (demCaveat) note += demCaveat;
 
@@ -369,10 +381,6 @@ export function buildCourseComparison(input: {
       withinTolerance,
     },
   };
-}
-
-function formatFeetPerMile(value: number): string {
-  return `${Math.round(value).toLocaleString("en-US")} ft/mile`;
 }
 
 function formatSeconds(seconds: number): string {

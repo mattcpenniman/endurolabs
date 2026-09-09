@@ -9,7 +9,14 @@
 
 import { useState } from "react";
 import { RaceDayPlan } from "@/lib/training/models";
-import { formatPace, formatTime } from "@/lib/training/models";
+import { formatTime } from "@/lib/training/models";
+import { useUnits } from "@/app/components/units/UnitsProvider";
+import {
+  formatPaceForSystem,
+  paceUnitAbbr,
+  paceUnitSuffix,
+  secondsPerMileForDisplay,
+} from "@/lib/units/format";
 
 interface RaceDayPlanCardProps {
   plan: RaceDayPlan;
@@ -19,6 +26,7 @@ const TABS = ["splits", "nutrition", "pre-race", "weather"] as const;
 type Tab = (typeof TABS)[number];
 
 export default function RaceDayPlanCard({ plan }: RaceDayPlanCardProps) {
+  const { units } = useUnits();
   const [activeTab, setActiveTab] = useState<Tab>("splits");
 
   const goalFormatted = formatTime({
@@ -33,7 +41,7 @@ export default function RaceDayPlanCard({ plan }: RaceDayPlanCardProps) {
       <div className="mb-6">
         <h3 className="text-xl font-bold text-gray-900">🏁 Race Day Plan</h3>
         <p className="mt-1 text-sm text-gray-500">
-          {plan.raceDistanceLabel} · {plan.raceDate} · Goal: {goalFormatted} · Pace: {formatPace(plan.goalPace)}/mi
+          {plan.raceDistanceLabel} · {plan.raceDate} · Goal: {goalFormatted} · Pace: {formatPaceForSystem(plan.goalPace, units)}{paceUnitSuffix(units)}
         </p>
         <p className="text-xs text-gray-400 capitalize">{plan.pacingStrategy} pacing strategy</p>
       </div>
@@ -61,7 +69,7 @@ export default function RaceDayPlanCard({ plan }: RaceDayPlanCardProps) {
           {/* Half markers */}
           <div className="mb-2 grid grid-cols-[40px_1fr_1fr_1fr_1fr] gap-2 text-xs font-medium text-gray-400">
             <span>Mile</span>
-            <span>Pace</span>
+            <span>Pace /{paceUnitAbbr(units)}</span>
             <span>Time</span>
             <span>Effort</span>
             <span>Notes</span>
@@ -80,7 +88,7 @@ export default function RaceDayPlanCard({ plan }: RaceDayPlanCardProps) {
               }`}
             >
               <span className="font-mono font-bold text-gray-900">{split.mile <= 26 ? split.mile : "26.2"}</span>
-              <span className="font-mono text-gray-700">{formatPace(split.targetPace)}</span>
+              <span className="font-mono text-gray-700">{formatPaceForSystem(split.targetPace, units)}</span>
               <span className="font-mono text-gray-600">
                 {formatTime({
                   hours: Math.floor(split.targetTime / 60),
@@ -163,7 +171,7 @@ export default function RaceDayPlanCard({ plan }: RaceDayPlanCardProps) {
               </div>
               {adj.paceDelta > 0 && (
                 <p className="mt-1 text-xs font-medium text-red-600">
-                  +{adj.paceDelta}s/mile adjustment
+                  +{Math.round(secondsPerMileForDisplay(adj.paceDelta, units))}s/{paceUnitAbbr(units)} adjustment
                 </p>
               )}
             </div>

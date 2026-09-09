@@ -9,6 +9,13 @@ import type {
   ElevationGradeAnalysisResult,
   GradeBandResult,
 } from "@/lib/analytics/elevation-grade";
+import { useUnits } from "@/app/components/units/UnitsProvider";
+import {
+  formatGrade,
+  paceUnitAbbr,
+  paceUnitSuffix,
+  secondsPerMileForDisplay,
+} from "@/lib/units/format";
 
 interface ElevationGradeCardProps {
   current: ElevationGradeAnalysisResult;
@@ -26,6 +33,7 @@ export default function ElevationGradeCard({
   current,
   prior,
 }: ElevationGradeCardProps): React.ReactNode {
+  const { units } = useUnits();
   const hasMeasuredPower = current.bands.some((band) => band.powerWattsMeasured !== null)
     || prior.bands.some((band) => band.powerWattsMeasured !== null);
   const hasData = current.suppressReason === null;
@@ -39,7 +47,7 @@ export default function ElevationGradeCard({
         <div>
           <h3 className="text-xs font-medium uppercase tracking-wide text-gray-500">Elevation and grade</h3>
           <p className="mt-1 max-w-2xl text-xs text-gray-500">
-            Weekly elevation gain per mile and observed pace, heart rate, and measured power across flat, climbing,
+            Weekly elevation gain per {paceUnitAbbr(units)} and observed pace, heart rate, and measured power across flat, climbing,
             and descending samples. Grade-adjusted results are suppressed until GPS and elevation coverage qualify.
           </p>
         </div>
@@ -68,11 +76,9 @@ export default function ElevationGradeCard({
           )}
           <div className="grid gap-3 sm:grid-cols-3">
             <div className="rounded-lg bg-gray-50 p-3">
-              <p className="text-[11px] font-medium uppercase tracking-wide text-gray-500">Gain per mile</p>
+              <p className="text-[11px] font-medium uppercase tracking-wide text-gray-500">Gain per {paceUnitAbbr(units)}</p>
               <p className="mt-1 text-2xl font-bold tabular-nums text-gray-900">
-                {current.elevationGainFeetPerMile === null
-                  ? "--"
-                  : `${Math.round(current.elevationGainFeetPerMile)} ft/mi`}
+                {formatGrade(current.elevationGainFeetPerMile, units)}
               </p>
               <p className="mt-1 text-xs text-gray-500">
                 across {current.qualifyingActivities} qualifying {current.qualifyingActivities === 1 ? "run" : "runs"}
@@ -91,10 +97,10 @@ export default function ElevationGradeCard({
               )}
             </div>
             <div className="rounded-lg bg-gray-50 p-3">
-              <p className="text-[11px] font-medium uppercase tracking-wide text-gray-500">Prior gain/mi</p>
+              <p className="text-[11px] font-medium uppercase tracking-wide text-gray-500">Prior gain/{paceUnitAbbr(units)}</p>
               <p className="mt-1 text-2xl font-bold tabular-nums text-gray-900">
                 {prior.suppressReason === null
-                  ? (prior.elevationGainFeetPerMile === null ? "--" : `${Math.round(prior.elevationGainFeetPerMile)} ft/mi`)
+                  ? formatGrade(prior.elevationGainFeetPerMile, units)
                   : "--"}
               </p>
             </div>
@@ -103,7 +109,7 @@ export default function ElevationGradeCard({
           {current.weeks.length > 0 && (
             <p className="text-xs text-gray-500">
               Weekly trend: {current.weeks
-                .map((week) => `W${week.weekNumber} ${Math.round(week.elevationGainFeetPerMile ?? 0)} ft/mi`)
+                .map((week) => `W${week.weekNumber} ${formatGrade(week.elevationGainFeetPerMile ?? 0, units)}`)
                 .join(" · ")}
               .
             </p>
@@ -125,7 +131,7 @@ export default function ElevationGradeCard({
                   <div key={key} className="grid min-w-[560px] grid-cols-[100px_1fr_90px_90px_100px] items-center gap-3 px-3 py-2.5 text-sm">
                     <span className="font-medium text-gray-900">{band.label}</span>
                     <span className="text-right font-medium tabular-nums text-gray-900">
-                      {band.paceSecondsPerMile === null ? "--" : `${formatPaceShort(band.paceSecondsPerMile)}/mi`}
+                      {band.paceSecondsPerMile === null ? "--" : `${formatPaceShort(secondsPerMileForDisplay(band.paceSecondsPerMile, units))}${paceUnitSuffix(units)}`}
                     </span>
                     <span className="text-right font-medium tabular-nums text-gray-900">
                       {band.heartRate === null ? "--" : `${band.heartRate} bpm`}

@@ -11,7 +11,7 @@
 import React from "react";
 import { useState, useEffect } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { RunnerProfile, MarathonPlan, DailyLog, WeeklyPlan, formatPace } from "@/lib/training/models";
+import { RunnerProfile, MarathonPlan, DailyLog, WeeklyPlan } from "@/lib/training/models";
 import type { PlanListSummary } from "@/lib/activities/plan-list-summary";
 import OnboardingForm from "@/app/components/onboarding/OnboardingForm";
 import PlanOverviewCard from "@/app/components/plan/PlanOverviewCard";
@@ -31,6 +31,11 @@ import { calculatePaceZones, calculatePowerZones } from "@/lib/training/zone-cal
 import { analyzeProgress, areAllPhaseRunsLogged, dailyLogsToWeeklyLogs } from "@/lib/training/progress-tracker";
 import { adjustWeeklyIntensityPercent } from "@/lib/training/intensity-adjustments";
 import { buildPlanUrl, PlanUrlUpdates } from "@/lib/plan-url";
+import { useUnits } from "@/app/components/units/UnitsProvider";
+import {
+  formatElevationGain,
+  formatPaceWithUnit,
+} from "@/lib/units/format";
 
 // Shape of a saved plan row from the database
 interface SavedPlanRow {
@@ -186,6 +191,7 @@ function formatPlanDate(value: string | undefined): string {
 }
 
 function PlanSummaryMetrics({ summary }: { summary: PlanListSummary }): React.ReactNode {
+  const { units } = useUnits();
   const hasActuals = summary.actualRunCount > 0;
   const planned = Math.round(summary.plannedMileage * 10) / 10;
   const actual = Math.round(summary.actualMileage * 10) / 10;
@@ -205,7 +211,7 @@ function PlanSummaryMetrics({ summary }: { summary: PlanListSummary }): React.Re
         <dd className="mt-0.5 font-mono text-sm font-semibold text-gray-800">
           {summary.actualElevationGainMeters === null
             ? "--"
-            : `${Math.round(summary.actualElevationGainMeters * 3.28084).toLocaleString()} ft`}
+            : formatElevationGain(summary.actualElevationGainMeters, units)}
         </dd>
       </div>
       <div>
@@ -213,7 +219,7 @@ function PlanSummaryMetrics({ summary }: { summary: PlanListSummary }): React.Re
         <dd className="mt-0.5 font-mono text-sm font-semibold text-gray-800">
           {summary.averagePaceMinutesPerMile === null
             ? "--"
-            : `${formatPace(summary.averagePaceMinutesPerMile)} /mi`}
+            : formatPaceWithUnit(summary.averagePaceMinutesPerMile, units)}
         </dd>
       </div>
       <div>

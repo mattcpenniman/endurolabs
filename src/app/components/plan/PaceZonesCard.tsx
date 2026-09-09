@@ -1,12 +1,16 @@
-import React from "react";
+"use client";
 // ============================================================
 // EnduroLab — Pace Zones Card
 // ============================================================
 // Displays the runner's calculated pace zones with color
-// coding and RPE effort descriptors.
+// coding and RPE effort descriptors, in the user's profile
+// unit system (min/mile or min/km).
 // ============================================================
 
-import { PaceZones, PowerZones, HeartRateZone, formatPace } from "@/lib/training/models";
+import React from "react";
+import { PaceZones, PowerZones, HeartRateZone } from "@/lib/training/models";
+import { useUnits } from "@/app/components/units/UnitsProvider";
+import { formatPaceForSystem, paceUnitAbbr } from "@/lib/units/format";
 
 interface PaceZonesCardProps {
   paceZones: PaceZones;
@@ -22,6 +26,7 @@ const zoneColor: Record<string, string> = {
 };
 
 export default function PaceZonesCard({ paceZones, powerZones }: PaceZonesCardProps) {
+  const { units } = useUnits();
   const formatPercentRange = (range: HeartRateZone["hrrPercent"]): string =>
     `${Math.round(range.min * 100)}-${Math.round(range.max * 100)}%`;
   const formatHeartRateLine = (heartRateZone: HeartRateZone): string => {
@@ -35,35 +40,35 @@ export default function PaceZonesCard({ paceZones, powerZones }: PaceZonesCardPr
   const zones = [
     {
       name: "Recovery",
-      pace: formatPace(paceZones.recovery),
+      pace: formatPaceForSystem(paceZones.recovery, units),
       effort: "Very easy",
       color: zoneColor.recovery,
       heartRate: paceZones.heartRateZones.recovery,
     },
     {
       name: "Easy",
-      pace: `${formatPace(paceZones.easy.max)}–${formatPace(paceZones.easy.min)}`,
+      pace: `${formatPaceForSystem(paceZones.easy.max, units)}–${formatPaceForSystem(paceZones.easy.min, units)}`,
       effort: paceZones.easyEffort,
       color: zoneColor.easy,
       heartRate: paceZones.heartRateZones.easy,
     },
     {
       name: "Marathon",
-      pace: formatPace(paceZones.marathon),
+      pace: formatPaceForSystem(paceZones.marathon, units),
       effort: paceZones.marathonEffort,
       color: zoneColor.marathon,
       heartRate: paceZones.heartRateZones.marathon,
     },
     {
       name: "Threshold",
-      pace: formatPace(paceZones.threshold),
+      pace: formatPaceForSystem(paceZones.threshold, units),
       effort: paceZones.thresholdEffort,
       color: zoneColor.threshold,
       heartRate: paceZones.heartRateZones.threshold,
     },
     {
       name: "VO2 Max",
-      pace: formatPace(paceZones.vo2),
+      pace: formatPaceForSystem(paceZones.vo2, units),
       effort: paceZones.vo2Effort,
       color: zoneColor.vo2,
       heartRate: paceZones.heartRateZones.vo2,
@@ -89,7 +94,7 @@ export default function PaceZonesCard({ paceZones, powerZones }: PaceZonesCardPr
           <div key={zone.name} className={`rounded-lg p-3 ${zone.color}`}>
             <div className="flex items-center justify-between">
               <span className="text-sm font-semibold">{zone.name}</span>
-              <span className="text-lg font-bold">{zone.pace}<span className="text-xs font-normal"> /mi</span></span>
+              <span className="text-lg font-bold">{zone.pace}<span className="text-xs font-normal"> /{paceUnitAbbr(units)}</span></span>
             </div>
             {powerZones && (
               <p className="text-xs opacity-75">

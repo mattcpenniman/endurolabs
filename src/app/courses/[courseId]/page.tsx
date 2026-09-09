@@ -10,6 +10,8 @@
 import React, { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useParams } from "next/navigation";
+import { useUnits } from "@/app/components/units/UnitsProvider";
+import { formatElevationFeet, formatGrade } from "@/lib/units/format";
 
 interface BandRow {
   key: string;
@@ -34,6 +36,7 @@ interface CourseRow {
 export default function CourseDetailPage(): React.ReactNode {
   const params = useParams<{ courseId: string }>();
   const router = useRouter();
+  const { units } = useUnits();
   const id = params?.courseId ?? "";
   const [course, setCourse] = useState<CourseRow | null>(null);
   const [allCourses, setAllCourses] = useState<CourseRow[]>([]);
@@ -147,9 +150,9 @@ export default function CourseDetailPage(): React.ReactNode {
           <p className="mt-2 text-sm text-[var(--color-text-secondary)]">
             {course.distanceMiles.toLocaleString("en-US", { maximumFractionDigits: 2 })} miles
             {" · "}
-            {Math.round(course.elevationGainFeet).toLocaleString("en-US")} ft of total climbing
+            {formatElevationFeet(course.elevationGainFeet, units)} of total climbing
             {course.elevationGainFeetPerMile !== null
-              ? ` (${Math.round(course.elevationGainFeetPerMile)} ft/mi)`
+              ? ` (${formatGrade(course.elevationGainFeetPerMile, units)})`
               : " (no elevation in the GPX)"}
             {" · "}
             {course.pointCount.toLocaleString("en-US")} points

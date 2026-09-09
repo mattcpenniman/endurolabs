@@ -118,6 +118,23 @@ describe("buildCourseComparison", () => {
     expect(result.difference.note).toMatch(/flatter than your recent racing/);
   });
 
+  it("renders the plain-language note in the requested display units", () => {
+    const target = syntheticCourse("Hilly Target", 26.2, 0.024);
+    const base = {
+      targetSeries: [target],
+      athleteActivities: flatAthlete(),
+      athleteWeeks: weeks,
+    };
+    const imperial = buildCourseComparison(base);
+    const metric = buildCourseComparison({ ...base, units: "metric" });
+
+    expect(imperial.difference.note).toContain("ft/mi");
+    expect(imperial.difference.note).toContain("per mile");
+    expect(metric.difference.note).toContain("m/km");
+    expect(metric.difference.note).toContain("per km");
+    expect(metric.difference.note).not.toContain("ft/mi");
+  });
+
   it("treats similar courses as transferable and stays within tolerance", () => {
     // Athlete history: two flat 10-milers + one 3.5% climb → ~0.017 m/m
     // mean gain. A 0.017-slope course lands inside the ±15 ft/mile band.

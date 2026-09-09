@@ -7,6 +7,8 @@
 import React, { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import type { RacePredictorResponse, RacePredictorResult } from "@/lib/analytics/race-predictor";
+import { useUnits } from "@/app/components/units/UnitsProvider";
+import { paceUnitSuffix, secondsPerMileForDisplay } from "@/lib/units/format";
 
 function formatDuration(totalSeconds: number): string {
   const seconds = Math.max(0, Math.round(totalSeconds));
@@ -38,6 +40,7 @@ function PredictorLoading(): React.ReactNode {
 
 export default function RacePredictorPage(): React.ReactNode {
   const router = useRouter();
+  const { units } = useUnits();
   const [data, setData] = useState<RacePredictorResponse | null>(null);
   const [selectedKey, setSelectedKey] = useState("marathon");
   const [customDistance, setCustomDistance] = useState("8");
@@ -194,7 +197,7 @@ export default function RacePredictorPage(): React.ReactNode {
               </div>
               <p className="mt-4 text-sm font-bold text-slate-300">{selected.label}</p>
               <p className="mt-1 font-mono text-5xl font-black tracking-tight text-white sm:text-6xl">{formatDuration(selected.activePredictedSeconds)}</p>
-              <p className="mt-3 font-mono text-sm text-lime-200">{formatDuration(Math.round(selected.activePredictedSeconds / selected.distanceMiles))}/mi</p>
+              <p className="mt-3 font-mono text-sm text-lime-200">{formatDuration(Math.round(secondsPerMileForDisplay(selected.activePredictedSeconds / selected.distanceMiles, units)))}{paceUnitSuffix(units)}</p>
               {model === "readiness" && selected.readiness && (
                 <p className="mt-2 text-[10px] font-bold uppercase tracking-wider text-lime-300/70">
                   Readiness candidate · {selected.readiness.adjustmentPercent.toFixed(2)}%
@@ -241,7 +244,7 @@ export default function RacePredictorPage(): React.ReactNode {
               <button key={prediction.key} type="button" onClick={() => setSelectedKey(prediction.key)} className={`rounded-2xl border p-4 text-left transition ${selectedKey === prediction.key ? "border-enduro-500 bg-enduro-950 text-white shadow-lg" : "border-[var(--color-border)] bg-[var(--color-bg)] hover:-translate-y-0.5 hover:border-enduro-400"}`}>
                 <p className={`text-[10px] font-black uppercase tracking-[0.18em] ${selectedKey === prediction.key ? "text-enduro-200" : "text-enduro-700"}`}>{prediction.label}</p>
                 <p className="mt-3 font-mono text-xl font-black">{formatDuration(seconds)}</p>
-                <p className={`mt-1 text-xs ${selectedKey === prediction.key ? "text-slate-300" : "text-[var(--color-text-secondary)]"}`}>{formatDuration(Math.round(seconds / prediction.distanceMiles))}/mi</p>
+                <p className={`mt-1 text-xs ${selectedKey === prediction.key ? "text-slate-300" : "text-[var(--color-text-secondary)]"}`}>{formatDuration(Math.round(secondsPerMileForDisplay(seconds / prediction.distanceMiles, units)))}{paceUnitSuffix(units)}</p>
               </button>
             );
           })}

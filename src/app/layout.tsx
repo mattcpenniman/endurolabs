@@ -4,6 +4,7 @@ import "leaflet/dist/leaflet.css";
 import Header from "./components/layout/Header";
 import Footer from "./components/layout/Footer";
 import { ThemeProvider } from "./components/layout/ThemeProvider";
+import { UnitsProvider } from "./components/units/UnitsProvider";
 
 export const metadata: Metadata = {
   title: "EnduroLab — Marathon Training Planner",
@@ -18,13 +19,15 @@ export default function RootLayout({
   return (
     <html lang="en">
       <body className="min-h-screen bg-[var(--color-bg)] text-[var(--color-text)]">
-        <div className="flex min-h-screen flex-col">
-          <Header />
-          <ThemeProvider>
-            <main className="flex-1">{children}</main>
-          </ThemeProvider>
-        </div>
-        <Footer />
+        <UnitsProvider>
+          <div className="flex min-h-screen flex-col">
+            <Header />
+            <ThemeProvider>
+              <main className="flex-1">{children}</main>
+            </ThemeProvider>
+          </div>
+          <Footer />
+        </UnitsProvider>
       </body>
     </html>
   );

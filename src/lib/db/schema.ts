@@ -25,6 +25,8 @@ export const users = pgTable("users", {
   name: varchar("name", { length: 255 }),
   passwordHash: text("password_hash").notNull(),
   currentPlanId: uuid("current_plan_id"),
+  // Display preference for elevation/pace: "imperial" (ft, min/mi) or "metric" (m, min/km).
+  unitsSystem: varchar("units_system", { length: 16 }).default("imperial").notNull(),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 });
