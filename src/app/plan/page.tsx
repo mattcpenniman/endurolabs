@@ -23,7 +23,6 @@ import MileageTrendChart from "@/app/components/charts/MileageTrendChart";
 import LongRunProgressionChart from "@/app/components/charts/LongRunProgressionChart";
 import IntensityDistributionChart from "@/app/components/charts/IntensityDistributionChart";
 import RunTrendChart from "@/app/components/charts/RunTrendChart";
-import GarminSyncCard from "@/app/components/plan/GarminSyncCard";
 import GarminActivityMapCard from "@/app/components/plan/GarminActivityMapCard";
 import { GarminConnectionStatus } from "@/lib/activities/models";
 import { generateRaceDayPlan } from "@/lib/training/race-day-plan";
@@ -357,10 +356,6 @@ function PlanPageContent(): React.ReactNode {
     const response = await fetch(`/api/integrations/garmin${query}`);
     if (!response.ok) throw new Error("Failed to load Garmin connection");
     return (await response.json()) as GarminConnectionStatus;
-  };
-
-  const refreshGarminConnection = async (): Promise<void> => {
-    setGarminConnection(await loadGarminConnection(plan?.id));
   };
 
   useEffect(() => {
@@ -2047,11 +2042,31 @@ function PlanPageContent(): React.ReactNode {
             </div>
 
             <div className="grid gap-4 md:grid-cols-2">
-              <GarminSyncCard
-                planId={plan.id}
-                connection={garminConnection}
-                onChanged={refreshGarminConnection}
-              />
+              <div id="garmin-detail-sync" className={`scroll-mt-24 flex flex-col gap-4 rounded-lg border bg-white p-5 sm:flex-row sm:items-center sm:justify-between md:col-span-2 ${garminConnection.status === "error" ? "border-red-300" : "border-gray-200"}`}>
+                <div className="flex items-center gap-3">
+                  <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-sky-950 text-xs font-black text-white">G</span>
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <h3 className="text-sm font-semibold text-gray-900">Garmin Connect</h3>
+                      <span className={`rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide ${garminConnection.connected ? "bg-emerald-100 text-emerald-700" : garminConnection.status === "error" ? "bg-red-100 text-red-700" : "bg-gray-100 text-gray-600"}`}>
+                        {garminConnection.connected ? "Connected" : garminConnection.status === "error" ? "Reconnect required" : "Not connected"}
+                      </span>
+                    </div>
+                    <p className="mt-1 text-sm text-gray-500">
+                      {garminConnection.connected
+                        ? `Connected as ${garminConnection.displayName || garminConnection.username}. ${garminConnection.activities.length} runs stored.`
+                        : "Connect Garmin to import runs and match them to this plan."}{" "}
+                      Login moved to your Profile.
+                    </p>
+                  </div>
+                </div>
+                <a
+                  href="/profile#garmin-detail-sync"
+                  className="w-fit shrink-0 rounded-lg bg-sky-950 px-4 py-2 text-sm font-semibold text-white hover:bg-sky-900"
+                >
+                  {garminConnection.connected ? "Manage in Profile" : "Connect in Profile"}
+                </a>
+              </div>
               <div id="mileage-targets" className="scroll-mt-24 rounded-lg border border-gray-200 bg-white p-5 md:col-span-2">
                 <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
                   <div>
