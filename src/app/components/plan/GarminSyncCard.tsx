@@ -16,6 +16,7 @@ interface GarminSyncCardProps {
 export default function GarminSyncCard({ planId, connection, onChanged }: GarminSyncCardProps): React.ReactNode {
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
+  const [rememberMe, setRememberMe] = useState(false);
   const [mfaCode, setMfaCode] = useState("");
   const [isMfaRequired, setIsMfaRequired] = useState(false);
   const [isWorking, setIsWorking] = useState(false);
@@ -31,6 +32,10 @@ export default function GarminSyncCard({ planId, connection, onChanged }: Garmin
     }
   }, [connection.connected, connection.username, username]);
 
+  useEffect(() => {
+    setRememberMe(connection.rememberMe ?? false);
+  }, [connection.rememberMe]);
+
   const runRequest = async (url: string, init: RequestInit): Promise<void> => {
     setIsWorking(true);
     setMessage(null);
@@ -38,23 +43,30 @@ export default function GarminSyncCard({ planId, connection, onChanged }: Garmin
       const response = await fetch(url, init);
       const body = (await response.json()) as {
         error?: string;
+        message?: string;
         synced?: number;
         matched?: number;
+        reauthenticated?: boolean;
         skippedByTtl?: boolean;
         details?: { imported: number; failed: number };
         mfaRequired?: boolean;
         mfaMethod?: string;
       };
-      if (!response.ok) throw new Error(body.error || "Garmin request failed");
+      // A 409 can still mean "enter the code Garmin just sent", so check that
+      // before treating the response as a failure.
       if (body.mfaRequired) {
         setIsMfaRequired(true);
-        setMessage(`Enter the verification code Garmin sent by ${body.mfaMethod ?? "email or SMS"}.`);
+        setMessage(body.message
+          || `Garmin sent a verification code by ${body.mfaMethod ?? "email or SMS"}. Forward it here to stay connected.`);
+      } else if (!response.ok) {
+        throw new Error(body.error || "Garmin request failed");
       } else if (typeof body.synced === "number") {
         const summary = body.skippedByTtl ? "Summaries already current" : `Synced ${body.synced} runs`;
         const detail = body.details
           ? ` ${body.details.imported} detail imports${body.details.failed ? `, ${body.details.failed} failed` : ""}.`
           : "";
-        setMessage(`${summary}; ${body.matched ?? 0} matched to this plan.${detail}`);
+        const renewed = body.reauthenticated ? " Garmin sign-in was renewed automatically." : "";
+        setMessage(`${summary}; ${body.matched ?? 0} matched to this plan.${detail}${renewed}`);
       } else {
         setMessage("Garmin connection updated.");
         setIsMfaRequired(false);
@@ -164,11 +176,16 @@ export default function GarminSyncCard({ planId, connection, onChanged }: Garmin
             Import recent runs, match them to scheduled workouts by local date and distance, and chart mileage, pace, and heart-rate trends.
           </p>
           <p className="mt-2 text-xs text-gray-400">
-            This uses Garmin Connect&apos;s unofficial API. Your password is used only for sign-in; encrypted OAuth tokens are stored afterward.
+            This uses Garmin Connect&apos;s unofficial API. Your password is used only for sign-in; encrypted OAuth
+            tokens are stored afterward. With &quot;Remember me&quot;, the password is also sealed with the same
+            AES-256 key so a dead session can sign itself back in.
           </p>
           {connection.connected && (
             <div className="mt-4 flex flex-wrap gap-2 text-xs text-gray-600">
               <span className="rounded bg-gray-100 px-2 py-1">{connection.displayName || connection.username}</span>
+              {connection.rememberMe && (
+                <span className="rounded bg-emerald-100 px-2 py-1 font-semibold text-emerald-700">Remembered</span>
+              )}
               <span className="rounded bg-gray-100 px-2 py-1">{connection.activities.length} runs stored</span>
               <span className="rounded bg-gray-100 px-2 py-1">
                 {connection.activities.filter((activity) => activity.samplesFetchedAt).length} with detail
@@ -298,6 +315,9 @@ export default function GarminSyncCard({ planId, connection, onChanged }: Garmin
                 className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 font-mono text-sm tracking-widest focus:border-sky-800 focus:outline-none focus:ring-2 focus:ring-sky-900/10"
               />
             </label>
+            <p className="mt-2 text-xs text-gray-400">
+              Garmin texts or emails a one-time code; forward it here and the connection stays signed in.
+            </p>
             <div className="mt-3 flex gap-2">
               <button
                 type="submit"
@@ -317,47 +337,76 @@ export default function GarminSyncCard({ planId, connection, onChanged }: Garmin
             </div>
           </form>
         ) : (
-          <form
-            className="grid w-full gap-3 sm:grid-cols-2 lg:max-w-xl"
-            onSubmit={(event) => {
-              event.preventDefault();
-              runRequest("/api/integrations/garmin", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ username, password }),
-              });
-            }}
-          >
-            <label className="block">
-              <span className="text-xs font-medium uppercase tracking-wide text-gray-500">Garmin email</span>
-              <input
-                type="email"
-                autoComplete="username"
-                required
-                value={username}
-                onChange={(event) => setUsername(event.target.value)}
-                className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-sky-800 focus:outline-none focus:ring-2 focus:ring-sky-900/10"
-              />
-            </label>
-            <label className="block">
-              <span className="text-xs font-medium uppercase tracking-wide text-gray-500">Password</span>
-              <input
-                type="password"
-                autoComplete="current-password"
-                required
-                value={password}
-                onChange={(event) => setPassword(event.target.value)}
-                className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-sky-800 focus:outline-none focus:ring-2 focus:ring-sky-900/10"
-              />
-            </label>
-            <button
-              type="submit"
-              disabled={isWorking}
-              className="rounded-lg bg-sky-950 px-4 py-2 text-sm font-semibold text-white hover:bg-sky-900 disabled:opacity-50 sm:col-span-2"
+          <div className="grid w-full gap-3 lg:max-w-xl">
+            {reconnectRequired && connection.rememberMe && (
+              <button
+                type="button"
+                disabled={isWorking}
+                onClick={() => runRequest("/api/integrations/garmin/sync", {
+                  method: "POST",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({ planId, limit: 50, detailLimit: 0, force: true }),
+                })}
+                className="rounded-lg border border-sky-950 bg-white px-4 py-2 text-sm font-semibold text-sky-950 hover:bg-sky-50 disabled:opacity-50"
+              >
+                {isWorking ? "Renewing..." : "Renew with saved password"}
+              </button>
+            )}
+            <form
+              className="grid w-full gap-3 sm:grid-cols-2"
+              onSubmit={(event) => {
+                event.preventDefault();
+                runRequest("/api/integrations/garmin", {
+                  method: "POST",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({ username, password, rememberMe }),
+                });
+              }}
             >
-              {isWorking ? "Connecting..." : reconnectRequired ? "Reconnect Garmin" : "Connect Garmin"}
-            </button>
-          </form>
+              <label className="block">
+                <span className="text-xs font-medium uppercase tracking-wide text-gray-500">Garmin email</span>
+                <input
+                  type="email"
+                  autoComplete="username"
+                  required
+                  value={username}
+                  onChange={(event) => setUsername(event.target.value)}
+                  className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-sky-800 focus:outline-none focus:ring-2 focus:ring-sky-900/10"
+                />
+              </label>
+              <label className="block">
+                <span className="text-xs font-medium uppercase tracking-wide text-gray-500">Password</span>
+                <input
+                  type="password"
+                  autoComplete="current-password"
+                  required
+                  value={password}
+                  onChange={(event) => setPassword(event.target.value)}
+                  className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-sky-800 focus:outline-none focus:ring-2 focus:ring-sky-900/10"
+                />
+              </label>
+              <label className="flex items-start gap-2 text-xs text-gray-600 sm:col-span-2">
+                <input
+                  type="checkbox"
+                  className="mt-0.5"
+                  checked={rememberMe}
+                  onChange={(event) => setRememberMe(event.target.checked)}
+                />
+                <span>
+                  <span className="font-semibold text-gray-700">Remember me</span> — seal the password on the server so
+                  an expired Garmin sign-in renews itself. If Garmin asks for a one-time code, you get a fresh email to
+                  forward here.
+                </span>
+              </label>
+              <button
+                type="submit"
+                disabled={isWorking}
+                className="rounded-lg bg-sky-950 px-4 py-2 text-sm font-semibold text-white hover:bg-sky-900 disabled:opacity-50 sm:col-span-2"
+              >
+                {isWorking ? "Connecting..." : reconnectRequired ? "Reconnect Garmin" : "Connect Garmin"}
+              </button>
+            </form>
+          </div>
         )}
       </div>
     </div>

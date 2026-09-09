@@ -10,7 +10,13 @@ import { db } from "@/lib/db/client";
 import { garminConnections, plans, runActivities } from "@/lib/db/schema";
 import { MarathonPlan } from "@/lib/training/models";
 import { decryptGarminTokens, encryptGarminTokens } from "@/lib/garmin/crypto";
-import { fetchRunsSince, restoreGarminClient, StoredGarminAuth } from "@/lib/garmin/client";
+import {
+  fetchRunsSince,
+  garminCredentialsFor,
+  GarminMfaRequiredError,
+  openGarminSession,
+  StoredGarminAuth,
+} from "@/lib/garmin/client";
 import { GarminActivityPayload, matchActivityToPlan, normalizeGarminActivity } from "@/lib/garmin/activities";
 import { ingestGarminActivityDetail, mapWithConcurrency, recomputeStoredActivityQuality } from "@/lib/garmin/sample-ingestion";
 import { recomputeFitnessSnapshotsForActivities } from "@/lib/analytics/fitness-cache";
@@ -32,7 +38,11 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     .from(garminConnections)
     .where(eq(garminConnections.userId, user.id))
     .limit(1);
-  if (!connection || connection.status !== "connected") {
+  // An errored connection can still heal on its own when a sealed password is
+  // remembered, so "remember me" makes the next sync re-authenticate instead of
+  // waiting for the runner to type the password again.
+  const selfHealing = connection?.status === "error" && connection.rememberMe;
+  if (!connection || (connection.status !== "connected" && !selfHealing)) {
     return NextResponse.json({ error: "Connect Garmin first" }, { status: 409 });
   }
 
@@ -76,7 +86,9 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     }
     leaseAcquired = true;
     const auth = decryptGarminTokens<StoredGarminAuth>(leasedConnection.encryptedTokens);
-    const client = await restoreGarminClient(auth);
+    const opened = await openGarminSession(auth, garminCredentialsFor(leasedConnection));
+    const client = opened.client;
+    const nextAuth = opened.auth;
     const syncThrough = new Date();
     const ttlSeconds = Math.min(Math.max(Math.round(body.ttlSeconds ?? DEFAULT_TTL_SECONDS), 0), 86_400);
     const summaryIsFresh = !body.force
@@ -208,7 +220,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
 
     const now = new Date();
     await db.update(garminConnections).set({
-      encryptedTokens: encryptGarminTokens({ kind: "session", session: client.getSession() }),
+      encryptedTokens: encryptGarminTokens(nextAuth),
       status: "connected",
       lastSyncAt: summaryIsFresh ? connection.lastSyncAt : now,
       lastError: null,
@@ -234,6 +246,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
 
     return NextResponse.json({
       success: true,
+      reauthenticated: opened.reauthenticated,
       skippedByTtl: summaryIsFresh,
       through: syncThrough.toISOString(),
       synced: normalized.length,
@@ -249,6 +262,24 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     });
   } catch (error) {
     console.error("Failed to sync Garmin activities:", error);
+    if (error instanceof GarminMfaRequiredError) {
+      // "Remember me" re-logged in and Garmin asked for a one-time code: park
+      // the connection in mfa_required so the runner can forward the code.
+      await db.update(garminConnections).set({
+        encryptedTokens: encryptGarminTokens(error.pending),
+        status: "mfa_required",
+        lastError: error.message,
+        ...(leaseAcquired ? { activeJobId: null, activeWorkerToken: null, activeJobLeaseExpiresAt: null } : {}),
+        updatedAt: new Date(),
+      }).where(and(
+        eq(garminConnections.id, connection.id),
+        ...(leaseAcquired ? [eq(garminConnections.activeWorkerToken, workerToken)] : []),
+      ));
+      return NextResponse.json(
+        { error: error.message, mfaRequired: true, mfaMethod: error.pending.method },
+        { status: 409 }
+      );
+    }
     const message = error instanceof Error && (
       error.message.includes("GARMIN_TOKEN_ENCRYPTION_KEY")
       || error.message.startsWith("Garmin session expired.")

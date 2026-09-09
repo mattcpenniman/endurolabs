@@ -34,3 +34,23 @@ export function decryptGarminTokens<T>(encrypted: string): T {
   ]);
   return JSON.parse(plaintext.toString("utf8")) as T;
 }
+
+/** Seal a Garmin password for opt-in "remember me" re-authentication. */
+export function encryptGarminPassword(password: string): string {
+  if (!password) throw new Error("Garmin password is required to store credentials");
+  return encryptGarminTokens({ v: 1, password });
+}
+
+/**
+ * Recover a stored Garmin password. Returns null for an unset or malformed
+ * payload so a corrupt value degrades to "not remembered" instead of failing.
+ */
+export function decryptGarminPassword(encrypted: string | null): string | null {
+  if (!encrypted) return null;
+  try {
+    const parsed = decryptGarminTokens<{ v?: number; password?: unknown }>(encrypted);
+    return typeof parsed?.password === "string" && parsed.password.length > 0 ? parsed.password : null;
+  } catch {
+    return null;
+  }
+}
