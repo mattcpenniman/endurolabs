@@ -51,6 +51,8 @@ export interface GarminConnectionStatus {
   username?: string;
   displayName?: string | null;
   status?: string;
+  /** True when a sealed password is kept so expired sessions re-login automatically. */
+  rememberMe?: boolean;
   lastSyncAt?: string | null;
   lastError?: string | null;
   activities: RunActivity[];

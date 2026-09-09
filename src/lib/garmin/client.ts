@@ -17,6 +17,8 @@ import type {
   PersistedSession,
 } from "garmin-connect-client";
 
+import { decryptGarminPassword } from "@/lib/garmin/crypto";
+
 export interface PendingGarminLogin {
   kind: "mfa";
   cookies: string;
@@ -34,6 +36,56 @@ export type GarminLoginResult =
   | { mfaRequired: true; pending: PendingGarminLogin }
   | { mfaRequired: false; client: GarminConnectClient; auth: GarminSession };
 
+/** Username/password pair kept for opt-in "remember me" re-authentication. */
+export interface GarminCredentials {
+  username: string;
+  password: string;
+}
+
+/**
+ * Read the sealed password for a connection that opted into "remember me".
+ * Returns null whenever the runner did not opt in or nothing is stored.
+ */
+export function garminCredentialsFor(connection: {
+  garminUsername: string;
+  rememberMe: boolean;
+  encryptedPassword: string | null;
+}): GarminCredentials | null {
+  if (!connection.rememberMe) return null;
+  const password = decryptGarminPassword(connection.encryptedPassword);
+  return password ? { username: connection.garminUsername, password } : null;
+}
+
+/** Raised when the stored OAuth session can no longer be refreshed. */
+export class GarminSessionExpiredError extends Error {
+  constructor(message = "Garmin session expired. Reconnect Garmin to resume syncing.") {
+    super(message);
+    this.name = "GarminSessionExpiredError";
+  }
+}
+
+/**
+ * Raised when a "remember me" re-login needs the one-time code Garmin emailed
+ * or texted. The caller persists `pending` and asks the runner to forward it.
+ */
+export class GarminMfaRequiredError extends Error {
+  readonly pending: PendingGarminLogin;
+
+  constructor(pending: PendingGarminLogin) {
+    super("Garmin sent a new verification code. Enter it to stay connected.");
+    this.name = "GarminMfaRequiredError";
+    this.pending = pending;
+  }
+}
+
+export interface GarminSessionResult {
+  client: GarminConnectClient;
+  /** Latest auth to persist so the refreshed tokens outlive this request. */
+  auth: GarminSession;
+  /** True when the stored session was dead and credentials re-logged in. */
+  reauthenticated: boolean;
+}
+
 interface RefreshableGarminClient extends GarminConnectClient {
   httpClient: {
     client: {
@@ -45,6 +97,21 @@ interface RefreshableGarminClient extends GarminConnectClient {
 }
 
 const GARMIN_REQUEST_TIMEOUT_MS = 30_000;
+/**
+ * Refresh access tokens this far before they actually expire. Garmin access
+ * tokens live ~1 day, so a daily refresh keeps an active runner logged in
+ * without ever hitting the expired-token path.
+ */
+const GARMIN_REFRESH_SKEW_SECONDS = 60 * 60;
+
+export function garminTokenNeedsRefresh(
+  expiresAt: number | undefined,
+  nowSeconds = Math.floor(Date.now() / 1000),
+  skewSeconds = GARMIN_REFRESH_SKEW_SECONDS
+): boolean {
+  if (expiresAt === undefined) return false;
+  return expiresAt - nowSeconds <= skewSeconds;
+}
 
 export async function loginToGarmin(username: string, password: string): Promise<GarminLoginResult> {
   const context = await createAuthContext({ username, password });
@@ -72,26 +139,51 @@ export async function completeGarminMfa(pending: PendingGarminLogin, code: strin
   return { client, auth: { kind: "session", session: client.getSession() } };
 }
 
-export async function restoreGarminClient(auth: StoredGarminAuth): Promise<GarminConnectClient> {
-  if (auth.kind !== "session") throw new Error("Garmin MFA verification is still required");
+async function restoreGarminSession(auth: GarminSession): Promise<{
+  client: GarminConnectClient;
+  auth: GarminSession;
+}> {
   let client = createFromSession(auth.session) as RefreshableGarminClient;
   client.httpClient.client.defaults.timeout = GARMIN_REQUEST_TIMEOUT_MS;
 
-  const expiresAt = auth.session.oauth2Token.expires_at;
-  if (expiresAt !== undefined && expiresAt <= Math.floor(Date.now() / 1000)) {
+  if (garminTokenNeedsRefresh(auth.session.oauth2Token.expires_at)) {
     // The package's 401 interceptor recursively waits on itself when OAuth1 is
     // also invalid. Refresh without that interceptor so reconnect errors return.
     client.httpClient.client.interceptors.response.clear();
     try {
       await client.httpClient.refreshToken();
     } catch {
-      throw new Error("Garmin session expired. Reconnect Garmin to resume syncing.");
+      throw new GarminSessionExpiredError();
     }
     client = createFromSession(client.getSession()) as RefreshableGarminClient;
     client.httpClient.client.defaults.timeout = GARMIN_REQUEST_TIMEOUT_MS;
   }
 
-  return client;
+  return { client, auth: { kind: "session", session: client.getSession() } };
+}
+
+/**
+ * Restore a stored Garmin session, refreshing its access token before it
+ * expires, and — when the runner opted into "remember me" — transparently
+ * re-authenticate with the sealed password once the session is unrecoverable.
+ *
+ * The returned `auth` is always the newest session and should be persisted so
+ * every sync rotates the tokens forward instead of letting them age out.
+ */
+export async function openGarminSession(
+  auth: StoredGarminAuth,
+  credentials: GarminCredentials | null = null
+): Promise<GarminSessionResult> {
+  if (auth.kind !== "session") throw new Error("Garmin MFA verification is still required");
+  try {
+    const restored = await restoreGarminSession(auth);
+    return { ...restored, reauthenticated: false };
+  } catch (error) {
+    if (!(error instanceof GarminSessionExpiredError) || !credentials?.password) throw error;
+    const login = await loginToGarmin(credentials.username, credentials.password);
+    if (login.mfaRequired) throw new GarminMfaRequiredError(login.pending);
+    return { client: login.client, auth: login.auth, reauthenticated: true };
+  }
 }
 
 export async function fetchRecentRuns(client: GarminConnectClient, limit = 400): Promise<Activity[]> {

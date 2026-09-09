@@ -9,9 +9,12 @@ import { and, asc, count, eq, gt, gte, isNull, lt, lte, or, sql } from "drizzle-
 import { db } from "@/lib/db/client";
 import { garminConnections, garminSyncJobs, runActivities } from "@/lib/db/schema";
 import { decryptGarminTokens, encryptGarminTokens } from "@/lib/garmin/crypto";
+import type { GarminConnectClient } from "garmin-connect-client";
 import {
   fetchHistoryActivitiesPage,
-  restoreGarminClient,
+  garminCredentialsFor,
+  GarminMfaRequiredError,
+  openGarminSession,
   StoredGarminAuth,
 } from "@/lib/garmin/client";
 import { GarminActivityPayload, isRunningActivity, normalizeGarminActivity } from "@/lib/garmin/activities";
@@ -22,6 +25,8 @@ import { applyCalculatedSummaryPower, loadSummaryPowerModel } from "@/lib/activi
 const DETAIL_BATCH_SIZE = 10;
 const HISTORY_PAGE_SIZE = 200;
 const LEASE_MS = 5 * 60_000;
+/** How long a job waits before checking whether a forwarded Garmin code arrived. */
+const MFA_WAIT_RETRY_MS = 5 * 60_000;
 
 export interface DetailJobParameters {
   scope: "recent" | "older" | "all";
@@ -66,7 +71,7 @@ function detailWindow(parameters: DetailJobParameters) {
       : undefined;
 }
 
-async function processDetailPass(job: typeof garminSyncJobs.$inferSelect, client: Awaited<ReturnType<typeof restoreGarminClient>>): Promise<boolean> {
+async function processDetailPass(job: typeof garminSyncJobs.$inferSelect, client: GarminConnectClient): Promise<boolean> {
   const parameters = job.parameters as DetailJobParameters;
   const cursor = (job.cursor ?? {}) as JobCursor;
   const through = new Date(parameters.through);
@@ -125,7 +130,7 @@ async function processDetailPass(job: typeof garminSyncJobs.$inferSelect, client
   return activities.length < DETAIL_BATCH_SIZE;
 }
 
-async function processHistoryPass(job: typeof garminSyncJobs.$inferSelect, client: Awaited<ReturnType<typeof restoreGarminClient>>): Promise<boolean> {
+async function processHistoryPass(job: typeof garminSyncJobs.$inferSelect, client: GarminConnectClient): Promise<boolean> {
   const parameters = job.parameters as HistoryJobParameters;
   const cursor = (job.cursor ?? {}) as JobCursor;
   const offset = cursor.offset ?? 0;
@@ -200,21 +205,40 @@ export async function processGarminJob(jobId: string, maxPasses = 4): Promise<vo
   }).where(and(
     eq(garminConnections.id, job.connectionId),
     eq(garminConnections.userId, job.userId),
-    eq(garminConnections.status, "connected"),
+    // A remembered password can renew an errored session mid-job, so an errored
+    // connection stays workable instead of dead until the runner acts.
+    or(
+      eq(garminConnections.status, "connected"),
+      and(eq(garminConnections.status, "error"), eq(garminConnections.rememberMe, true)),
+    ),
     or(
       isNull(garminConnections.activeWorkerToken),
       lte(garminConnections.activeJobLeaseExpiresAt, now),
     ),
   )).returning();
   if (!connection) {
-    const [existingConnection] = await db.select({ status: garminConnections.status })
+    const [existingConnection] = await db.select({
+      status: garminConnections.status,
+      rememberMe: garminConnections.rememberMe,
+    })
       .from(garminConnections)
       .where(and(eq(garminConnections.id, job.connectionId), eq(garminConnections.userId, job.userId)))
       .limit(1);
-    if (existingConnection?.status === "connected") {
+    if (existingConnection?.status === "connected"
+      || (existingConnection?.status === "error" && existingConnection.rememberMe)) {
       await db.update(garminSyncJobs).set({
         status: "queued",
         leaseExpiresAt: new Date(Date.now() + 5000),
+        attemptCount: sql`greatest(${garminSyncJobs.attemptCount} - 1, 0)`,
+        updatedAt: new Date(),
+      }).where(eq(garminSyncJobs.id, job.id));
+      return;
+    }
+    if (existingConnection?.status === "mfa_required") {
+      await db.update(garminSyncJobs).set({
+        status: "queued",
+        lastError: "Garmin verification required. Enter the code Garmin sent to resume this import.",
+        leaseExpiresAt: new Date(Date.now() + MFA_WAIT_RETRY_MS),
         attemptCount: sql`greatest(${garminSyncJobs.attemptCount} - 1, 0)`,
         updatedAt: new Date(),
       }).where(eq(garminSyncJobs.id, job.id));
@@ -230,9 +254,15 @@ export async function processGarminJob(jobId: string, maxPasses = 4): Promise<vo
     return;
   }
 
-  let client: Awaited<ReturnType<typeof restoreGarminClient>> | null = null;
+  let client: GarminConnectClient | null = null;
+  let nextAuth: StoredGarminAuth | null = null;
   try {
-    client = await restoreGarminClient(decryptGarminTokens<StoredGarminAuth>(connection.encryptedTokens));
+    const opened = await openGarminSession(
+      decryptGarminTokens<StoredGarminAuth>(connection.encryptedTokens),
+      garminCredentialsFor(connection)
+    );
+    client = opened.client;
+    nextAuth = opened.auth;
     let complete = false;
     for (let pass = 0; pass < maxPasses && !complete; pass += 1) {
       const renewedLease = new Date(Date.now() + LEASE_MS);
@@ -281,6 +311,27 @@ export async function processGarminJob(jobId: string, maxPasses = 4): Promise<vo
       updatedAt: new Date(),
     }).where(eq(garminSyncJobs.id, job.id));
   } catch (error) {
+    if (error instanceof GarminMfaRequiredError) {
+      // Park the connection at the verification step and keep the job waiting
+      // instead of burning retries while the runner forwards us Garmin's code.
+      await db.update(garminConnections).set({
+        encryptedTokens: encryptGarminTokens(error.pending),
+        status: "mfa_required",
+        lastError: error.message,
+        updatedAt: new Date(),
+      }).where(and(
+        eq(garminConnections.id, connection.id),
+        eq(garminConnections.activeWorkerToken, workerToken),
+      ));
+      await db.update(garminSyncJobs).set({
+        status: "queued",
+        lastError: "Garmin sent a new verification code. Enter it to resume this import.",
+        leaseExpiresAt: new Date(Date.now() + MFA_WAIT_RETRY_MS),
+        attemptCount: sql`greatest(${garminSyncJobs.attemptCount} - 1, 0)`,
+        updatedAt: new Date(),
+      }).where(eq(garminSyncJobs.id, job.id));
+      return;
+    }
     const message = error instanceof Error ? error.message.slice(0, 1000) : "Garmin job failed";
     const terminal = claimed.attemptCount >= 5;
     const retryDelayMinutes = Math.min(2 ** Math.max(0, claimed.attemptCount - 1), 60);
@@ -294,7 +345,9 @@ export async function processGarminJob(jobId: string, maxPasses = 4): Promise<vo
       .where(eq(garminSyncJobs.id, job.id));
   } finally {
     await db.update(garminConnections).set({
-      ...(client ? { encryptedTokens: encryptGarminTokens({ kind: "session", session: client.getSession() }) } : {}),
+      ...(nextAuth
+        ? { encryptedTokens: encryptGarminTokens(nextAuth), status: "connected", lastError: null }
+        : {}),
       activeJobId: null,
       activeWorkerToken: null,
       activeJobLeaseExpiresAt: null,

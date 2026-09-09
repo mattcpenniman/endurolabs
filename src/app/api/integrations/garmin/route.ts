@@ -8,11 +8,21 @@ import { and, desc, eq, isNull, lte, or } from "drizzle-orm";
 import { getCurrentUser } from "@/lib/auth";
 import { db } from "@/lib/db/client";
 import { garminConnections, plans, runActivities } from "@/lib/db/schema";
-import { decryptGarminTokens, encryptGarminTokens } from "@/lib/garmin/crypto";
-import { completeGarminMfa, loginToGarmin, PendingGarminLogin, StoredGarminAuth } from "@/lib/garmin/client";
+import { decryptGarminTokens, encryptGarminPassword, encryptGarminTokens } from "@/lib/garmin/crypto";
+import {
+  completeGarminMfa,
+  garminCredentialsFor,
+  loginToGarmin,
+  StoredGarminAuth,
+} from "@/lib/garmin/client";
 import { serializeRunActivity } from "@/lib/activities/serialize";
 
 export const runtime = "nodejs";
+
+function isStaleGarminMfaError(error: unknown): boolean {
+  const message = error instanceof Error ? error.message.toLowerCase() : "";
+  return message.includes("session expired");
+}
 
 export async function GET(request: NextRequest): Promise<NextResponse> {
   try {
@@ -50,6 +60,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
       username: connection?.garminUsername,
       displayName: connection?.garminDisplayName,
       status: connection?.status,
+      rememberMe: connection?.rememberMe ?? false,
       lastSyncAt: connection?.lastSyncAt?.toISOString() ?? null,
       lastError: connection?.lastError ?? null,
       activities: activities.map(serializeRunActivity),
@@ -63,11 +74,27 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
 export async function POST(request: NextRequest): Promise<NextResponse> {
   const workerToken = randomUUID();
   let lockedConnectionId: string | null = null;
+  const releaseLease = async (connectionId: string): Promise<void> => {
+    await db.update(garminConnections).set({
+      activeJobId: null,
+      activeWorkerToken: null,
+      activeJobLeaseExpiresAt: null,
+      updatedAt: new Date(),
+    }).where(and(
+      eq(garminConnections.id, connectionId),
+      eq(garminConnections.activeWorkerToken, workerToken),
+    ));
+  };
   try {
     const user = await getCurrentUser();
     if (!user) return NextResponse.json({ error: "Authentication required" }, { status: 401 });
 
-    const body = (await request.json()) as { username?: string; password?: string; mfaCode?: string };
+    const body = (await request.json()) as {
+      username?: string;
+      password?: string;
+      mfaCode?: string;
+      rememberMe?: boolean;
+    };
 
     if (body.mfaCode) {
       const [pendingConnection] = await db
@@ -77,10 +104,6 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
         .limit(1);
       if (!pendingConnection) {
         return NextResponse.json({ error: "Start Garmin sign-in again before entering a verification code" }, { status: 409 });
-      }
-      const stored = decryptGarminTokens<StoredGarminAuth>(pendingConnection.encryptedTokens);
-      if (stored.kind !== "mfa") {
-        return NextResponse.json({ error: "Garmin verification session expired; start sign-in again" }, { status: 409 });
       }
       const now = new Date();
       const [locked] = await db.update(garminConnections).set({
@@ -93,9 +116,45 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       )).returning({ id: garminConnections.id });
       if (!locked) return NextResponse.json({ error: "Another Garmin import is already running" }, { status: 409 });
       lockedConnectionId = locked.id;
-      const completed = await completeGarminMfa(stored as PendingGarminLogin, body.mfaCode.trim());
+      const stored = decryptGarminTokens<StoredGarminAuth>(pendingConnection.encryptedTokens);
+      if (stored.kind !== "mfa") {
+        await releaseLease(pendingConnection.id);
+        lockedConnectionId = null;
+        return NextResponse.json({ error: "Garmin verification session expired; start sign-in again" }, { status: 409 });
+      }
+      const code = body.mfaCode.trim();
+      let auth: StoredGarminAuth;
+      try {
+        const completed = await completeGarminMfa(stored, code);
+        auth = completed.auth;
+      } catch (error) {
+        // The remembered password lets Garmin re-issue a code when the pending
+        // login window closed while the runner was fetching the forwarded one.
+        const credentials = garminCredentialsFor(pendingConnection);
+        if (!credentials || !isStaleGarminMfaError(error)) throw error;
+        const relogin = await loginToGarmin(credentials.username, credentials.password);
+        if (relogin.mfaRequired) {
+          await db.update(garminConnections).set({
+            encryptedTokens: encryptGarminTokens(relogin.pending),
+            status: "mfa_required",
+            lastError: null,
+            activeJobId: null,
+            activeWorkerToken: null,
+            activeJobLeaseExpiresAt: null,
+            updatedAt: new Date(),
+          }).where(and(eq(garminConnections.id, pendingConnection.id), eq(garminConnections.activeWorkerToken, workerToken)));
+          lockedConnectionId = null;
+          return NextResponse.json({
+            connected: false,
+            mfaRequired: true,
+            mfaMethod: relogin.pending.method,
+            message: "That code expired, so Garmin sent a new one. Enter it to stay connected.",
+          });
+        }
+        auth = relogin.auth;
+      }
       await db.update(garminConnections).set({
-        encryptedTokens: encryptGarminTokens(completed.auth),
+        encryptedTokens: encryptGarminTokens(auth),
         status: "connected",
         lastError: null,
         activeJobId: null,
@@ -111,6 +170,8 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     if (!username || !body.password) {
       return NextResponse.json({ error: "Garmin email and password are required" }, { status: 400 });
     }
+    const rememberMe = body.rememberMe === true;
+    const encryptedPassword = rememberMe ? encryptGarminPassword(body.password) : null;
 
     const [existingConnection] = await db.select({ id: garminConnections.id }).from(garminConnections)
       .where(eq(garminConnections.userId, user.id)).limit(1);
@@ -137,6 +198,8 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       garminUsername: username,
       garminDisplayName: null,
       encryptedTokens: encryptGarminTokens(storedAuth),
+      encryptedPassword,
+      rememberMe,
       status,
       lastError: null,
       activeJobId: null,
@@ -149,6 +212,8 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
         garminUsername: username,
         garminDisplayName: null,
         encryptedTokens: encryptGarminTokens(storedAuth),
+        encryptedPassword,
+        rememberMe,
         status,
         lastError: null,
         activeJobId: null,
@@ -169,15 +234,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     return NextResponse.json({ connected: true });
   } catch (error) {
     if (lockedConnectionId) {
-      await db.update(garminConnections).set({
-        activeJobId: null,
-        activeWorkerToken: null,
-        activeJobLeaseExpiresAt: null,
-        updatedAt: new Date(),
-      }).where(and(
-        eq(garminConnections.id, lockedConnectionId),
-        eq(garminConnections.activeWorkerToken, workerToken),
-      ));
+      await releaseLease(lockedConnectionId);
     }
     console.error("Failed to connect Garmin:", error);
     const rawMessage = error instanceof Error ? error.message : "";
