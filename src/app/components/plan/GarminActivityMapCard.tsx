@@ -241,10 +241,10 @@ export default function GarminActivityMapCard({
           <p className="rounded-lg border border-dashed border-gray-300 bg-gray-50 px-4 py-3 text-sm text-gray-600">
             No runs with stored sample detail yet. Import activity detail from{" "}
             <a
-              href="/plan?view=current&tab=settings#garmin-detail-sync"
+              href="/profile#garmin-detail-sync"
               className="font-medium text-enduro-700 underline"
             >
-              Garmin settings
+              Garmin Connect settings on your Profile
             </a>{" "}
             and each route, with per-minute pace, heart rate, power, cadence, elevation, and
             temperature, will appear here.

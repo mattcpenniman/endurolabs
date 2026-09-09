@@ -4,11 +4,15 @@
 
 "use client";
 
-import React, { FormEvent, useEffect, useState } from "react";
+import React, { FormEvent, useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
+import GarminConnectCard from "@/app/components/profile/GarminConnectCard";
 import { useUnits } from "@/app/components/units/UnitsProvider";
+import type { GarminConnectionStatus } from "@/lib/activities/models";
 import { kilogramsToPounds, poundsToKilograms } from "@/lib/profile/weight";
 import type { UnitSystem } from "@/lib/units/format";
+
+const EMPTY_GARMIN_STATUS: GarminConnectionStatus = { connected: false, activities: [] };
 
 interface ProfileResponse {
   profile: {
@@ -30,6 +34,18 @@ export default function ProfilePage(): React.ReactNode {
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [garminConnection, setGarminConnection] = useState<GarminConnectionStatus>(EMPTY_GARMIN_STATUS);
+
+  const refreshGarminConnection = useCallback(async (): Promise<void> => {
+    try {
+      const response = await fetch("/api/integrations/garmin");
+      if (response.ok) {
+        setGarminConnection((await response.json()) as GarminConnectionStatus);
+      }
+    } catch {
+      // Keep the last known connection status; the card surfaces request errors.
+    }
+  }, []);
 
   useEffect(() => {
     fetch("/api/profile")
@@ -46,10 +62,11 @@ export default function ProfilePage(): React.ReactNode {
         setProfile(body.profile);
         setPendingUnits(body.profile.unitsSystem);
         setWeight(weightInput(body.profile.weightPounds, body.profile.unitsSystem));
+        return refreshGarminConnection();
       })
       .catch((loadError: Error) => setError(loadError.message))
       .finally(() => setLoading(false));
-  }, [router]);
+  }, [router, refreshGarminConnection]);
 
   useEffect(() => {
     if (profile && units !== pendingUnits) {
@@ -100,12 +117,13 @@ export default function ProfilePage(): React.ReactNode {
         <header>
           <p className="text-xs font-semibold uppercase tracking-[0.18em] text-enduro-700">Account</p>
           <h1 className="mt-2 text-3xl font-bold text-gray-900">Profile</h1>
-          <p className="mt-2 text-sm text-gray-600">Keep your body weight current for accurate power-to-weight stats, and choose the units EnduroLab uses for elevation and pace.</p>
+          <p className="mt-2 text-sm text-gray-600">Keep your body weight current for accurate power-to-weight stats, choose the units EnduroLab uses for elevation and pace, and connect your Garmin Connect account.</p>
         </header>
 
         {loading ? (
           <p className="mt-8 text-sm text-gray-500">Loading profile...</p>
         ) : profile ? (
+          <>
           <form onSubmit={handleSubmit} className="mt-8 rounded-xl border border-gray-200 bg-white p-6 shadow-sm">
             <div className="border-b border-gray-100 pb-5">
               <p className="text-xs font-medium uppercase tracking-wide text-gray-500">Signed in as</p>
@@ -170,6 +188,13 @@ export default function ProfilePage(): React.ReactNode {
               {saving ? "Saving..." : "Save profile"}
             </button>
           </form>
+          <div className="mt-6">
+            <GarminConnectCard
+              connection={garminConnection}
+              onChanged={refreshGarminConnection}
+            />
+          </div>
+          </>
         ) : null}
         {!loading && !profile && error && <p className="mt-8 text-sm text-red-600">{error}</p>}
       </div>

@@ -1,19 +1,18 @@
 "use client";
 
 // ============================================================
-// EnduroLab - Garmin Sync Settings
+// EnduroLab - Garmin Connect Account Card (Profile page)
 // ============================================================
 
 import React, { useEffect, useState } from "react";
 import { GarminConnectionStatus } from "@/lib/activities/models";
 
-interface GarminSyncCardProps {
-  planId: string;
+interface GarminConnectCardProps {
   connection: GarminConnectionStatus;
   onChanged: () => Promise<void>;
 }
 
-export default function GarminSyncCard({ planId, connection, onChanged }: GarminSyncCardProps): React.ReactNode {
+export default function GarminConnectCard({ connection, onChanged }: GarminConnectCardProps): React.ReactNode {
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [rememberMe, setRememberMe] = useState(false);
@@ -66,7 +65,7 @@ export default function GarminSyncCard({ planId, connection, onChanged }: Garmin
           ? ` ${body.details.imported} detail imports${body.details.failed ? `, ${body.details.failed} failed` : ""}.`
           : "";
         const renewed = body.reauthenticated ? " Garmin sign-in was renewed automatically." : "";
-        setMessage(`${summary}; ${body.matched ?? 0} matched to this plan.${detail}${renewed}`);
+        setMessage(`${summary}; ${body.matched ?? 0} matched to your current plan.${detail}${renewed}`);
       } else {
         setMessage("Garmin connection updated.");
         setIsMfaRequired(false);
@@ -162,87 +161,85 @@ export default function GarminSyncCard({ planId, connection, onChanged }: Garmin
   const reconnectRequired = connection.status === "error";
 
   return (
-    <div id="garmin-detail-sync" className={`scroll-mt-24 rounded-lg border bg-white p-5 md:col-span-2 ${reconnectRequired ? "border-red-300" : "border-gray-200"}`}>
-      <div className="flex flex-col gap-5 lg:flex-row lg:items-start lg:justify-between">
-        <div className="max-w-xl">
-          <div className="flex items-center gap-2">
-            <span className="flex h-8 w-8 items-center justify-center rounded-full bg-sky-950 text-xs font-black text-white">G</span>
-            <h3 className="text-sm font-semibold text-gray-900">Garmin Connect</h3>
-            <span className={`rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide ${connection.connected ? "bg-emerald-100 text-emerald-700" : reconnectRequired ? "bg-red-100 text-red-700" : "bg-gray-100 text-gray-600"}`}>
-              {connection.connected ? "Connected" : reconnectRequired ? "Reconnect required" : "Not connected"}
-            </span>
-          </div>
-          <p className="mt-2 text-sm text-gray-500">
-            Import recent runs, match them to scheduled workouts by local date and distance, and chart mileage, pace, and heart-rate trends.
-          </p>
-          <p className="mt-2 text-xs text-gray-400">
-            This uses Garmin Connect&apos;s unofficial API. Your password is used only for sign-in; encrypted OAuth
-            tokens are stored afterward. With &quot;Remember me&quot;, the password is also sealed with the same
-            AES-256 key so a dead session can sign itself back in.
-          </p>
-          {connection.connected && (
-            <div className="mt-4 flex flex-wrap gap-2 text-xs text-gray-600">
-              <span className="rounded bg-gray-100 px-2 py-1">{connection.displayName || connection.username}</span>
-              {connection.rememberMe && (
-                <span className="rounded bg-emerald-100 px-2 py-1 font-semibold text-emerald-700">Remembered</span>
-              )}
-              <span className="rounded bg-gray-100 px-2 py-1">{connection.activities.length} runs stored</span>
-              <span className="rounded bg-gray-100 px-2 py-1">
-                {connection.activities.filter((activity) => activity.samplesFetchedAt).length} with detail
-              </span>
-              {connection.lastSyncAt && (
-                <span className="rounded bg-gray-100 px-2 py-1">Last sync {new Date(connection.lastSyncAt).toLocaleString()}</span>
-              )}
-            </div>
+    <section id="garmin-detail-sync" className={`scroll-mt-24 rounded-xl border bg-white p-6 shadow-sm ${reconnectRequired ? "border-red-300" : "border-gray-200"}`}>
+      <div className="flex items-center gap-2">
+        <span className="flex h-8 w-8 items-center justify-center rounded-full bg-sky-950 text-xs font-black text-white">G</span>
+        <h2 className="text-sm font-semibold text-gray-900">Garmin Connect</h2>
+        <span className={`rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide ${connection.connected ? "bg-emerald-100 text-emerald-700" : reconnectRequired ? "bg-red-100 text-red-700" : "bg-gray-100 text-gray-600"}`}>
+          {connection.connected ? "Connected" : reconnectRequired ? "Reconnect required" : "Not connected"}
+        </span>
+      </div>
+      <p className="mt-2 text-sm text-gray-500">
+        Import recent runs, match them to scheduled workouts by local date and distance, and chart mileage, pace, and heart-rate trends.
+      </p>
+      <p className="mt-2 text-xs text-gray-400">
+        This uses Garmin Connect&apos;s unofficial API. Your password is used only for sign-in; encrypted OAuth
+        tokens are stored afterward. With &quot;Remember me&quot;, the password is also sealed with the same
+        AES-256 key so a dead session can sign itself back in.
+      </p>
+      {connection.connected && (
+        <div className="mt-4 flex flex-wrap gap-2 text-xs text-gray-600">
+          <span className="rounded bg-gray-100 px-2 py-1">{connection.displayName || connection.username}</span>
+          {connection.rememberMe && (
+            <span className="rounded bg-emerald-100 px-2 py-1 font-semibold text-emerald-700">Remembered</span>
           )}
-          {reconnectRequired && (
-            <div role="alert" className="mt-4 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-800">
-              <p className="font-semibold">Garmin is disconnected</p>
-              <p className="mt-1">{connection.lastError || "Your Garmin session is no longer valid. Sign in again to resume run imports."}</p>
-            </div>
-          )}
-          {(message || (!reconnectRequired && connection.lastError)) && (
-            <p className={`mt-3 text-xs ${message?.toLowerCase().includes("failed") || connection.lastError ? "text-red-600" : "text-emerald-700"}`}>
-              {message || (!reconnectRequired ? connection.lastError : null)}
-            </p>
-          )}
-          {connection.connected && connection.activities.length > 0 && (
-            <details className="mt-4 text-xs text-gray-600">
-              <summary className="cursor-pointer font-medium text-gray-700">Recent activity quality</summary>
-              <div className="mt-2 divide-y divide-gray-100 rounded-lg border border-gray-200">
-                {connection.activities.slice(0, 8).map((activity) => (
-                  <div key={activity.id} className="flex items-center justify-between gap-3 px-3 py-2">
-                    <div className="min-w-0">
-                      <p className="truncate font-medium text-gray-800">{activity.activityName}</p>
-                      <p className="text-gray-400">
-                        {activity.localDate} | quality {activity.qualityScore ?? "pending"}/100
-                      </p>
-                    </div>
-                    <label className="flex shrink-0 items-center gap-2">
-                      <input
-                        type="checkbox"
-                        checked={activity.excludedFromAnalytics ?? false}
-                        disabled={updatingActivityId === activity.id}
-                        onChange={(event) => setActivityExcluded(activity.id, event.target.checked)}
-                      />
-                      Exclude
-                    </label>
-                  </div>
-                ))}
-              </div>
-            </details>
+          <span className="rounded bg-gray-100 px-2 py-1">{connection.activities.length} runs stored</span>
+          <span className="rounded bg-gray-100 px-2 py-1">
+            {connection.activities.filter((activity) => activity.samplesFetchedAt).length} with detail
+          </span>
+          {connection.lastSyncAt && (
+            <span className="rounded bg-gray-100 px-2 py-1">Last sync {new Date(connection.lastSyncAt).toLocaleString()}</span>
           )}
         </div>
+      )}
+      {reconnectRequired && (
+        <div role="alert" className="mt-4 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-800">
+          <p className="font-semibold">Garmin is disconnected</p>
+          <p className="mt-1">{connection.lastError || "Your Garmin session is no longer valid. Sign in again to resume run imports."}</p>
+        </div>
+      )}
+      {(message || (!reconnectRequired && connection.lastError)) && (
+        <p className={`mt-3 text-xs ${message?.toLowerCase().includes("failed") || connection.lastError ? "text-red-600" : "text-emerald-700"}`}>
+          {message || (!reconnectRequired ? connection.lastError : null)}
+        </p>
+      )}
+      {connection.connected && connection.activities.length > 0 && (
+        <details className="mt-4 text-xs text-gray-600">
+          <summary className="cursor-pointer font-medium text-gray-700">Recent activity quality</summary>
+          <div className="mt-2 divide-y divide-gray-100 rounded-lg border border-gray-200">
+            {connection.activities.slice(0, 8).map((activity) => (
+              <div key={activity.id} className="flex items-center justify-between gap-3 px-3 py-2">
+                <div className="min-w-0">
+                  <p className="truncate font-medium text-gray-800">{activity.activityName}</p>
+                  <p className="text-gray-400">
+                    {activity.localDate} | quality {activity.qualityScore ?? "pending"}/100
+                  </p>
+                </div>
+                <label className="flex shrink-0 items-center gap-2">
+                  <input
+                    type="checkbox"
+                    checked={activity.excludedFromAnalytics ?? false}
+                    disabled={updatingActivityId === activity.id}
+                    onChange={(event) => setActivityExcluded(activity.id, event.target.checked)}
+                  />
+                  Exclude
+                </label>
+              </div>
+            ))}
+          </div>
+        </details>
+      )}
 
+      <div className="mt-5 border-t border-gray-100 pt-5">
         {connection.connected ? (
-          <div className="flex max-w-sm shrink-0 flex-wrap justify-end gap-2">
+          <div className="flex flex-wrap gap-2">
             <button
               type="button"
               disabled={isWorking || isDetailWorking}
               onClick={() => runRequest("/api/integrations/garmin/sync", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ planId, limit: 400, force: true }),
+                body: JSON.stringify({ limit: 400, force: true }),
               })}
               className="rounded-lg bg-sky-950 px-4 py-2 text-sm font-semibold text-white hover:bg-sky-900 disabled:opacity-50"
             >
@@ -251,19 +248,19 @@ export default function GarminSyncCard({ planId, connection, onChanged }: Garmin
             <button
               type="button"
               disabled={isWorking || isDetailWorking}
-              onClick={() => startJob("/api/integrations/garmin/samples", { scope: "all", days: 90, planId })}
+              onClick={() => startJob("/api/integrations/garmin/samples", { scope: "all", days: 90 })}
               className="rounded-lg border border-sky-950 bg-white px-4 py-2 text-sm font-semibold text-sky-950 hover:bg-sky-50 disabled:opacity-50"
             >
               {isDetailWorking ? "Syncing detail..." : "Sync detail"}
             </button>
             <form
-              className="flex w-full items-end gap-2 pt-2"
+              className="flex w-full items-end gap-2 pt-2 sm:w-auto"
               onSubmit={(event) => {
                 event.preventDefault();
                 startJob("/api/integrations/garmin/history", { since: historySince });
               }}
             >
-              <label className="min-w-0 flex-1">
+              <label className="min-w-0 flex-1 sm:w-44">
                 <span className="block text-[10px] font-bold uppercase tracking-wide text-gray-500">Import summaries since</span>
                 <input
                   type="date"
@@ -286,14 +283,14 @@ export default function GarminSyncCard({ planId, connection, onChanged }: Garmin
               type="button"
               disabled={isWorking || isDetailWorking}
               onClick={() => runRequest("/api/integrations/garmin", { method: "DELETE" })}
-              className="rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-600 hover:bg-gray-50 disabled:opacity-50"
+              className="ml-auto rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-600 hover:bg-gray-50 disabled:opacity-50"
             >
               Disconnect
             </button>
           </div>
         ) : awaitingMfa ? (
           <form
-            className="w-full lg:max-w-sm"
+            className="max-w-sm"
             onSubmit={(event) => {
               event.preventDefault();
               runRequest("/api/integrations/garmin", {
@@ -337,7 +334,7 @@ export default function GarminSyncCard({ planId, connection, onChanged }: Garmin
             </div>
           </form>
         ) : (
-          <div className="grid w-full gap-3 lg:max-w-xl">
+          <div className="grid gap-3">
             {reconnectRequired && connection.rememberMe && (
               <button
                 type="button"
@@ -345,15 +342,15 @@ export default function GarminSyncCard({ planId, connection, onChanged }: Garmin
                 onClick={() => runRequest("/api/integrations/garmin/sync", {
                   method: "POST",
                   headers: { "Content-Type": "application/json" },
-                  body: JSON.stringify({ planId, limit: 50, detailLimit: 0, force: true }),
+                  body: JSON.stringify({ limit: 50, detailLimit: 0, force: true }),
                 })}
-                className="rounded-lg border border-sky-950 bg-white px-4 py-2 text-sm font-semibold text-sky-950 hover:bg-sky-50 disabled:opacity-50"
+                className="w-fit rounded-lg border border-sky-950 bg-white px-4 py-2 text-sm font-semibold text-sky-950 hover:bg-sky-50 disabled:opacity-50"
               >
                 {isWorking ? "Renewing..." : "Renew with saved password"}
               </button>
             )}
             <form
-              className="grid w-full gap-3 sm:grid-cols-2"
+              className="grid gap-3 sm:grid-cols-2"
               onSubmit={(event) => {
                 event.preventDefault();
                 runRequest("/api/integrations/garmin", {
@@ -401,7 +398,7 @@ export default function GarminSyncCard({ planId, connection, onChanged }: Garmin
               <button
                 type="submit"
                 disabled={isWorking}
-                className="rounded-lg bg-sky-950 px-4 py-2 text-sm font-semibold text-white hover:bg-sky-900 disabled:opacity-50 sm:col-span-2"
+                className="w-fit rounded-lg bg-sky-950 px-4 py-2 text-sm font-semibold text-white hover:bg-sky-900 disabled:opacity-50 sm:col-span-2"
               >
                 {isWorking ? "Connecting..." : reconnectRequired ? "Reconnect Garmin" : "Connect Garmin"}
               </button>
@@ -409,6 +406,6 @@ export default function GarminSyncCard({ planId, connection, onChanged }: Garmin
           </div>
         )}
       </div>
-    </div>
+    </section>
   );
 }

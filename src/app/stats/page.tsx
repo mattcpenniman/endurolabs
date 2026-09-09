@@ -406,7 +406,7 @@ export default function StatsPage() {
                     : `None of this plan's ${currentActivities.length} matched runs has stored detail samples yet.`}
                 </p>
                 <a
-                  href="/plan?view=current&tab=settings#garmin-detail-sync"
+                  href="/profile#garmin-detail-sync"
                   className="mt-3 inline-flex rounded-lg bg-amber-900 px-3 py-2 font-semibold text-white hover:bg-amber-800"
                 >
                   {garminConnection.connected ? "Open Garmin detail import" : "Connect Garmin and import detail"}
