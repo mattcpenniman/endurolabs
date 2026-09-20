@@ -553,9 +553,12 @@ function dayOfWeekForDate(value: string): string {
 }
 
 /**
- * Build the final week around the race itself: the race lands on race day, no
- * long run or quality work is scheduled, and only a few short shakeouts keep
- * the legs sharp. The race is not counted as training mileage.
+ * Build the final week around the race itself, following the race-week schedule
+ * in docs/elite-training-plan.md: a short easy run on every available day,
+ * strides on the middle days, one light threshold sharpener five days out, and
+ * a short easy run the day before the race. The race is not counted as training
+ * mileage. Days that fall on the preferred rest day or outside the runner's
+ * available days stay as rest.
  */
 function buildRaceWeek(
   week: number,
@@ -568,10 +571,18 @@ function buildRaceWeek(
   const allDays = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
   const raceDay = dayOfWeekForDate(raceDate);
   const raceIndex = DISPLAY_DAY_ORDER[raceDay] ?? 6;
-  const shakeoutPlan = new Map<number, number>([
-    [raceIndex - 5, 5],   // 5 days out
-    [raceIndex - 3, 4],   // 3 days out
-    [raceIndex - 2, 3.5], // 2 days out, day before is rest
+  const easyRunMiles = (minutes: number): number => {
+    const easyPace = (paceZones.easy.min + paceZones.easy.max) / 2;
+    return Math.max(1, roundMiles(minutes / easyPace));
+  };
+  // Keyed by days remaining until the race, mirroring the documented schedule.
+  const schedule = new Map<number, (index: number) => Workout>([
+    [6, (index) => WorkoutLibrary.createShakeoutRun(week, index, easyRunMiles(60), paceZones, powerZones)],
+    [5, (index) => WorkoutLibrary.createThresholdIntervals(week, index, 7.5, 4, 0.75, 120, paceZones, powerZones)],
+    [4, (index) => WorkoutLibrary.createShakeoutRun(week, index, easyRunMiles(40), paceZones, powerZones)],
+    [3, (index) => WorkoutLibrary.createShakeoutRun(week, index, easyRunMiles(25), paceZones, powerZones)],
+    [2, (index) => WorkoutLibrary.createEasyRun(week, index, easyRunMiles(15), paceZones, powerZones)],
+    [1, (index) => WorkoutLibrary.createEasyRun(week, index, easyRunMiles(25), paceZones, powerZones)],
   ]);
   let workoutIndex = 0;
 
@@ -595,15 +606,15 @@ function buildRaceWeek(
       };
     }
 
-    const shakeoutMiles = dayIndex < raceIndex ? shakeoutPlan.get(dayIndex) : undefined;
-    if (shakeoutMiles && trainingDays.includes(day) && day !== preferredRestDay) {
-      const shakeout = WorkoutLibrary.createShakeoutRun(week, workoutIndex++, shakeoutMiles, paceZones, powerZones);
+    const build = dayIndex < raceIndex ? schedule.get(raceIndex - dayIndex) : undefined;
+    if (build && trainingDays.includes(day) && day !== preferredRestDay) {
+      const workout = build(workoutIndex++);
       return {
         date: "",
         dayOfWeek: day,
-        workout: shakeout,
+        workout,
         isRestDay: false,
-        plannedMileage: shakeout.totalDistance,
+        plannedMileage: workout.totalDistance,
       };
     }
 

@@ -362,10 +362,14 @@ describe("generatePlan", () => {
     expect(finalThreeWeeks[2]).toBeLessThan(80);
   });
 
-  it("keeps the first three and final three weeks aerobic base only", () => {
+  it("keeps the first three and the pre-race taper weeks aerobic base only", () => {
     const plan = generatePlan(makeProfile({ weeksOverride: 18, peakMileageOverride: 55 }));
-    const aerobicOnlyWeeks = [...plan.weeks.slice(0, 3), ...plan.weeks.slice(-3)];
+    const aerobicOnlyWeeks = [
+      ...plan.weeks.slice(0, 3),
+      ...plan.weeks.slice(-3).filter((week) => !week.isRaceWeek),
+    ];
 
+    expect(aerobicOnlyWeeks.length).toBe(5);
     for (const week of aerobicOnlyWeeks) {
       expect(hasPaceSpecificSegments(week)).toBe(false);
       expect(week.intensityDistribution.threshold).toBe(0);
@@ -574,7 +578,6 @@ describe("generatePlan", () => {
     expect(raceWeek.isRaceWeek).toBe(true);
     expect(raceWeek.longRunDistance).toBe(0);
     expect(raceWeek.days.some((day) => day.workout?.type === "long")).toBe(false);
-    expect(raceWeek.intensityDistribution.threshold).toBe(0);
     expect(raceWeek.intensityDistribution.marathon).toBe(0);
     expect(raceWeek.intensityDistribution.vo2).toBe(0);
   });
@@ -596,20 +599,27 @@ describe("generatePlan", () => {
     expect(raceDays[0].workout?.totalDistance).toBe(26.2);
   });
 
-  it("leaves the day before the race as rest and tapers race week hard", () => {
+  it("follows the documented race week: strides, a sharpener, and a short run the day before", () => {
     const plan = generatePlan(makeProfile({
       currentWeeklyMileage: 60,
       raceDate: "2026-09-27",
       weeksOverride: 20,
       peakMileageOverride: 90,
+      trainingDaysPerWeek: 6,
+      preferredRestDay: "Wednesday",
     }));
     const raceWeek = plan.weeks.at(-1)!;
     const dayBeforeRace = raceWeek.days.find((day) => day.dayOfWeek === "Saturday");
+    const sharpenerDay = raceWeek.days.find((day) => day.dayOfWeek === "Tuesday");
 
-    expect(dayBeforeRace?.isRestDay).toBe(true);
-    expect(dayBeforeRace?.workout).toBeNull();
-    // Race-week mileage counts the shakeouts only, not the race itself.
-    expect(raceWeek.totalMileage).toBeLessThanOrEqual(20);
+    // 1 day to race: 20-30 minutes easy, never rest.
+    expect(dayBeforeRace?.isRestDay).toBe(false);
+    expect(dayBeforeRace?.workout?.type).toBe("easy");
+    expect(dayBeforeRace?.workout?.totalDistance ?? 99).toBeLessThanOrEqual(4);
+    // 5 days to race: a light threshold sharpener.
+    expect(sharpenerDay?.workout?.type).toBe("threshold");
+
+    // Race-week mileage counts the training runs, not the race itself.
     expect(raceWeek.totalMileage).toBeLessThan(plan.weeks.at(-2)!.totalMileage);
     expect(raceWeek.totalMileage).toBeLessThan(plan.peakWeeklyMileage);
   });
