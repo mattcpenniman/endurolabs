@@ -167,10 +167,10 @@ describe("generatePlan", () => {
     }
   });
 
-  it("sets long runs to 25% of weekly mileage", () => {
+  it("sets long runs to 25% of weekly mileage outside race week", () => {
     const plan = generatePlan(makeProfile({ weeksOverride: 18, peakMileageOverride: 55 }));
 
-    for (const week of plan.weeks) {
+    for (const week of plan.weeks.filter((candidate) => !candidate.isRaceWeek)) {
       const longRun = week.days.find((day) => day.workout?.type === "long")?.workout;
 
       expect(longRun).toBeDefined();
@@ -327,7 +327,7 @@ describe("generatePlan", () => {
       50, 45, 40,
       50, 45, 35,
       50, 40, 35,
-      35, 30, 30,
+      26, 19, 0,
     ]);
   });
 
@@ -344,7 +344,7 @@ describe("generatePlan", () => {
       40, 40, 35,
       45, 45, 35,
       50, 45, 40,
-      35, 30, 30,
+      30, 22, 0,
     ]);
   });
 
@@ -384,7 +384,7 @@ describe("generatePlan", () => {
       })
     );
 
-    for (const week of plan.weeks) {
+    for (const week of plan.weeks.filter((candidate) => !candidate.isRaceWeek)) {
       expect(scheduledRunCount(week)).toBe(7);
     }
   });
@@ -399,7 +399,7 @@ describe("generatePlan", () => {
       })
     );
 
-    for (const week of plan.weeks) {
+    for (const week of plan.weeks.filter((candidate) => !candidate.isRaceWeek)) {
       const expectedMinimum = roundQuarter(Math.max(3, Math.min(6, week.totalMileage * 0.06)));
       const secondaryRuns = week.days.flatMap((day) =>
         day.secondaryWorkout ? [day.secondaryWorkout] : []
@@ -423,7 +423,7 @@ describe("generatePlan", () => {
       })
     );
 
-    for (const week of plan.weeks) {
+    for (const week of plan.weeks.filter((candidate) => !candidate.isRaceWeek)) {
       const doubleUpDays = week.days
         .filter((day) => !!day.secondaryWorkout)
         .map((day) => day.dayOfWeek);
@@ -555,5 +555,76 @@ describe("generatePlan", () => {
     expect(week11?.intensityTargetDistribution?.marathon).toBe(
       roundQuarter(((week11?.totalMileage ?? 0) * 10) / 100)
     );
+  });
+
+  it("builds the final week around the race with no long run", () => {
+    const plan = generatePlan(makeProfile({
+      currentWeeklyMileage: 60,
+      peakHistoricalWeeklyMileage: 100,
+      raceDate: "2026-09-27",
+      weeksOverride: 20,
+      peakMileageOverride: 90,
+      trainingDaysPerWeek: 6,
+      runsPerWeekOverride: 8,
+      preferredRestDay: "Wednesday",
+      availableLongRunDays: ["Saturday"],
+    }));
+    const raceWeek = plan.weeks.at(-1)!;
+
+    expect(raceWeek.isRaceWeek).toBe(true);
+    expect(raceWeek.longRunDistance).toBe(0);
+    expect(raceWeek.days.some((day) => day.workout?.type === "long")).toBe(false);
+    expect(raceWeek.intensityDistribution.threshold).toBe(0);
+    expect(raceWeek.intensityDistribution.marathon).toBe(0);
+    expect(raceWeek.intensityDistribution.vo2).toBe(0);
+  });
+
+  it("places the race on race day and marks it", () => {
+    const plan = generatePlan(makeProfile({
+      currentWeeklyMileage: 60,
+      raceDate: "2026-09-27",
+      weeksOverride: 20,
+      peakMileageOverride: 90,
+    }));
+    const raceWeek = plan.weeks.at(-1)!;
+    const raceDays = raceWeek.days.filter((day) => day.isRaceDay);
+
+    expect(raceDays).toHaveLength(1);
+    expect(raceDays[0].dayOfWeek).toBe("Sunday");
+    expect(new Date(raceDays[0].date).toISOString().slice(0, 10)).toBe("2026-09-27");
+    expect(raceDays[0].workout?.type).toBe("race");
+    expect(raceDays[0].workout?.totalDistance).toBe(26.2);
+  });
+
+  it("leaves the day before the race as rest and tapers race week hard", () => {
+    const plan = generatePlan(makeProfile({
+      currentWeeklyMileage: 60,
+      raceDate: "2026-09-27",
+      weeksOverride: 20,
+      peakMileageOverride: 90,
+    }));
+    const raceWeek = plan.weeks.at(-1)!;
+    const dayBeforeRace = raceWeek.days.find((day) => day.dayOfWeek === "Saturday");
+
+    expect(dayBeforeRace?.isRestDay).toBe(true);
+    expect(dayBeforeRace?.workout).toBeNull();
+    // Race-week mileage counts the shakeouts only, not the race itself.
+    expect(raceWeek.totalMileage).toBeLessThanOrEqual(20);
+    expect(raceWeek.totalMileage).toBeLessThan(plan.weeks.at(-2)!.totalMileage);
+    expect(raceWeek.totalMileage).toBeLessThan(plan.peakWeeklyMileage);
+  });
+
+  it("honors the preferred rest day during race week", () => {
+    const plan = generatePlan(makeProfile({
+      currentWeeklyMileage: 60,
+      raceDate: "2026-09-27",
+      weeksOverride: 20,
+      peakMileageOverride: 90,
+      preferredRestDay: "Tuesday",
+    }));
+    const raceWeek = plan.weeks.at(-1)!;
+    const preferredRestDay = raceWeek.days.find((day) => day.dayOfWeek === "Tuesday");
+
+    expect(preferredRestDay?.isRestDay).toBe(true);
   });
 });

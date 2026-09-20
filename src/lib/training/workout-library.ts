@@ -807,6 +807,77 @@ export function createCrossTraining(
   };
 }
 
+// ─── Race Week Shakeout ─────────────────────────────────────
+
+export function createShakeoutRun(
+  week: number,
+  index: number,
+  distance: number,
+  paceZones: PaceZones,
+  powerZones?: PowerZones
+): Workout {
+  const actualDistance = roundMiles(Math.max(1, distance));
+  const segments: WorkoutSegment[] = [
+    {
+      description: `Easy shakeout — ${actualDistance} miles relaxed, then 4-6 × 20s strides`,
+      distance: actualDistance,
+      pace: (paceZones.easy.min + paceZones.easy.max) / 2,
+      power: powerZones ? (powerZones.easy.min + powerZones.easy.max) / 2 : undefined,
+      effort: "Easy — stay relaxed and keep the legs turning over",
+      type: "easy",
+    },
+  ];
+
+  return {
+    id: makeId("easy", week, index),
+    type: "easy",
+    title: `${actualDistance} mi Shakeout + Strides`,
+    description: "Short, relaxed race-week run finished with a few strides to stay sharp without adding fatigue.",
+    segments,
+    totalDistance: actualDistance,
+    estimatedDuration: Math.round(actualDistance * ((paceZones.easy.min + paceZones.easy.max) / 2)),
+    weeklyMileageContribution: actualDistance,
+    intensityCategory: "easy",
+  };
+}
+
+// ─── Race Day ───────────────────────────────────────────────
+
+export function createRaceDayWorkout(
+  week: number,
+  index: number,
+  distance: number,
+  paceZones: PaceZones,
+  powerZones?: PowerZones,
+  raceLabel = "Marathon"
+): Workout {
+  const raceDistance = Math.round(distance * 100) / 100;
+  const segments: WorkoutSegment[] = [
+    {
+      description: `${raceLabel} — ${raceDistance} miles at race effort`,
+      distance: raceDistance,
+      pace: paceZones.marathon,
+      power: powerZones?.marathon,
+      effort: "Race effort — execute your pacing and fueling plan",
+      type: "race",
+    },
+  ];
+
+  return {
+    id: makeId("race", week, index),
+    type: "race",
+    title: `${raceLabel} — ${raceDistance} mi`,
+    description: `Goal race. ${raceDistance} miles at goal marathon pace. Trust the taper.`,
+    segments,
+    totalDistance: raceDistance,
+    // The race is the goal of the plan, not training volume, so it does not
+    // inflate the race week's scheduled mileage.
+    estimatedDuration: Math.round(raceDistance * paceZones.marathon),
+    weeklyMileageContribution: 0,
+    intensityCategory: "hard",
+  };
+}
+
 // ─── Public API ─────────────────────────────────────────────
 
 export const WorkoutLibrary = {
@@ -821,6 +892,8 @@ export const WorkoutLibrary = {
   createMarathonThresholdAlternation,
   createLongRun,
   createProgressionRun,
+  createShakeoutRun,
+  createRaceDayWorkout,
   createStrengthSession,
   createCrossTraining,
   createRestDay,

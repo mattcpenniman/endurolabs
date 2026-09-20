@@ -138,6 +138,7 @@ export type WorkoutType =
   | "vo2"
   | "long"
   | "progression"
+  | "race"
   | "strength"
   | "cross_training"
   | "rest";
@@ -175,6 +176,7 @@ export interface DailyPlan {
   secondaryWorkout?: Workout | null;  // AM/PM double-day run
   isRestDay: boolean;
   plannedMileage: number;
+  isRaceDay?: boolean;       // true for the target race inside the race week
 }
 
 // ─── Weekly Plan ───────────────────────────────────────────
@@ -201,6 +203,7 @@ export interface WeeklyPlan {
     marathon: number;
     vo2: number;
   };
+  isRaceWeek?: boolean;      // true for the final week containing the target race
 }
 
 // ─── Training Phase ────────────────────────────────────────

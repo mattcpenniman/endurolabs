@@ -220,6 +220,8 @@ function workoutToIntensityBucket(workout: Workout | null | undefined): keyof We
       return "threshold";
     case "marathon_pace":
       return "marathon";
+    case "race":
+      return "marathon";
     case "vo2":
       return "vo2";
     default:
