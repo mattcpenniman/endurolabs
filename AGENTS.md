@@ -144,7 +144,8 @@ src/
 - Test Garmin payload mapping as pure logic; DB idempotency requires an integration test against PostgreSQL.
 
 ## Key Configuration
-- `package.json` scripts include app lifecycle, `db:push`, user/plan utilities, `seed:dev`, `garmin:history`, `samples:backfill`, `summaries:recompute`, `race:analyze`, and Vitest commands
+- `package.json` scripts include app lifecycle, `db:push`, user/plan utilities, `seed:dev`, `garmin:history`, `samples:backfill`, `summaries:recompute`, `race:analyze`, `plan:rebuild-week`, and Vitest commands
+- `plan:rebuild-week` (`scripts/rebuild-plan-week.ts`) regenerates one stored plan week from the current generator and splices it back in, leaving every other week untouched. Defaults to the final (race) week; use `--week N` for another. Preview-first (`--apply` persists) and it refuses when the stored week start date no longer lines up or when activities/run logs already reference the replaced week's workouts.
 - `tsconfig.json`: strict mode, `@/*` → `./src/*`, ES2017 target, bundler module resolution
 - `vitest.config.ts`: jsdom environment, React plugin, globals true
 - `next.config.js`: default (empty) config
