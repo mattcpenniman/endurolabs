@@ -36,6 +36,7 @@ const MIN_WEEKS = 14;
 const MAX_WEEKS = 28;
 const MIN_SECONDARY_RUN_MILES = 3;
 const MAX_SECONDARY_RUN_MILES = 6;
+const MARATHON_RACE_MILES = 26.2;
 
 // Day-of-week index mapping (0=Sunday for JS date math)
 const DAY_INDEX: Record<string, number> = {
@@ -69,7 +70,7 @@ const PEAK_BUILD_BLOCK_LEVELS = [
   [1, 0.75, 0.25],
   [1, 0.5, 0.25],
 ];
-const TAPER_LEVELS = [0.25, 0, 0];
+const TAPER_VOLUME_FRACTIONS = [0.75, 0.55, 0.4];
 const DEFAULT_INTENSITY_TARGET_PERCENTS = {
   marathon: 10,
   threshold: 6,
@@ -184,7 +185,8 @@ function mileageProgression(
   }
 
   const taperWeeks = Math.min(3, Math.max(0, totalWeeks - 1));
-  const availableBuildWeeks = Math.max(0, totalWeeks - taperWeeks);
+  const buildWeeks = Math.max(0, totalWeeks - taperWeeks);
+  const availableBuildWeeks = buildWeeks;
   const fullBuildBlocks = Math.floor(availableBuildWeeks / 3);
   const partialBuildWeeks = availableBuildWeeks % 3;
   const baseBlockCount = Math.min(BASE_BUILD_BLOCK_LEVELS.length, fullBuildBlocks);
@@ -193,15 +195,27 @@ function mileageProgression(
   const finalBuildLevel = selectedPeakBlocks.length > 0
     ? selectedPeakBlocks[selectedPeakBlocks.length - 1][0]
     : BASE_BUILD_BLOCK_LEVELS[Math.max(0, baseBlockCount - 1)]?.[0] ?? 0;
-  const levels = [
+  const buildLevels = [
     ...BASE_BUILD_BLOCK_LEVELS.slice(0, baseBlockCount).flat(),
     ...selectedPeakBlocks.flat(),
     ...Array.from({ length: partialBuildWeeks }, () => finalBuildLevel),
-    ...TAPER_LEVELS.slice(-taperWeeks),
   ];
-  const progressionLevel = levels[Math.min(week - 1, levels.length - 1)] ?? 0;
+  const mileageAtLevel = (level: number): number =>
+    Math.round(startMileage + (peakMileage - startMileage) * level);
 
-  return Math.round(startMileage + (peakMileage - startMileage) * progressionLevel);
+  if (week <= buildWeeks) {
+    const level = buildLevels[Math.min(week - 1, Math.max(0, buildLevels.length - 1))] ?? 0;
+    return mileageAtLevel(level);
+  }
+
+  // Taper the final weeks down from the last build week — not down to the
+  // starting mileage — so the race week is a real reduction even when the
+  // runner started close to their peak.
+  const lastBuildLevel = buildLevels[Math.max(0, buildWeeks - 1)] ?? 1;
+  const lastBuildMileage = mileageAtLevel(lastBuildLevel);
+  const taperIndex = week - buildWeeks;
+  const fraction = TAPER_VOLUME_FRACTIONS[Math.min(taperIndex - 1, TAPER_VOLUME_FRACTIONS.length - 1)] ?? 0.4;
+  return Math.max(1, Math.round(lastBuildMileage * fraction));
 }
 
 // ─── Long Run Progression (stepped: plateau → step → recovery → repeat) ──
@@ -527,6 +541,74 @@ function rebalanceDailyMileage(
       }
     }
   }
+}
+
+// ─── Race Week ─────────────────────────────────────────────
+
+const WEEKDAY_NAMES = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+
+function dayOfWeekForDate(value: string): string {
+  const parsed = new Date(`${value.slice(0, 10)}T00:00:00Z`);
+  return WEEKDAY_NAMES[parsed.getUTCDay()] ?? "Sunday";
+}
+
+/**
+ * Build the final week around the race itself: the race lands on race day, no
+ * long run or quality work is scheduled, and only a few short shakeouts keep
+ * the legs sharp. The race is not counted as training mileage.
+ */
+function buildRaceWeek(
+  week: number,
+  raceDate: string,
+  trainingDays: string[],
+  preferredRestDay: string,
+  paceZones: PaceZones,
+  powerZones: PowerZones | undefined
+): DailyPlan[] {
+  const allDays = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
+  const raceDay = dayOfWeekForDate(raceDate);
+  const raceIndex = DISPLAY_DAY_ORDER[raceDay] ?? 6;
+  const shakeoutPlan = new Map<number, number>([
+    [raceIndex - 5, 5],   // 5 days out
+    [raceIndex - 3, 4],   // 3 days out
+    [raceIndex - 2, 3.5], // 2 days out, day before is rest
+  ]);
+  let workoutIndex = 0;
+
+  return allDays.map((day) => {
+    const dayIndex = DISPLAY_DAY_ORDER[day];
+    if (day === raceDay) {
+      const race = WorkoutLibrary.createRaceDayWorkout(
+        week,
+        workoutIndex++,
+        MARATHON_RACE_MILES,
+        paceZones,
+        powerZones
+      );
+      return {
+        date: "",
+        dayOfWeek: day,
+        workout: race,
+        isRestDay: false,
+        plannedMileage: race.totalDistance,
+        isRaceDay: true,
+      };
+    }
+
+    const shakeoutMiles = dayIndex < raceIndex ? shakeoutPlan.get(dayIndex) : undefined;
+    if (shakeoutMiles && trainingDays.includes(day) && day !== preferredRestDay) {
+      const shakeout = WorkoutLibrary.createShakeoutRun(week, workoutIndex++, shakeoutMiles, paceZones, powerZones);
+      return {
+        date: "",
+        dayOfWeek: day,
+        workout: shakeout,
+        isRestDay: false,
+        plannedMileage: shakeout.totalDistance,
+      };
+    }
+
+    return { date: "", dayOfWeek: day, workout: null, isRestDay: true, plannedMileage: 0 };
+  });
 }
 
 // ─── Workout Assignment ────────────────────────────────────
@@ -946,15 +1028,12 @@ export function generatePlan(profile: RunnerProfile): MarathonPlan {
 
   for (let week = 1; week <= totalWeeks; week++) {
     const phase = getPhaseForWeek(week, phases);
+    const isRaceWeek = week === totalWeeks;
     const progressionMileage = mileageProgression(week, totalWeeks, profile.currentWeeklyMileage, peakMileage, phase);
     const mileageOverride = profile.weeklyMileageOverrides?.[week];
     const weeklyMileage = mileageOverride === undefined
       ? progressionMileage
       : roundMiles(Math.max(5, Math.min(120, mileageOverride)));
-    const calculatedLongRunMiles = roundMiles(weeklyMileage * 0.25);
-    const longRunMiles = maxLongRunOverride
-      ? Math.min(calculatedLongRunMiles, maxLongRunOverride)
-      : calculatedLongRunMiles;
     const isDownWeek = phase === "marathon_build" && (week - phases[0].weekRange[1]) % 3 === 0;
     const intensityTargetDistribution = calculateIntensityTargets(
       weeklyMileage,
@@ -965,24 +1044,43 @@ export function generatePlan(profile: RunnerProfile): MarathonPlan {
       profile.weeklyIntensityOverrides
     );
 
-    const days = assignWorkoutsForWeek(
-      week,
-      totalWeeks,
-      phase,
-      weeklyMileage,
-      longRunMiles,
-      trainingDays,
-      longRunDay,
-      paceZones,
-      powerZones,
-      profile.comfortLevelWithWorkouts,
-      profile.strengthTrainingAvailability,
-      isDownWeek,
-      runsPerWeek,
-      profile.preferredDoubleUpDays ?? [],
-      intensityTargetDistribution,
-      profile.weeklyIntensityOverrides
-    );
+    let days: DailyPlan[];
+    let targetMileage = weeklyMileage;
+    let longRunMiles: number;
+    if (isRaceWeek) {
+      days = buildRaceWeek(week, profile.raceDate, trainingDays, profile.preferredRestDay, paceZones, powerZones);
+      targetMileage = roundMiles(days.reduce(
+        (sum, day) =>
+          sum +
+          (day.workout?.weeklyMileageContribution ?? 0) +
+          (day.secondaryWorkout?.weeklyMileageContribution ?? 0),
+        0
+      ));
+      longRunMiles = 0;
+    } else {
+      const calculatedLongRunMiles = roundMiles(weeklyMileage * 0.25);
+      longRunMiles = maxLongRunOverride
+        ? Math.min(calculatedLongRunMiles, maxLongRunOverride)
+        : calculatedLongRunMiles;
+      days = assignWorkoutsForWeek(
+        week,
+        totalWeeks,
+        phase,
+        weeklyMileage,
+        longRunMiles,
+        trainingDays,
+        longRunDay,
+        paceZones,
+        powerZones,
+        profile.comfortLevelWithWorkouts,
+        profile.strengthTrainingAvailability,
+        isDownWeek,
+        runsPerWeek,
+        profile.preferredDoubleUpDays ?? [],
+        intensityTargetDistribution,
+        profile.weeklyIntensityOverrides
+      );
+    }
 
     // Calculate dates
     const startDate = planStart.add(week - 1, "week").toISOString();
@@ -1009,12 +1107,13 @@ export function generatePlan(profile: RunnerProfile): MarathonPlan {
       endDate,
       phase,
       days,
-      totalMileage: weeklyMileage,
+      totalMileage: targetMileage,
       calculatedMileage: progressionMileage,
       isDownWeek,
       longRunDistance: longRunMiles,
       intensityDistribution: intensityDist,
       intensityTargetDistribution,
+      isRaceWeek,
     });
   }
 
