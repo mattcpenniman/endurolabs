@@ -82,7 +82,7 @@ function analyzePRGap(
 // Faster goal times generally require higher peak mileage.
 // Based on Daniels' guidelines and typical training plans.
 
-function recommendedPeakMileage(goalMinutes: number): number {
+export function recommendedPeakMileage(goalMinutes: number): number {
   if (goalMinutes <= 180) return 90;    // Sub-3:00
   if (goalMinutes <= 210) return 75;    // Sub-3:30
   if (goalMinutes <= 240) return 60;    // Sub-4:00
