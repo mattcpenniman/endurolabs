@@ -12,7 +12,7 @@ import React from "react";
 import { useState, useEffect } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { RunnerProfile, MarathonPlan, DailyLog, WeeklyPlan, RaceDayPlanForecast } from "@/lib/training/models";
-import type { PlanListSummary } from "@/lib/activities/plan-list-summary";
+import { sortPlansByEndDateDesc, type PlanListSummary } from "@/lib/activities/plan-list-summary";
 import type { RacePredictorResponse } from "@/lib/analytics/race-predictor";
 import OnboardingForm from "@/app/components/onboarding/OnboardingForm";
 import PlanOverviewCard from "@/app/components/plan/PlanOverviewCard";
@@ -1451,8 +1451,12 @@ function PlanPageContent(): React.ReactNode {
     );
   }
 
-  const activeSavedPlans = savedPlans.filter((savedPlan) => !savedPlan.archivedAt);
-  const archivedSavedPlans = savedPlans.filter((savedPlan) => savedPlan.archivedAt);
+  const activeSavedPlans = sortPlansByEndDateDesc(
+    savedPlans.filter((savedPlan) => !savedPlan.archivedAt)
+  );
+  const archivedSavedPlans = sortPlansByEndDateDesc(
+    savedPlans.filter((savedPlan) => savedPlan.archivedAt)
+  );
 
   if ((!plan || isListView) && !isLoading) {
     return (
