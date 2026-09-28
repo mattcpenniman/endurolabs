@@ -24,6 +24,11 @@ function argument(name: string): string | undefined {
   return index >= 0 ? process.argv[index + 1] : undefined;
 }
 
+/** postgres.js serializes JSONB via sql.json(); a plain object is not JSONValue by default. */
+function toJson(value: unknown): postgres.JSONValue {
+  return value as unknown as postgres.JSONValue;
+}
+
 function usage(): void {
   console.error(`Usage:
   npm run plan:rebuild-week -- --plan-id UUID [--week N] [--apply] [--json]
@@ -107,7 +112,7 @@ try {
   }
 
   if (apply) {
-    await sql`update plans set plan_data = ${JSON.stringify(result.plan)}::jsonb, updated_at = now() where id = ${planRow.id}`;
+    await sql`update plans set plan_data = ${sql.json(toJson(result.plan))}, updated_at = now() where id = ${planRow.id}`;
   }
 
   const replacement = result.plan.weeks.find((week) => week.weekNumber === result.summary.weekNumber);
