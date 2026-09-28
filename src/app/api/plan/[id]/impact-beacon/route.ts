@@ -8,8 +8,13 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { getCurrentUser } from "@/lib/auth";
-import { buildImpactBeacon } from "@/lib/analytics/impact-beacon";
 import {
+  buildImpactBeacon,
+  impactBeaconBaselineWindow,
+  planStartDate,
+} from "@/lib/analytics/impact-beacon";
+import {
+  loadImpactBeaconBaselineRuns,
   loadImpactBeaconPlan,
   loadImpactBeaconRuns,
 } from "@/lib/analytics/plan-impact-beacon-loader";
@@ -31,7 +36,15 @@ export async function GET(
     }
 
     const asOf = new Date().toISOString().slice(0, 10);
-    const runs = await loadImpactBeaconRuns({ userId: user.id, planId: id, asOf });
+    const planStart = planStartDate(plan);
+    const baselineWindow = impactBeaconBaselineWindow(asOf);
+    const runs = planStart !== null && planStart > asOf
+      ? await loadImpactBeaconBaselineRuns({
+          userId: user.id,
+          since: baselineWindow.start,
+          asOf: baselineWindow.end,
+        })
+      : await loadImpactBeaconRuns({ userId: user.id, planId: id, asOf });
     return NextResponse.json(buildImpactBeacon({ plan, runs, asOf }));
   } catch (error) {
     console.error("Failed to build plan impact beacon:", error);

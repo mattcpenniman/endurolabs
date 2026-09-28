@@ -6,7 +6,7 @@
 // manual run logs, and per-activity time at effort computed from
 // stored samples with each activity's linked plan zones. Read-only.
 
-import { and, asc, eq, inArray, lte, or } from "drizzle-orm";
+import { and, asc, eq, gte, inArray, lte, or } from "drizzle-orm";
 import { db } from "@/lib/db/client";
 import { planRunLogs, plans, runActivities } from "@/lib/db/schema";
 import { metersToMiles, type ImpactBeaconRun } from "@/lib/analytics/impact-beacon";
@@ -26,6 +26,53 @@ export async function loadImpactBeaconPlan(
     .where(and(eq(plans.id, planId), eq(plans.userId, userId)))
     .limit(1);
   return normalizePlanData(row?.planData);
+}
+
+interface ImpactBeaconActivityRow {
+  id: string;
+  localDate: string;
+  distanceMeters: number;
+  durationSeconds: number;
+  eventType: string | null;
+  planId: string | null;
+  powerSource: string;
+}
+
+const ACTIVITY_COLUMNS = {
+  id: runActivities.id,
+  localDate: runActivities.localDate,
+  distanceMeters: runActivities.distanceMeters,
+  durationSeconds: runActivities.durationSeconds,
+  eventType: runActivities.eventType,
+  planId: runActivities.planId,
+  powerSource: runActivities.powerSource,
+};
+
+async function activityRuns(activityRows: ImpactBeaconActivityRow[]): Promise<ImpactBeaconRun[]> {
+  const effortByActivity = await loadTimeAtEffort(activityRows);
+  return activityRows.map((activity) => ({
+    date: activity.localDate,
+    miles: metersToMiles(activity.distanceMeters),
+    durationSeconds: activity.durationSeconds,
+    race: activity.eventType === "race",
+    timeAtEffort: effortByActivity.get(activity.id) ?? null,
+  }));
+}
+
+function appendManualLogs(runs: ImpactBeaconRun[], logs: Array<{
+  date: string;
+  actualMileage: number;
+  mergedActivityId: string | null;
+}>): void {
+  for (const log of logs) {
+    if (log.mergedActivityId) continue;
+    runs.push({
+      date: log.date.slice(0, 10),
+      miles: log.actualMileage / 100,
+      durationSeconds: null,
+      timeAtEffort: null,
+    });
+  }
 }
 
 export interface LoadImpactBeaconRunsInput {
@@ -58,15 +105,8 @@ export async function loadImpactBeaconRuns(
     .orderBy(asc(planRunLogs.date));
 
   const mergedIds = logs.flatMap((log) => (log.mergedActivityId ? [log.mergedActivityId] : []));
-  const activityRows = await db.select({
-    id: runActivities.id,
-    localDate: runActivities.localDate,
-    distanceMeters: runActivities.distanceMeters,
-    durationSeconds: runActivities.durationSeconds,
-    eventType: runActivities.eventType,
-    planId: runActivities.planId,
-    powerSource: runActivities.powerSource,
-  }).from(runActivities)
+  const activityRows = await db.select(ACTIVITY_COLUMNS)
+    .from(runActivities)
     .where(and(
       eq(runActivities.userId, input.userId),
       eq(runActivities.excludedFromAnalytics, false),
@@ -77,25 +117,53 @@ export async function loadImpactBeaconRuns(
     ))
     .orderBy(asc(runActivities.localDate));
 
-  const effortByActivity = await loadTimeAtEffort(activityRows);
+  const runs = await activityRuns(activityRows);
+  appendManualLogs(runs, logs);
+  return runs;
+}
 
-  const runs: ImpactBeaconRun[] = activityRows.map((activity) => ({
-    date: activity.localDate,
-    miles: metersToMiles(activity.distanceMeters),
-    durationSeconds: activity.durationSeconds,
-    race: activity.eventType === "race",
-    timeAtEffort: effortByActivity.get(activity.id) ?? null,
-  }));
+export interface LoadImpactBeaconBaselineRunsInput {
+  userId: string;
+  /** First day of the trailing window (YYYY-MM-DD). */
+  since: string;
+  /** Last day of the trailing window (YYYY-MM-DD). */
+  asOf: string;
+}
 
-  for (const log of logs) {
-    if (log.mergedActivityId) continue;
-    runs.push({
-      date: log.date.slice(0, 10),
-      miles: log.actualMileage / 100,
-      durationSeconds: null,
-      timeAtEffort: null,
-    });
-  }
+/**
+ * Builds the trailing actual-run list for a plan that has not started yet:
+ * every non-excluded activity in the window, whichever plan it is linked to,
+ * merged with completed manual logs the same way the plan-scoped loader does.
+ * Time at effort still uses each activity's own linked plan zones.
+ */
+export async function loadImpactBeaconBaselineRuns(
+  input: LoadImpactBeaconBaselineRunsInput,
+): Promise<ImpactBeaconRun[]> {
+  const logs = await db.select({
+    id: planRunLogs.id,
+    date: planRunLogs.date,
+    actualMileage: planRunLogs.actualMileage,
+    mergedActivityId: planRunLogs.mergedActivityId,
+  }).from(planRunLogs)
+    .where(and(
+      eq(planRunLogs.userId, input.userId),
+      eq(planRunLogs.completed, 1),
+      gte(planRunLogs.date, input.since),
+      lte(planRunLogs.date, input.asOf),
+    ))
+    .orderBy(asc(planRunLogs.date));
 
+  const activityRows = await db.select(ACTIVITY_COLUMNS)
+    .from(runActivities)
+    .where(and(
+      eq(runActivities.userId, input.userId),
+      eq(runActivities.excludedFromAnalytics, false),
+      gte(runActivities.localDate, input.since),
+      lte(runActivities.localDate, input.asOf),
+    ))
+    .orderBy(asc(runActivities.localDate));
+
+  const runs = await activityRuns(activityRows);
+  appendManualLogs(runs, logs);
   return runs;
 }

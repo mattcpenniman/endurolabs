@@ -251,6 +251,8 @@ describe("buildImpactBeacon", () => {
     });
 
     expect(report.version).toBe("impact-beacon-v1");
+    expect(report.mode).toBe("plan_to_date");
+    expect(report.baseline).toBeNull();
     expect(report.planStarted).toBe(true);
     expect(report.weeksElapsed).toBe(4);
     expect(report.beacon?.key).toBe("volume");
@@ -354,13 +356,90 @@ describe("buildImpactBeacon", () => {
     expect(volume?.planned).toBe(190);
   });
 
-  it("returns a no-data report before the plan starts", () => {
-    const report = buildImpactBeacon({ plan: makePlan(), runs: [], asOf: "2026-09-01" });
+  it("compares the plan's opening block with trailing actuals before the plan starts", () => {
+    const runs: ImpactBeaconRun[] = [
+      run("2026-08-05", 10),
+      run("2026-08-12", 10),
+      run("2026-08-19", 10),
+      run("2026-08-26", 10),
+    ];
+    const report = buildImpactBeacon({ plan: makePlan(), runs, asOf: "2026-09-01" });
+    const volume = report.metrics.find((metric) => metric.key === "volume");
+
+    expect(report.mode).toBe("opening_block");
+    expect(report.planStarted).toBe(false);
+    expect(report.baseline).toEqual({
+      weeks: 4,
+      plannedStart: "2026-09-07",
+      plannedEnd: "2026-10-04",
+      actualStart: "2026-08-05",
+      actualEnd: "2026-09-01",
+    });
+    expect(volume?.planned).toBe(190);
+    expect(volume?.actual).toBe(40);
+    expect(volume?.evidence).toContain("trailing 4 weeks");
+    expect(report.gaps.map((gap) => gap.key)).toEqual(["volume", "long_run"]);
+    expect(report.beacon?.key).toBe("volume");
+    expect(report.summary).toContain("Plan starts 2026-09-07");
+    expect(report.summary).toContain("Largest gap: Weekly volume");
+  });
+
+  it("does not beacon before the plan starts when current training meets the opening block", () => {
+    const runs: ImpactBeaconRun[] = [
+      run("2026-08-06", 20),
+      run("2026-08-09", 20),
+      run("2026-08-13", 20),
+      run("2026-08-16", 20),
+      run("2026-08-20", 20),
+      run("2026-08-23", 20),
+      run("2026-08-27", 20),
+      run("2026-08-30", 20),
+      run("2026-09-01", 16),
+    ];
+    const report = buildImpactBeacon({ plan: makePlan(), runs, asOf: "2026-09-01" });
+
+    expect(report.mode).toBe("opening_block");
+    expect(report.beacon).toBeNull();
+    expect(report.summary).toContain("Plan starts 2026-09-07");
+    expect(report.summary).toContain("On track");
+  });
+
+  it("caps the opening block at the plan length", () => {
+    const shortPlan = makePlan({ weeks: makePlan().weeks.slice(0, 2) });
+    const report = buildImpactBeacon({ plan: shortPlan, runs: [], asOf: "2026-09-01" });
+    const volume = report.metrics.find((metric) => metric.key === "volume");
+
+    expect(report.mode).toBe("opening_block");
+    expect(report.baseline?.weeks).toBe(2);
+    expect(report.baseline?.plannedEnd).toBe("2026-09-20");
+    expect(volume?.planned).toBe(85);
+    expect(volume?.actual).toBe(0);
+  });
+
+  it("ignores runs outside the trailing window before the plan starts", () => {
+    const runs: ImpactBeaconRun[] = [
+      run("2026-07-15", 30),
+      run("2026-09-02", 30),
+      run("2026-08-30", 5),
+    ];
+    const report = buildImpactBeacon({ plan: makePlan(), runs, asOf: "2026-09-01" });
+    const volume = report.metrics.find((metric) => metric.key === "volume");
+
+    expect(volume?.actual).toBe(5);
+  });
+
+  it("reports no scheduled weeks when the plan is empty", () => {
+    const report = buildImpactBeacon({
+      plan: makePlan({ weeks: [], totalWeeks: 0 }),
+      runs: [],
+      asOf: "2026-09-01",
+    });
 
     expect(report.planStarted).toBe(false);
+    expect(report.baseline).toBeNull();
     expect(report.beacon).toBeNull();
     expect(report.metrics.every((metric) => metric.direction === "no_data")).toBe(true);
-    expect(report.summary).toContain("starts on 2026-09-07");
+    expect(report.summary).toContain("no scheduled weeks");
   });
 
   it("rejects an invalid as-of date", () => {

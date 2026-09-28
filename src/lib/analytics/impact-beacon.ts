@@ -44,6 +44,9 @@ export const IMPACT_BEACON_BEHIND_RATIO = 0.9;
 /** Above this completion ratio an impact-eligible metric is ahead of plan. */
 export const IMPACT_BEACON_AHEAD_RATIO = 1.1;
 
+/** Weeks compared before a plan starts: its opening block vs the trailing actuals. */
+export const IMPACT_BEACON_BASELINE_WEEKS = 4;
+
 /** Runs of at least this many miles count as long-run finish work. */
 const LONG_RUN_FINISH_MIN_MILES = 12;
 const METERS_PER_MILE = 1609.344;
@@ -80,6 +83,22 @@ export interface ImpactBeaconInput {
 export type ImpactBeaconDirection = "ahead" | "on_track" | "behind" | "no_data";
 
 export type ImpactBeaconUnit = "miles" | "minutes" | "count" | "weeks";
+
+/**
+ * `plan_to_date` compares the plan's schedule through today with the runs
+ * inside the same window. `opening_block` is the pre-start view: the plan's
+ * first weeks against the athlete's trailing actual training.
+ */
+export type ImpactBeaconMode = "plan_to_date" | "opening_block";
+
+/** The two windows compared when the plan has not started yet. */
+export interface ImpactBeaconBaseline {
+  weeks: number;
+  plannedStart: string;
+  plannedEnd: string;
+  actualStart: string;
+  actualEnd: string;
+}
 
 export interface ImpactBeaconComponent {
   label: string;
@@ -125,6 +144,9 @@ export interface ImpactBeaconReport {
   version: typeof IMPACT_BEACON_VERSION;
   planId: string;
   asOf: string;
+  mode: ImpactBeaconMode;
+  /** Present only when `mode` is `opening_block`. */
+  baseline: ImpactBeaconBaseline | null;
   planStarted: boolean;
   /** Plan weeks that have started by the as-of date. */
   weeksElapsed: number;
@@ -154,8 +176,59 @@ function daysInclusive(start: string, end: string): number {
   );
 }
 
+function isoDay(millis: number): string {
+  return new Date(millis).toISOString().slice(0, 10);
+}
+
 function round1(value: number): number {
   return Math.round(value * 10) / 10;
+}
+
+/** First scheduled plan day, or null when the plan carries no weeks. */
+export function planStartDate(plan: MarathonPlan): string | null {
+  const weeks = planWeeks(plan);
+  if (weeks.length === 0) return null;
+  const start = day(weeks[0].startDate ?? "");
+  return start === "" ? null : start;
+}
+
+export interface ImpactBeaconBaselineWindow {
+  /** First day of the trailing actual window. */
+  start: string;
+  /** Last day of the trailing actual window (the as-of date). */
+  end: string;
+  weeks: number;
+  /** One 7-day bucket per week, oldest first, clipped to the as-of date. */
+  windows: Array<{ start: string; end: string }>;
+}
+
+/**
+ * The trailing actual window compared with the plan's opening block before
+ * the plan starts: `weeks` complete 7-day buckets ending on the as-of date.
+ */
+export function impactBeaconBaselineWindow(
+  asOf: string,
+  weeks: number = IMPACT_BEACON_BASELINE_WEEKS,
+): ImpactBeaconBaselineWindow {
+  const endMs = Date.parse(`${asOf}T00:00:00Z`);
+  const startMs = endMs - (weeks * 7 - 1) * DAY_MS;
+  const windows = Array.from({ length: weeks }, (_, index) => ({
+    start: isoDay(startMs + index * 7 * DAY_MS),
+    end: isoDay(Math.min(startMs + (index * 7 + 6) * DAY_MS, endMs)),
+  }));
+  return { start: isoDay(startMs), end: isoDay(endMs), weeks, windows };
+}
+
+/** Plan weeks that have started by the cutoff, each clipped to it. */
+function planWeekWindows(plan: MarathonPlan, through: string): Array<{ start: string; end: string }> {
+  const windows: Array<{ start: string; end: string }> = [];
+  for (const week of planWeeks(plan)) {
+    const weekStart = day(week.startDate ?? "");
+    if (!weekStart || weekStart > through) continue;
+    const weekEnd = day(week.endDate ?? weekStart);
+    windows.push({ start: weekStart, end: weekEnd < through ? weekEnd : through });
+  }
+  return windows;
 }
 
 // ─── Planned side ──────────────────────────────────────────
@@ -330,10 +403,10 @@ interface ActualTraining {
 }
 
 function actualTraining(
-  plan: MarathonPlan,
   runs: ImpactBeaconRun[],
   start: string,
   through: string,
+  weekWindows: Array<{ start: string; end: string }>,
 ): ActualTraining {
   const inWindow = runs.filter((run) => {
     const date = day(run.date ?? "");
@@ -391,14 +464,10 @@ function actualTraining(
   }
 
   let activeWeeks = 0;
-  for (const week of planWeeks(plan)) {
-    const weekStart = day(week.startDate ?? "");
-    if (!weekStart || weekStart > through) continue;
-    const weekEnd = day(week.endDate ?? weekStart);
-    const bound = weekEnd < through ? weekEnd : through;
+  for (const window of weekWindows) {
     if (inWindow.some((run) => {
       const date = day(run.date ?? "");
-      return date >= weekStart && date <= bound;
+      return date >= window.start && date <= window.end;
     })) {
       activeWeeks += 1;
     }
@@ -439,6 +508,27 @@ function formatRatio(ratio: number | null): string {
 function formatDelta(value: number, unit: ImpactBeaconUnit): string {
   const sign = value > 0 ? "+" : value < 0 ? "-" : "+";
   return `${sign}${formatValue(Math.abs(value), unit)}`;
+}
+
+interface ComparisonLabels {
+  /** True when the planned side is the plan's opening block. */
+  opening: boolean;
+  /** Planned-side phrase, e.g. "in the plan's first 4 weeks". */
+  planned: string;
+  /** Actual-side phrase, e.g. "in the trailing 4 weeks". */
+  actual: string;
+}
+
+function comparisonLabels(mode: ImpactBeaconMode, weeks: number): ComparisonLabels {
+  if (mode !== "opening_block") {
+    return { opening: false, planned: "through the cutoff", actual: "" };
+  }
+  const suffix = weeks === 1 ? "week" : "weeks";
+  return {
+    opening: true,
+    planned: `in the plan's first ${weeks} ${suffix}`,
+    actual: `in the trailing ${weeks} ${suffix}`,
+  };
 }
 
 // ─── Metric assembly ───────────────────────────────────────
@@ -507,6 +597,7 @@ function volumeMetric(
   planned: PlannedTraining,
   actual: ActualTraining,
   eligible: Set<ReadinessMetricKey>,
+  labels: ComparisonLabels,
 ): ImpactBeaconMetricStatus {
   const components: ImpactBeaconComponent[] = [{
     label: "Run minutes",
@@ -514,11 +605,14 @@ function volumeMetric(
     actual: actual.minutes,
     unit: "minutes",
   }];
+  const actualPhrase = labels.actual ? ` ${labels.actual}` : "";
   const evidence = planned.miles > 0
-    ? `Planned ${formatValue(planned.miles, "miles")} through the cutoff; logged `
-      + `${formatValue(actual.miles, "miles")} (${formatRatio(actual.miles / planned.miles)} `
+    ? `Planned ${formatValue(planned.miles, "miles")} ${labels.planned}; logged `
+      + `${formatValue(actual.miles, "miles")}${actualPhrase} (${formatRatio(actual.miles / planned.miles)} `
       + `of plan, ${formatDelta(actual.miles - planned.miles, "miles")}).`
-    : "No plan mileage has elapsed yet.";
+    : labels.opening
+      ? "No plan mileage is scheduled in the opening block."
+      : "No plan mileage has elapsed yet.";
   return metricStatus({
     key: "volume",
     unit: "miles",
@@ -535,6 +629,7 @@ function longRunMetric(
   planned: PlannedTraining,
   actual: ActualTraining,
   eligible: Set<ReadinessMetricKey>,
+  labels: ComparisonLabels,
 ): ImpactBeaconMetricStatus {
   const components: ImpactBeaconComponent[] = [
     {
@@ -551,7 +646,16 @@ function longRunMetric(
     },
   ];
   let evidence: string;
-  if (planned.longestRunMiles === null) {
+  if (labels.opening) {
+    if (planned.longestRunMiles === null) {
+      evidence = "No long run is scheduled in the opening block.";
+    } else {
+      const ratio = planned.longestRunMiles > 0 ? actual.longestRunMiles / planned.longestRunMiles : null;
+      evidence = `Longest scheduled run ${labels.planned} ${formatValue(planned.longestRunMiles, "miles")}; `
+        + `longest logged run ${labels.actual} ${formatValue(actual.longestRunMiles, "miles")} `
+        + `(${formatRatio(ratio)}).`;
+    }
+  } else if (planned.longestRunMiles === null) {
     evidence = "No long run has been scheduled yet.";
   } else if (actual.longestRunMiles <= 0) {
     evidence = `Longest scheduled run so far ${formatValue(planned.longestRunMiles, "miles")}; `
@@ -577,11 +681,17 @@ function consistencyMetric(
   planned: PlannedTraining,
   actual: ActualTraining,
   eligible: Set<ReadinessMetricKey>,
+  labels: ComparisonLabels,
 ): ImpactBeaconMetricStatus {
   const evidence = planned.weeksElapsed > 0
-    ? `${actual.activeWeeks} of ${planned.weeksElapsed} elapsed plan weeks logged training `
-      + `(${formatRatio(actual.activeWeeks / planned.weeksElapsed)}).`
-    : "No plan weeks have elapsed yet.";
+    ? labels.opening
+      ? `${actual.activeWeeks} of ${planned.weeksElapsed} opening-block weeks logged training `
+        + `${labels.actual} (${formatRatio(actual.activeWeeks / planned.weeksElapsed)}).`
+      : `${actual.activeWeeks} of ${planned.weeksElapsed} elapsed plan weeks logged training `
+        + `(${formatRatio(actual.activeWeeks / planned.weeksElapsed)}).`
+    : labels.opening
+      ? "The opening block has no scheduled weeks."
+      : "No plan weeks have elapsed yet.";
   return metricStatus({
     key: "consistency",
     unit: "weeks",
@@ -599,6 +709,7 @@ function effortMetric(
   planned: PlannedTraining,
   actual: ActualTraining,
   eligible: Set<ReadinessMetricKey>,
+  labels: ComparisonLabels,
 ): ImpactBeaconMetricStatus {
   const isHeartRate = key === "hr_effort";
   const measuredRuns = isHeartRate ? actual.hrMeasuredRuns : actual.powerMeasuredRuns;
@@ -624,7 +735,23 @@ function effortMetric(
   ];
 
   let evidence: string;
-  if (planned.effortMinutes <= 0) {
+  if (labels.opening) {
+    if (planned.effortMinutes <= 0) {
+      evidence = "No marathon-pace or faster work is scheduled in the opening block.";
+    } else if (dataMissing) {
+      evidence = `Scheduled ${formatValue(planned.effortMinutes, "minutes")} at marathon-or-faster `
+        + `${source} effort ${labels.planned}; no stored sample detail is available to measure it `
+        + `${labels.actual}.`;
+    } else {
+      const ratio = planned.effortMinutes > 0 && effortMinutes !== null
+        ? effortMinutes / planned.effortMinutes
+        : null;
+      evidence = `Scheduled ${formatValue(planned.effortMinutes, "minutes")} at marathon-or-faster `
+        + `${source} effort ${labels.planned}; recorded ${formatValue(effortMinutes ?? 0, "minutes")} `
+        + `${labels.actual} from ${measuredRuns} run${measuredRuns === 1 ? "" : "s"} with samples `
+        + `(${formatRatio(ratio)}).`;
+    }
+  } else if (planned.effortMinutes <= 0) {
     evidence = "No marathon-pace or faster work has been scheduled yet.";
   } else if (dataMissing) {
     evidence = `Scheduled ${formatValue(planned.effortMinutes, "minutes")} at marathon-or-faster `
@@ -660,12 +787,33 @@ const METRIC_UNITS: Record<ReadinessMetricKey, ImpactBeaconUnit> = {
   power_effort: "minutes",
 };
 
+function collectGaps(metrics: ImpactBeaconMetricStatus[]): ImpactBeaconGap[] {
+  return metrics
+    .filter((metric) => metric.impactEligible && metric.direction === "behind" && metric.completionRatio !== null)
+    .sort((left, right) => (left.completionRatio ?? 1) - (right.completionRatio ?? 1))
+    .map((metric) => ({
+      key: metric.key,
+      label: metric.label,
+      tier: metric.tier,
+      planned: metric.planned ?? 0,
+      actual: metric.actual ?? 0,
+      delta: metric.delta ?? 0,
+      completionRatio: metric.completionRatio ?? 0,
+      unit: metric.unit,
+      evidence: metric.evidence,
+    }));
+}
+
 /**
- * Builds the plan-vs-actual impact beacon report. The planned side is the
- * plan's own schedule through `asOf` (pro-rating the in-progress week, so a
- * partial week is not treated as a full one). The actual side is filtered to
- * the same window. Only metrics in `beaconMetrics` (default: validated or
- * provisional per `beaconReadinessMetrics()`) can produce the beacon.
+ * Builds the plan-vs-actual impact beacon report. Once the plan has started,
+ * the planned side is the plan's own schedule through `asOf` (pro-rating the
+ * in-progress week, so a partial week is not treated as a full one) and the
+ * actual side is filtered to the same window. Before the plan starts, the
+ * planned side is its opening block — the first `IMPACT_BEACON_BASELINE_WEEKS`
+ * weeks — and the actual side is the athlete's trailing actual training over
+ * the same number of weeks, so a proposed plan still gets a beacon. Only
+ * metrics in `beaconMetrics` (default: validated or provisional per
+ * `beaconReadinessMetrics()`) can produce the beacon.
  */
 export function buildImpactBeacon(input: ImpactBeaconInput): ImpactBeaconReport {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(input.asOf)) {
@@ -673,7 +821,7 @@ export function buildImpactBeacon(input: ImpactBeaconInput): ImpactBeaconReport 
   }
   const eligible = new Set<ReadinessMetricKey>(input.beaconMetrics ?? beaconReadinessMetrics());
   const weeks = planWeeks(input.plan);
-  const planStart = weeks.length > 0 ? day(weeks[0].startDate ?? "") : "";
+  const planStart = planStartDate(input.plan) ?? "";
   const planEnd = weeks.length > 0
     ? day(weeks[weeks.length - 1].endDate ?? weeks[weeks.length - 1].startDate ?? "")
     : "";
@@ -688,7 +836,7 @@ export function buildImpactBeacon(input: ImpactBeaconInput): ImpactBeaconReport 
       : null,
   };
 
-  if (!planStarted) {
+  if (planStart === "") {
     const metrics = READINESS_METRIC_KEYS.map((key) => metricStatus({
       key,
       unit: METRIC_UNITS[key],
@@ -703,43 +851,90 @@ export function buildImpactBeacon(input: ImpactBeaconInput): ImpactBeaconReport 
       version: IMPACT_BEACON_VERSION,
       planId: input.plan.id,
       asOf: input.asOf,
+      mode: "plan_to_date",
+      baseline: null,
       planStarted: false,
       weeksElapsed: 0,
       race,
       metrics,
       gaps: [],
       beacon: null,
-      summary: planStart === ""
-        ? "This plan has no scheduled weeks."
-        : `This plan starts on ${planStart}; there is nothing to compare yet.`,
+      summary: "This plan has no scheduled weeks.",
+    };
+  }
+
+  if (!planStarted) {
+    const baselineWeeks = Math.min(IMPACT_BEACON_BASELINE_WEEKS, weeks.length);
+    const opening = weeks[baselineWeeks - 1];
+    const openingEnd = day(opening.endDate ?? opening.startDate ?? "");
+    const window = impactBeaconBaselineWindow(input.asOf, baselineWeeks);
+    const labels = comparisonLabels("opening_block", baselineWeeks);
+    const planned = plannedTraining(input.plan, openingEnd);
+    const actual = actualTraining(input.runs, window.start, window.end, window.windows);
+
+    const metrics: ImpactBeaconMetricStatus[] = [
+      volumeMetric(planned, actual, eligible, labels),
+      longRunMetric(planned, actual, eligible, labels),
+      consistencyMetric(planned, actual, eligible, labels),
+      effortMetric("hr_effort", planned, actual, eligible, labels),
+      effortMetric("power_effort", planned, actual, eligible, labels),
+    ];
+    const gaps = collectGaps(metrics);
+    const beacon = gaps[0] ?? null;
+    const eligibleWithData = metrics.filter((metric) => metric.impactEligible && metric.direction !== "no_data");
+    const suffix = baselineWeeks === 1 ? "week" : "weeks";
+    let summary: string;
+    if (beacon) {
+      summary = `Plan starts ${planStart}. Largest gap: ${beacon.label} — `
+        + `${formatValue(beacon.actual, beacon.unit)} now vs ${formatValue(beacon.planned, beacon.unit)} `
+        + `in the plan's first ${baselineWeeks} ${suffix} (${formatRatio(beacon.completionRatio)}).`;
+    } else if (eligibleWithData.length > 0) {
+      summary = `Plan starts ${planStart}. On track: ${eligibleWithData.map((metric) => metric.label).join(", ")} `
+        + `at or ahead of the plan's first ${baselineWeeks} ${suffix}.`;
+    } else {
+      summary = `Plan starts ${planStart}; not enough recent logged training to beacon a validated `
+        + "readiness metric yet.";
+    }
+
+    return {
+      version: IMPACT_BEACON_VERSION,
+      planId: input.plan.id,
+      asOf: input.asOf,
+      mode: "opening_block",
+      baseline: {
+        weeks: baselineWeeks,
+        plannedStart: planStart,
+        plannedEnd: openingEnd,
+        actualStart: window.start,
+        actualEnd: window.end,
+      },
+      planStarted: false,
+      weeksElapsed: 0,
+      race,
+      metrics,
+      gaps,
+      beacon,
+      summary,
     };
   }
 
   const planned = plannedTraining(input.plan, effectiveEnd);
-  const actual = actualTraining(input.plan, input.runs, planStart, effectiveEnd);
-
+  const actual = actualTraining(
+    input.runs,
+    planStart,
+    effectiveEnd,
+    planWeekWindows(input.plan, effectiveEnd),
+  );
+  const labels = comparisonLabels("plan_to_date", planned.weeksElapsed);
   const metrics: ImpactBeaconMetricStatus[] = [
-    volumeMetric(planned, actual, eligible),
-    longRunMetric(planned, actual, eligible),
-    consistencyMetric(planned, actual, eligible),
-    effortMetric("hr_effort", planned, actual, eligible),
-    effortMetric("power_effort", planned, actual, eligible),
+    volumeMetric(planned, actual, eligible, labels),
+    longRunMetric(planned, actual, eligible, labels),
+    consistencyMetric(planned, actual, eligible, labels),
+    effortMetric("hr_effort", planned, actual, eligible, labels),
+    effortMetric("power_effort", planned, actual, eligible, labels),
   ];
 
-  const gaps: ImpactBeaconGap[] = metrics
-    .filter((metric) => metric.impactEligible && metric.direction === "behind" && metric.completionRatio !== null)
-    .sort((left, right) => (left.completionRatio ?? 1) - (right.completionRatio ?? 1))
-    .map((metric) => ({
-      key: metric.key,
-      label: metric.label,
-      tier: metric.tier,
-      planned: metric.planned ?? 0,
-      actual: metric.actual ?? 0,
-      delta: metric.delta ?? 0,
-      completionRatio: metric.completionRatio ?? 0,
-      unit: metric.unit,
-      evidence: metric.evidence,
-    }));
+  const gaps = collectGaps(metrics);
   const beacon = gaps[0] ?? null;
 
   const eligibleWithData = metrics.filter((metric) => metric.impactEligible && metric.direction !== "no_data");
@@ -758,6 +953,8 @@ export function buildImpactBeacon(input: ImpactBeaconInput): ImpactBeaconReport 
     version: IMPACT_BEACON_VERSION,
     planId: input.plan.id,
     asOf: input.asOf,
+    mode: "plan_to_date",
+    baseline: null,
     planStarted: true,
     weeksElapsed: planned.weeksElapsed,
     race,
