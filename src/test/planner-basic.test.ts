@@ -282,6 +282,32 @@ describe('runSafetyGates', () => {
     const gates = runSafetyGates(plan, { sourceMaxTimestamp: '', asOf: '', trainingFeatures: { runs: 20 }, injuryFlags: [], consistencyRate: 0.8, peakWeeklyMiles: 40 } as any, {});
     expect(gates.find(g => g.checkId === 'weekly_progression')!.result).toBe('warn');
   });
+
+  it('allows returning to the pre-recovery mileage after a down week', () => {
+    const weeks = [
+      { totalMileage: 40, isDownWeek: false },
+      { totalMileage: 44, isDownWeek: false },
+      { totalMileage: 35, isDownWeek: true },
+      { totalMileage: 44, isDownWeek: false },
+    ];
+    const plan = makeMinimalPlan(weeks);
+    const gates = runSafetyGates(plan, { sourceMaxTimestamp: '', asOf: '', trainingFeatures: { runs: 20 }, injuryFlags: [], consistencyRate: 0.8, peakWeeklyMiles: 45 } as any, {});
+
+    expect(gates.find(g => g.checkId === 'weekly_progression')!.result).toBe('pass');
+  });
+
+  it('warns when the rebound after a down week exceeds the pre-recovery level', () => {
+    const weeks = [
+      { totalMileage: 40, isDownWeek: false },
+      { totalMileage: 44, isDownWeek: false },
+      { totalMileage: 35, isDownWeek: true },
+      { totalMileage: 55, isDownWeek: false },
+    ];
+    const plan = makeMinimalPlan(weeks);
+    const gates = runSafetyGates(plan, { sourceMaxTimestamp: '', asOf: '', trainingFeatures: { runs: 20 }, injuryFlags: [], consistencyRate: 0.8, peakWeeklyMiles: 60 } as any, {});
+
+    expect(gates.find(g => g.checkId === 'weekly_progression')!.result).toBe('warn');
+  });
 });
 
 // ─── Recommendations ────────────────────────────────────────

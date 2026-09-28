@@ -70,7 +70,16 @@ const PEAK_BUILD_BLOCK_LEVELS = [
   [1, 0.75, 0.25],
   [1, 0.5, 0.25],
 ];
-const TAPER_VOLUME_FRACTIONS = [0.75, 0.55, 0.4];
+// Taper volume as a fraction of peak, keyed by weeks before the race. The
+// documented plan holds roughly 70% of peak through the last three pre-race
+// weeks and 60% one week out (docs/elite-training-plan.md). The race week is
+// built separately around the race itself.
+const TAPER_FRACTIONS_BY_WEEKS_BEFORE_RACE: Record<number, number> = {
+  1: 0.6,
+  2: 0.7,
+  3: 0.7,
+};
+const TAPER_RECOVERY_FACTOR = 0.9;
 const DEFAULT_INTENSITY_TARGET_PERCENTS = {
   marathon: 10,
   threshold: 6,
@@ -89,21 +98,26 @@ function calculateWeeks(raceDate: string, weeksOverride?: number | null): number
 
 // ─── Phase Division ─────────────────────────────────────────
 
-function dividePhases(totalWeeks: number): PhaseInfo[] {
+function dividePhases(totalWeeks: number, curve: MileageWeek[], peakMileage: number): PhaseInfo[] {
   // Daniels-style marathon block: 6-8 weeks of aerobic/LT base,
   // marathon-specific build, then a 3-4 week peak/taper.
-  const taperWeeks = Math.max(3, Math.min(4, Math.round(totalWeeks * 0.2)));
+  const taperWeeks = taperWeekCount(totalWeeks);
   const baseWeeks = Math.max(5, Math.min(8, Math.round((totalWeeks - taperWeeks) * 0.45)));
   const buildWeeks = totalWeeks - baseWeeks - taperWeeks;
+  const buildStart = baseWeeks + 1;
+  const buildEnd = baseWeeks + buildWeeks;
+  const taperStart = buildEnd + 1;
+  const milesAt = (week: number): number => curve[Math.min(Math.max(week, 1), curve.length) - 1]?.mileage ?? 0;
+  const longRunAt = (week: number): number => roundMiles(milesAt(week) * 0.25);
 
   return [
     {
       phaseNumber: 1,
       name: "Phase 1: Aerobic + Threshold Base",
-      description: "Build from roughly 50 to 65 miles per week while raising lactate threshold, the main bottleneck for marathon durability.",
+      description: `Build from roughly ${milesAt(1)} to ${milesAt(baseWeeks)} miles per week while raising lactate threshold, the main bottleneck for marathon durability.`,
       focus: "Raise LT and reinforce aerobic durability",
-      targetMileage: "~50 -> 65 mpw",
-      longRunRange: "14-18 miles, mostly easy",
+      targetMileage: `~${milesAt(1)} -> ${milesAt(baseWeeks)} mpw`,
+      longRunRange: `${longRunAt(1)}-${longRunAt(baseWeeks)} miles, mostly easy`,
       weekRange: [1, baseWeeks],
       startDate: "",
       endDate: "",
@@ -111,22 +125,22 @@ function dividePhases(totalWeeks: number): PhaseInfo[] {
     {
       phaseNumber: 2,
       name: "Phase 2: Marathon-Specific Build",
-      description: "Move from 65 miles per week toward peak volume, introduce marathon-pace long runs, and extend fatigue resistance.",
+      description: `Move from ${milesAt(buildStart)} miles per week toward a ${peakMileage} mpw peak, introduce marathon-pace long runs, and extend fatigue resistance.`,
       focus: "Marathon pace and fatigue resistance",
-      targetMileage: "65 -> 80-90 mpw peak",
-      longRunRange: "Long runs with marathon-pace work",
-      weekRange: [baseWeeks + 1, baseWeeks + buildWeeks],
+      targetMileage: `${milesAt(buildStart)} -> ${peakMileage} mpw peak`,
+      longRunRange: `Long runs ${longRunAt(buildStart)}-${longRunAt(buildEnd)} miles with marathon-pace work`,
+      weekRange: [buildStart, buildEnd],
       startDate: "",
       endDate: "",
     },
     {
       phaseNumber: 3,
       name: "Phase 3: Peak + Taper",
-      description: "Reach the most specific long runs, then reduce volume while keeping enough intensity to stay sharp.",
+      description: `Reach the most specific long runs at up to ${longRunAt(taperStart - 1)} miles, then reduce volume while keeping enough intensity to stay sharp.`,
       focus: "Highest specificity, then freshen up",
-      targetMileage: "Peak, then reduce volume",
-      longRunRange: "20-22 mile peak long runs",
-      weekRange: [baseWeeks + buildWeeks + 1, totalWeeks],
+      targetMileage: `Peak ${peakMileage}, then ${milesAt(taperStart)} -> ${milesAt(totalWeeks - 1)} mpw`,
+      longRunRange: `Long runs taper from ${longRunAt(taperStart)} to ${longRunAt(totalWeeks - 1)} miles`,
+      weekRange: [taperStart, totalWeeks],
       startDate: "",
       endDate: "",
     },
@@ -171,118 +185,84 @@ function selectTrainingDays(
   return trainingDays;
 }
 
-// ─── Mileage Progression Curve (stepped: plateau → step → recovery → repeat) ──
+// ─── Mileage Progression Curve (ramp → recovery → peak, then documented taper) ──
 
-function mileageProgression(
-  week: number,
-  totalWeeks: number,
-  startMileage: number,
-  peakMileage: number,
-  _phase: TrainingPhase
-): number {
-  if (totalWeeks <= 1 || peakMileage <= startMileage) {
-    return Math.round(startMileage);
-  }
-
-  const taperWeeks = Math.min(3, Math.max(0, totalWeeks - 1));
-  const buildWeeks = Math.max(0, totalWeeks - taperWeeks);
-  const availableBuildWeeks = buildWeeks;
-  const fullBuildBlocks = Math.floor(availableBuildWeeks / 3);
-  const partialBuildWeeks = availableBuildWeeks % 3;
-  const baseBlockCount = Math.min(BASE_BUILD_BLOCK_LEVELS.length, fullBuildBlocks);
-  const peakBlockCount = Math.max(0, fullBuildBlocks - baseBlockCount);
-  const selectedPeakBlocks = PEAK_BUILD_BLOCK_LEVELS.slice(0, peakBlockCount);
-  const finalBuildLevel = selectedPeakBlocks.length > 0
-    ? selectedPeakBlocks[selectedPeakBlocks.length - 1][0]
-    : BASE_BUILD_BLOCK_LEVELS[Math.max(0, baseBlockCount - 1)]?.[0] ?? 0;
-  const buildLevels = [
-    ...BASE_BUILD_BLOCK_LEVELS.slice(0, baseBlockCount).flat(),
-    ...selectedPeakBlocks.flat(),
-    ...Array.from({ length: partialBuildWeeks }, () => finalBuildLevel),
-  ];
-  const mileageAtLevel = (level: number): number =>
-    Math.round(startMileage + (peakMileage - startMileage) * level);
-
-  if (week <= buildWeeks) {
-    const level = buildLevels[Math.min(week - 1, Math.max(0, buildLevels.length - 1))] ?? 0;
-    return mileageAtLevel(level);
-  }
-
-  // Taper the final weeks down from the last build week — not down to the
-  // starting mileage — so the race week is a real reduction even when the
-  // runner started close to their peak.
-  const lastBuildLevel = buildLevels[Math.max(0, buildWeeks - 1)] ?? 1;
-  const lastBuildMileage = mileageAtLevel(lastBuildLevel);
-  const taperIndex = week - buildWeeks;
-  const fraction = TAPER_VOLUME_FRACTIONS[Math.min(taperIndex - 1, TAPER_VOLUME_FRACTIONS.length - 1)] ?? 0.4;
-  return Math.max(1, Math.round(lastBuildMileage * fraction));
+interface MileageWeek {
+  /** Target mileage for the week. */
+  mileage: number;
+  /** Ramp level between start and peak mileage; null in the taper and race weeks. */
+  level: number | null;
+  /** True when the ramp intentionally drops this week for recovery. */
+  isDownWeek: boolean;
 }
 
-// ─── Long Run Progression (stepped: plateau → step → recovery → repeat) ──
+function taperWeekCount(totalWeeks: number): number {
+  return Math.max(3, Math.min(4, Math.round(totalWeeks * 0.2)));
+}
 
-function longRunDistance(
-  week: number,
-  totalWeeks: number,
-  phase: TrainingPhase,
-  currentLongRun: number
-): number {
-  const baseWeeks = Math.round(totalWeeks * 0.3);
-  const taperWeeks = Math.max(3, Math.min(4, Math.round(totalWeeks * 0.2)));
-  const buildPhaseWeeks = totalWeeks - baseWeeks - taperWeeks;
+function taperMileageForWeeksBeforeRace(weeksBeforeRace: number): number {
+  return TAPER_FRACTIONS_BY_WEEKS_BEFORE_RACE[weeksBeforeRace] ?? TAPER_FRACTIONS_BY_WEEKS_BEFORE_RACE[3];
+}
 
-  if (phase === "base") {
-    // Step from current long run to 14 miles, plateau every 2 weeks
-    const steps = [0.6, 0.6, 0.75, 0.75, 0.85, 0.85, 1.0, 1.0];
-    const idx = Math.min(week - 1, steps.length - 1);
-    const target = Math.min(14, currentLongRun + (14 - currentLongRun) * steps[idx]);
-    return Math.round(target * 2) / 2;
-  } else if (phase === "marathon_build") {
-    // Stepped peaks: 16 → 17 → 18 → 19 → 20 miles, each held 2-3 weeks, with recovery between
-    const fullSequence = [
-      { miles: 16, hold: 2 },
-      { miles: 14, hold: 1 },
-      { miles: 17, hold: 2 },
-      { miles: 14, hold: 1 },
-      { miles: 18, hold: 2 },
-      { miles: 14, hold: 1 },
-      { miles: 19, hold: 2 },
-      { miles: 14, hold: 1 },
-      { miles: 20, hold: 3 },
-    ];
-
-    // Flatten to weeks
-    let weeksList: number[] = [];
-    for (const { miles, hold } of fullSequence) {
-      for (let i = 0; i < hold; i++) weeksList.push(miles);
-    }
-
-    // Trim or pad to fit buildPhaseWeeks
-    if (weeksList.length > buildPhaseWeeks) {
-      weeksList = weeksList.slice(0, buildPhaseWeeks);
-      // Ensure last week hits 20
-      if (weeksList[weeksList.length - 1] < 20) {
-        weeksList[weeksList.length - 1] = 20;
-      }
-    } else {
-      while (weeksList.length < buildPhaseWeeks) {
-        weeksList.push(weeksList[weeksList.length - 1]);
-      }
-    }
-
-    const buildWeek = week - baseWeeks;
-    return weeksList[Math.min(buildWeek - 1, weeksList.length - 1)];
-  } else {
-    // Taper: 16 → 10 → 5 → race
-    const taperStart = totalWeeks - taperWeeks;
-    const taperWeek = week - taperStart;
-    if (taperWeeks >= 3 && taperWeek === taperWeeks - 1) {
-      return 5; // 2 weeks out
-    }
-    if (taperWeek === taperWeeks - 2) {
-      return 10; // 1 week out
-    }
-    return 16; // Peak long before taper
+/**
+ * Build the whole week-by-week mileage curve once. The ramp steps from the
+ * runner's current mileage to peak in three-week blocks (two build weeks plus
+ * a recovery week), then the final pre-race weeks hold the documented percent
+ * of peak. Building the curve in one place keeps the phase ranges, the
+ * recovery flags, and the taper on the same sequence.
+ */
+function buildMileageCurve(totalWeeks: number, startMileage: number, peakMileage: number): MileageWeek[] {
+  if (totalWeeks <= 1) {
+    return [{ mileage: Math.round(startMileage), level: null, isDownWeek: false }];
   }
+
+  const taperWeeks = taperWeekCount(totalWeeks);
+  const buildWeeks = Math.max(0, totalWeeks - taperWeeks);
+  const fullBuildBlocks = Math.floor(buildWeeks / 3);
+  const partialBuildWeeks = buildWeeks % 3;
+  // Shorter plans keep one peak block: the final full block raises to peak
+  // instead of repeating the last base step below it.
+  const baseBlockCount = fullBuildBlocks <= BASE_BUILD_BLOCK_LEVELS.length
+    ? Math.max(0, fullBuildBlocks - 1)
+    : BASE_BUILD_BLOCK_LEVELS.length;
+  const peakBlockCount = Math.max(0, fullBuildBlocks - baseBlockCount);
+  const peakBlocks = Array.from({ length: peakBlockCount }, (_, index) =>
+    PEAK_BUILD_BLOCK_LEVELS[index % PEAK_BUILD_BLOCK_LEVELS.length]
+  );
+  const nextPeakBlock = PEAK_BUILD_BLOCK_LEVELS[peakBlockCount % PEAK_BUILD_BLOCK_LEVELS.length];
+  const blocks = [
+    ...BASE_BUILD_BLOCK_LEVELS.slice(0, baseBlockCount),
+    ...peakBlocks,
+    nextPeakBlock.slice(0, partialBuildWeeks),
+  ];
+  const mileageAtLevel = (level: number): number =>
+    peakMileage <= startMileage
+      ? Math.round(startMileage)
+      : Math.round(startMileage + (peakMileage - startMileage) * level);
+  const curve: MileageWeek[] = [];
+
+  for (const block of blocks) {
+    block.forEach((level, index) => {
+      curve.push({
+        mileage: mileageAtLevel(level),
+        level,
+        isDownWeek: peakMileage > startMileage && block.length === 3 && index === 2 && level < block[1],
+      });
+    });
+  }
+
+  // Taper to the documented percent of peak. If that target is not actually a
+  // reduction from the previous week (a runner far below peak whose last build
+  // week already sits at that level), step the previous week down instead.
+  const taperBase = Math.max(peakMileage, startMileage);
+  for (let week = buildWeeks + 1; week <= totalWeeks; week++) {
+    const previous = curve[curve.length - 1]?.mileage ?? Math.round(startMileage);
+    const target = Math.round(taperBase * taperMileageForWeeksBeforeRace(totalWeeks - week));
+    const mileage = Math.max(1, target <= previous ? target : Math.round(previous * TAPER_RECOVERY_FACTOR));
+    curve.push({ mileage, level: null, isDownWeek: false });
+  }
+
+  return curve;
 }
 
 function nearestVO2RepDistance(vo2Pace: number, targetRepMinutes: number): number {
@@ -1006,7 +986,6 @@ function addWorkoutIntensity(
 
 export function generatePlan(profile: RunnerProfile): MarathonPlan {
   const totalWeeks = calculateWeeks(profile.raceDate, profile.weeksOverride);
-  const phases = dividePhases(totalWeeks);
   const assessment = assessGoal(profile);
   const paceZones = calculatePaceZones(profile);
   const powerZones = calculatePowerZones(profile, paceZones);
@@ -1015,6 +994,8 @@ export function generatePlan(profile: RunnerProfile): MarathonPlan {
   const peakMileage = profile.peakMileageOverride
     ? Math.max(10, Math.min(120, profile.peakMileageOverride))
     : assessment.recommendedPeakMileage;
+  const mileageCurve = buildMileageCurve(totalWeeks, profile.currentWeeklyMileage, peakMileage);
+  const phases = dividePhases(totalWeeks, mileageCurve, peakMileage);
   const maxLongRunOverride = profile.maxLongRunOverride
     ? Math.max(4, Math.min(30, profile.maxLongRunOverride))
     : null;
@@ -1040,12 +1021,13 @@ export function generatePlan(profile: RunnerProfile): MarathonPlan {
   for (let week = 1; week <= totalWeeks; week++) {
     const phase = getPhaseForWeek(week, phases);
     const isRaceWeek = week === totalWeeks;
-    const progressionMileage = mileageProgression(week, totalWeeks, profile.currentWeeklyMileage, peakMileage, phase);
+    const curveWeek = mileageCurve[week - 1];
+    const progressionMileage = curveWeek?.mileage ?? profile.currentWeeklyMileage;
     const mileageOverride = profile.weeklyMileageOverrides?.[week];
     const weeklyMileage = mileageOverride === undefined
       ? progressionMileage
       : roundMiles(Math.max(5, Math.min(120, mileageOverride)));
-    const isDownWeek = phase === "marathon_build" && (week - phases[0].weekRange[1]) % 3 === 0;
+    const isDownWeek = phase === "marathon_build" && Boolean(curveWeek?.isDownWeek);
     const intensityTargetDistribution = calculateIntensityTargets(
       weeklyMileage,
       phase,
@@ -1119,7 +1101,7 @@ export function generatePlan(profile: RunnerProfile): MarathonPlan {
       phase,
       days,
       totalMileage: targetMileage,
-      calculatedMileage: progressionMileage,
+      calculatedMileage: isRaceWeek ? targetMileage : progressionMileage,
       isDownWeek,
       longRunDistance: longRunMiles,
       intensityDistribution: intensityDist,

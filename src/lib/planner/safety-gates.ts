@@ -15,13 +15,18 @@ const MIN_RECOVERY_RATIO = 0.25;
 
 function checkWeeklyProgression(weeks: readonly WeeklyPlan[]): SafetyGateResult {
   for (let i = 1; i < weeks.length; i++) {
-    const prev = weeks[i - 1].totalMileage;
-    const curr = weeks[i].totalMileage;
-    if (prev > 0 && (curr - prev) / prev > MAX_WEEKLY_PROGRESSION && !weeks[i].isDownWeek) {
+    const previous = weeks[i - 1];
+    const current = weeks[i];
+    // A rebound after an intentional down week returns toward the prior level;
+    // compare it with the pre-recovery week instead of the down week itself.
+    const reference = previous.isDownWeek
+      ? Math.max(weeks[i - 2]?.totalMileage ?? 0, previous.totalMileage)
+      : previous.totalMileage;
+    if (reference > 0 && (current.totalMileage - reference) / reference > MAX_WEEKLY_PROGRESSION) {
       return {
         checkId: 'weekly_progression',
         result: 'warn',
-        message: `Week ${i + 1} increases mileage by ${((curr - prev) / prev * 100).toFixed(0)}% (threshold: ${MAX_WEEKLY_PROGRESSION * 100}%)`,
+        message: `Week ${i + 1} increases mileage by ${((current.totalMileage - reference) / reference * 100).toFixed(0)}% (threshold: ${MAX_WEEKLY_PROGRESSION * 100}%)`,
       };
     }
   }

@@ -326,8 +326,9 @@ describe("generatePlan", () => {
       45, 45, 35,
       50, 45, 40,
       50, 45, 35,
-      50, 40, 35,
-      26, 19, 0,
+      50, 40,
+      35, 35, 30,
+      0,
     ]);
   });
 
@@ -342,10 +343,56 @@ describe("generatePlan", () => {
       30, 30, 30,
       35, 35, 35,
       40, 40, 35,
-      45, 45, 35,
       50, 45, 40,
-      30, 22, 0,
+      50, 45,
+      35, 35, 30,
+      0,
     ]);
+  });
+
+  it("reaches the requested peak mileage in short and long plans", () => {
+    for (const weeks of [14, 16, 28]) {
+      const plan = generatePlan(makeProfile({
+        currentWeeklyMileage: 60,
+        peakHistoricalWeeklyMileage: 100,
+        weeksOverride: weeks,
+        peakMileageOverride: 90,
+      }));
+
+      expect(plan.peakWeeklyMileage).toBe(90);
+      expect(Math.max(...plan.weeks.map((week) => week.totalMileage))).toBe(90);
+    }
+  });
+
+  it("marks the low recovery weeks of the ramp as down weeks", () => {
+    const plan = generatePlan(makeProfile({
+      currentWeeklyMileage: 60,
+      peakHistoricalWeeklyMileage: 100,
+      weeksOverride: 24,
+      peakMileageOverride: 90,
+    }));
+    const downWeeks = plan.weeks.filter((week) => week.isDownWeek).map((week) => week.weekNumber);
+
+    expect(downWeeks).toEqual([9, 12, 15, 18]);
+    for (const week of plan.weeks.filter((candidate) => candidate.isDownWeek)) {
+      expect(week.days.some((day) =>
+        ["threshold", "vo2", "marathon_pace", "progression"].includes(day.workout?.type ?? "")
+      )).toBe(false);
+    }
+  });
+
+  it("tapers to the documented percent of peak before race week", () => {
+    const plan = generatePlan(makeProfile({
+      currentWeeklyMileage: 60,
+      peakHistoricalWeeklyMileage: 100,
+      weeksOverride: 24,
+      peakMileageOverride: 90,
+    }));
+    const preRaceTaper = plan.weeks.slice(-4, -1).map((week) => week.totalMileage);
+
+    // docs/elite-training-plan.md: 70%, 70%, 60% of peak in the last three weeks.
+    expect(preRaceTaper).toEqual([63, 63, 54]);
+    expect(plan.weeks[19].totalMileage).toBeGreaterThan(plan.weeks[20].totalMileage);
   });
 
   it("tapers the final three weeks relative to the gap between start and peak mileage", () => {
@@ -452,23 +499,24 @@ describe("generatePlan", () => {
         preferredDoubleUpDays: ["Monday", "Tuesday"],
       })
     );
-    const august31Week = plan.weeks.find((week) =>
-      week.days.some((day) => new Date(day.date).toISOString().slice(0, 10) === "2026-08-31")
+    const peakWeek = plan.weeks.find((week) =>
+      week.days.some((day) => new Date(day.date).toISOString().slice(0, 10) === "2026-08-10")
     );
 
-    expect(august31Week?.totalMileage).toBe(90);
-    for (const day of august31Week?.days ?? []) {
-      if (day.dayOfWeek !== "Saturday") {
-        expect(day.plannedMileage).toBeLessThanOrEqual(16.25);
-      }
+    expect(peakWeek?.totalMileage).toBe(90);
+    for (const day of peakWeek?.days ?? []) {
+      // The key quality workout is fixed; the cap protects the easy and
+      // recovery mileage around it.
+      if (day.dayOfWeek === "Saturday" || day.workout?.intensityCategory === "hard") continue;
+      expect(day.plannedMileage).toBeLessThanOrEqual(16.25);
     }
 
-    const monday = august31Week?.days.find((day) => day.dayOfWeek === "Monday");
-    const sunday = august31Week?.days.find((day) => day.dayOfWeek === "Sunday");
+    const monday = peakWeek?.days.find((day) => day.dayOfWeek === "Monday");
+    const sunday = peakWeek?.days.find((day) => day.dayOfWeek === "Sunday");
     expect(monday?.plannedMileage).toBeLessThanOrEqual(16.25);
     expect(sunday?.plannedMileage).toBeLessThanOrEqual(11);
     expect(sunday?.workout?.type).toBe("recovery");
-    expect(scheduledMileage(august31Week!)).toBeCloseTo(august31Week!.totalMileage, 1);
+    expect(scheduledMileage(peakWeek!)).toBeCloseTo(peakWeek!.totalMileage, 1);
   });
 
   it("varies quality workout formats across the plan", () => {
