@@ -2,9 +2,26 @@
 // EnduroLab - Saved Plan List Summaries
 // ============================================================
 
-import type { MarathonPlan } from "@/lib/training/models";
+import type { MarathonPlan, RunnerProfile } from "@/lib/training/models";
 
 const METERS_PER_MILE = 1609.344;
+
+/** Minimal saved-plan shape needed to order plans by the day their final week ends. */
+export interface PlanEndDateSource {
+  planData: Pick<MarathonPlan, "weeks" | "raceDay">;
+  runnerProfile: Pick<RunnerProfile, "raceDate">;
+}
+
+function planEndDateKey(plan: PlanEndDateSource): string {
+  const lastWeek = plan.planData.weeks[plan.planData.weeks.length - 1];
+  const endDate = lastWeek?.endDate ?? plan.planData.raceDay ?? plan.runnerProfile.raceDate;
+  return endDate?.slice(0, 10) ?? "";
+}
+
+/** Sorts saved plans by the final day the plan covers, newest first; undated plans sort last. */
+export function sortPlansByEndDateDesc<T extends PlanEndDateSource>(plans: readonly T[]): T[] {
+  return [...plans].sort((a, b) => planEndDateKey(b).localeCompare(planEndDateKey(a)));
+}
 
 export interface PlanListSummary {
   plannedMileage: number;
