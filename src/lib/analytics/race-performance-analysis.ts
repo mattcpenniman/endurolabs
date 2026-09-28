@@ -6,6 +6,7 @@
 
 import { classifyRaceDistance } from "../activities/race-comparison";
 import type { RaceExecutionQuality } from "./race-execution";
+import type { EffortZone, TimeAtEffortBreakdown, TimeAtEffortSummary } from "./time-at-effort";
 
 const METERS_PER_MILE = 1609.344;
 const DAY_MS = 86_400_000;
@@ -32,6 +33,32 @@ const FORECAST_EXECUTION_LIMITED_WEIGHT = 1;
 const FITNESS_SENSITIVITY_PER_WATT = 0.0015;
 const FITNESS_DELTA_WATTS_CAP = 50;
 const FITNESS_INTERPOLATION_MAX_DAYS = 14;
+// Seconds per minute, for converting time-at-effort seconds.
+const SECONDS_PER_MINUTE = 60;
+
+/**
+ * Candidate readiness metrics. `volume`, `long_run`, and `consistency` are
+ * the incumbent race-training-readiness-v1 set; `hr_effort` and `power_effort`
+ * are candidates that are only ever promoted into the beacon after the
+ * rolling-origin and athlete-held-out validation in `readiness-metrics.ts`
+ * passes them. None of these may be shown as "impact" on domain intuition.
+ */
+export const READINESS_METRIC_KEYS = [
+  "volume",
+  "long_run",
+  "consistency",
+  "hr_effort",
+  "power_effort",
+] as const;
+
+export type ReadinessMetricKey = (typeof READINESS_METRIC_KEYS)[number];
+
+/** The incumbent race-training-readiness-v1 metric set; the default everywhere. */
+export const DEFAULT_READINESS_METRICS: readonly ReadinessMetricKey[] = [
+  "volume",
+  "long_run",
+  "consistency",
+];
 
 export interface RaceAnalysisActivity {
   id: string;
@@ -50,6 +77,8 @@ export interface RaceAnalysisActivity {
   verificationStatus?: "unverified" | "self-reported" | "verified" | null;
   /** race-execution-v1 classification from the race's own samples, when computed. */
   executionQuality?: RaceExecutionQuality | null;
+  /** Time-at-effort from stored samples. Null/absent when detail was not loaded. */
+  timeAtEffort?: TimeAtEffortSummary | null;
 }
 
 export interface RaceAnalysisPlanRun {
@@ -116,12 +145,24 @@ export interface RaceTrainingFeatures {
   averageHeartRate: number | null;
   measuredPowerRuns: number;
   calculatedPowerRuns: number;
+  /** Minutes in the marathon-or-faster HR zones over the lookback window. */
+  hrEffortMinutes: number;
+  hrEffortMinutesPerWeek: number;
+  /** Runs with any classified HR effort from stored samples. */
+  hrEffortRuns: number;
+  /** Minutes in the marathon-or-faster power zones, measured sensor power only. */
+  powerEffortMinutes: number;
+  powerEffortMinutesPerWeek: number;
+  /** Runs with any classified measured-power effort from stored samples. */
+  powerEffortRuns: number;
 }
 
 export interface RaceTrainingReference {
   weeklyMiles56Days: number;
   longestRunMiles: number;
   activeWeekShare: number;
+  hrEffortMinutesPerWeek: number;
+  powerEffortMinutesPerWeek: number;
 }
 
 /**
@@ -139,6 +180,8 @@ export interface RaceFitnessObservation {
 
 export interface RaceTrainingAdjustedPrediction {
   modelVersion: "race-training-readiness-v1" | "race-training-readiness-v2";
+  /** Readiness metric set applied to this prediction. */
+  metrics: readonly ReadinessMetricKey[];
   baseForecast: RaceForecastPrediction;
   predictedSeconds: number;
   adjustmentFactor: number;
@@ -151,6 +194,8 @@ export interface RaceTrainingAdjustedPrediction {
     volumePercent: number;
     longRunPercent: number;
     consistencyPercent: number;
+    hrEffortPercent: number;
+    powerEffortPercent: number;
     fitnessPercent: number;
   };
   fitness: {
@@ -547,6 +592,19 @@ export function buildRaceForecastWithHistoricalRange(
   );
 }
 
+const EFFORT_AT_OR_FASTER: ReadonlySet<EffortZone> = new Set(["marathon", "threshold", "vo2"]);
+
+function effortSecondsAtOrFaster(breakdown: TimeAtEffortBreakdown | null): number {
+  if (!breakdown) return 0;
+  return breakdown.buckets.reduce((sum, bucket) => (
+    EFFORT_AT_OR_FASTER.has(bucket.zone) ? sum + bucket.seconds : sum
+  ), 0);
+}
+
+function classifiedEffortSeconds(breakdown: TimeAtEffortBreakdown | null): number {
+  return breakdown?.totalSeconds ?? 0;
+}
+
 /** Creates summary-only training features strictly before the prediction date. */
 export function buildRaceTrainingFeatures(
   activities: RaceAnalysisActivity[],
@@ -605,6 +663,21 @@ export function buildRaceTrainingFeatures(
   const prior28WeeklyMiles = (miles35 - miles7) / 4;
   const prior42WeeklyMiles = (miles56 - miles14) / 6;
 
+  let hrEffortSeconds = 0;
+  let hrEffortRuns = 0;
+  let powerEffortSeconds = 0;
+  let powerEffortRuns = 0;
+  for (const activity of eligible) {
+    const effort = activity.timeAtEffort;
+    if (!effort) continue;
+    if (classifiedEffortSeconds(effort.heartRate) > 0) hrEffortRuns += 1;
+    hrEffortSeconds += effortSecondsAtOrFaster(effort.heartRate);
+    if (classifiedEffortSeconds(effort.power) > 0) powerEffortRuns += 1;
+    powerEffortSeconds += effortSecondsAtOrFaster(effort.power);
+  }
+  const hrEffortMinutes = hrEffortSeconds / SECONDS_PER_MINUTE;
+  const powerEffortMinutes = powerEffortSeconds / SECONDS_PER_MINUTE;
+
   return {
     lookbackDays,
     runs: eligible.length,
@@ -655,10 +728,16 @@ export function buildRaceTrainingFeatures(
     calculatedPowerRuns: eligible.filter((activity) => (
       activity.averagePower === null && activity.calculatedPower !== null
     )).length,
+    hrEffortMinutes: rounded(hrEffortMinutes, 1),
+    hrEffortMinutesPerWeek: rounded(hrEffortMinutes / expectedWeeks, 1),
+    hrEffortRuns,
+    powerEffortMinutes: rounded(powerEffortMinutes, 1),
+    powerEffortMinutesPerWeek: rounded(powerEffortMinutes / expectedWeeks, 1),
+    powerEffortRuns,
   };
 }
 
-function weightedTrainingReference(
+export function weightedTrainingReference(
   activities: RaceAnalysisActivity[],
   forecast: RaceForecastPrediction,
   lookbackDays: number,
@@ -673,26 +752,134 @@ function weightedTrainingReference(
     weeklyMiles56Days: rounded(weighted((features) => features.milesLast56Days / 8), 1),
     longestRunMiles: rounded(weighted((features) => features.longestRunMiles), 1),
     activeWeekShare: rounded(weighted((features) => Math.min(1, features.activeWeeks / expectedWeeks)), 3),
+    hrEffortMinutesPerWeek: rounded(weighted((features) => features.hrEffortMinutesPerWeek), 1),
+    powerEffortMinutesPerWeek: rounded(weighted((features) => features.powerEffortMinutesPerWeek), 1),
   };
 }
 
-function readinessParameters(targetDistanceMeters: number): {
+interface ReadinessParameters {
   volumeSaturation: number;
   volumeEffect: number;
   longRunTarget: number;
   longRunEffect: number;
   consistencyEffect: number;
-} {
+  /** Weekly minutes at marathon-or-faster HR effort at which the effect saturates. */
+  hrEffortTarget: number;
+  hrEffortEffect: number;
+  /** Weekly minutes at marathon-or-faster measured-power effort at saturation. */
+  powerEffortTarget: number;
+  powerEffortEffect: number;
+}
+
+/** Fixed, unfitted per-distance sensitivities. They are never fitted to outcomes;
+ *  the validation only decides whether a metric earns a place in the beacon. */
+function readinessParameters(targetDistanceMeters: number): ReadinessParameters {
   if (targetDistanceMeters < 8000) {
-    return { volumeSaturation: 25, volumeEffect: 0, longRunTarget: 8, longRunEffect: 0, consistencyEffect: 0 };
+    return {
+      volumeSaturation: 25, volumeEffect: 0, longRunTarget: 8, longRunEffect: 0, consistencyEffect: 0,
+      hrEffortTarget: 0, hrEffortEffect: 0, powerEffortTarget: 0, powerEffortEffect: 0,
+    };
   }
   if (targetDistanceMeters < 18_000) {
-    return { volumeSaturation: 30, volumeEffect: 0.01, longRunTarget: 10, longRunEffect: 0.005, consistencyEffect: 0.005 };
+    return {
+      volumeSaturation: 30, volumeEffect: 0.01, longRunTarget: 10, longRunEffect: 0.005, consistencyEffect: 0.005,
+      hrEffortTarget: 20, hrEffortEffect: 0.01, powerEffortTarget: 20, powerEffortEffect: 0.01,
+    };
   }
   if (targetDistanceMeters < 30_000) {
-    return { volumeSaturation: 40, volumeEffect: 0.025, longRunTarget: 14, longRunEffect: 0.015, consistencyEffect: 0.01 };
+    return {
+      volumeSaturation: 40, volumeEffect: 0.025, longRunTarget: 14, longRunEffect: 0.015, consistencyEffect: 0.01,
+      hrEffortTarget: 30, hrEffortEffect: 0.02, powerEffortTarget: 30, powerEffortEffect: 0.02,
+    };
   }
-  return { volumeSaturation: 55, volumeEffect: 0.05, longRunTarget: 20, longRunEffect: 0.04, consistencyEffect: 0.015 };
+  return {
+    volumeSaturation: 55, volumeEffect: 0.05, longRunTarget: 20, longRunEffect: 0.04, consistencyEffect: 0.015,
+    hrEffortTarget: 60, hrEffortEffect: 0.035, powerEffortTarget: 60, powerEffortEffect: 0.035,
+  };
+}
+
+/** Raw log-space readiness effects, one per candidate metric. */
+export interface ReadinessEffects {
+  volume: number;
+  long_run: number;
+  consistency: number;
+  hr_effort: number;
+  power_effort: number;
+}
+
+export interface ReadinessAdjustment {
+  metrics: readonly ReadinessMetricKey[];
+  readinessRelevance: number;
+  /** Sum of enabled effects before horizon attenuation. */
+  logAdjustment: number;
+  effects: ReadinessEffects;
+}
+
+/**
+ * Computes fixed, bounded readiness effects relative to the training behind the
+ * evidence races. Only the requested metrics contribute; the default set is the
+ * incumbent race-training-readiness-v1 (volume, long-run, consistency) so the
+ * product forecast does not change silently. Effort metrics use minutes at
+ * marathon-or-faster effort, saturating at a fixed per-distance target.
+ */
+export function computeReadinessAdjustment(input: {
+  targetTraining: RaceTrainingFeatures;
+  referenceTraining: RaceTrainingReference;
+  targetDistanceMeters: number;
+  forecastHorizonDays?: number;
+  metrics?: readonly ReadinessMetricKey[];
+}): ReadinessAdjustment {
+  const metrics = input.metrics ?? DEFAULT_READINESS_METRICS;
+  const enabled = new Set(metrics);
+  const parameters = readinessParameters(input.targetDistanceMeters);
+  const expectedWeeks = Math.ceil(input.targetTraining.lookbackDays / 7);
+  const saturation = (weeklyMiles: number): number => 1 - Math.exp(-weeklyMiles / parameters.volumeSaturation);
+  const boundedLongRun = (longestRunMiles: number): number => parameters.longRunTarget > 0
+    ? Math.min(1, longestRunMiles / parameters.longRunTarget)
+    : 0;
+  const boundedEffort = (minutesPerWeek: number, target: number): number =>
+    target > 0 ? 1 - Math.exp(-Math.max(0, minutesPerWeek) / target) : 0;
+  const targetActiveWeekShare = Math.min(1, input.targetTraining.activeWeeks / expectedWeeks);
+  const targetWeeklyMiles = input.targetTraining.milesLast56Days / 8;
+
+  const effects: ReadinessEffects = { volume: 0, long_run: 0, consistency: 0, hr_effort: 0, power_effort: 0 };
+  if (enabled.has("volume")) {
+    effects.volume = -parameters.volumeEffect * (
+      saturation(targetWeeklyMiles) - saturation(input.referenceTraining.weeklyMiles56Days)
+    );
+  }
+  if (enabled.has("long_run")) {
+    effects.long_run = -parameters.longRunEffect * (
+      boundedLongRun(input.targetTraining.longestRunMiles)
+      - boundedLongRun(input.referenceTraining.longestRunMiles)
+    );
+  }
+  if (enabled.has("consistency")) {
+    effects.consistency = -parameters.consistencyEffect * (
+      targetActiveWeekShare - input.referenceTraining.activeWeekShare
+    );
+  }
+  if (enabled.has("hr_effort")) {
+    effects.hr_effort = -parameters.hrEffortEffect * (
+      boundedEffort(input.targetTraining.hrEffortMinutesPerWeek, parameters.hrEffortTarget)
+      - boundedEffort(input.referenceTraining.hrEffortMinutesPerWeek, parameters.hrEffortTarget)
+    );
+  }
+  if (enabled.has("power_effort")) {
+    effects.power_effort = -parameters.powerEffortEffect * (
+      boundedEffort(input.targetTraining.powerEffortMinutesPerWeek, parameters.powerEffortTarget)
+      - boundedEffort(input.referenceTraining.powerEffortMinutesPerWeek, parameters.powerEffortTarget)
+    );
+  }
+
+  const logAdjustment = effects.volume + effects.long_run + effects.consistency
+    + effects.hr_effort + effects.power_effort;
+  return {
+    metrics: [...metrics],
+    readinessRelevance: Math.max(0, Math.min(1, (84 - (input.forecastHorizonDays ?? 0)) / 84)),
+    logAdjustment,
+    effects,
+  };
 }
 
 /** Applies fixed, bounded durability effects relative to the training behind source races.
@@ -712,26 +899,19 @@ export function buildTrainingAdjustedRaceForecast(
   forecastHorizonDays = 0,
   fitness: RaceFitnessObservation[] = [],
   fitnessEnabled = false,
+  metrics: readonly ReadinessMetricKey[] = DEFAULT_READINESS_METRICS,
 ): RaceTrainingAdjustedPrediction | null {
   const baseForecast = buildRaceForecast(races, predictionDate, targetDistanceMeters);
   if (!baseForecast) return null;
   const targetTraining = buildRaceTrainingFeatures(activities, predictionDate, lookbackDays);
   const referenceTraining = weightedTrainingReference(activities, baseForecast, lookbackDays);
-  const parameters = readinessParameters(targetDistanceMeters);
-  const saturation = (weeklyMiles: number): number => 1 - Math.exp(-weeklyMiles / parameters.volumeSaturation);
-  const boundedLongRun = (longestRunMiles: number): number => Math.min(1, longestRunMiles / parameters.longRunTarget);
-  const expectedWeeks = Math.ceil(lookbackDays / 7);
-  const targetActiveWeekShare = Math.min(1, targetTraining.activeWeeks / expectedWeeks);
-  const targetWeeklyMiles = targetTraining.milesLast56Days / 8;
-  const volumeEffect = -parameters.volumeEffect * (
-    saturation(targetWeeklyMiles) - saturation(referenceTraining.weeklyMiles56Days)
-  );
-  const longRunEffect = -parameters.longRunEffect * (
-    boundedLongRun(targetTraining.longestRunMiles) - boundedLongRun(referenceTraining.longestRunMiles)
-  );
-  const consistencyEffect = -parameters.consistencyEffect * (
-    targetActiveWeekShare - referenceTraining.activeWeekShare
-  );
+  const readiness = computeReadinessAdjustment({
+    targetTraining,
+    referenceTraining,
+    targetDistanceMeters,
+    forecastHorizonDays,
+    metrics,
+  });
 
   // Fitness effect (Power @ 140 trajectory): experimental and OFF by default.
   // The active model is v1 (volume + long-run + consistency) because on the
@@ -751,13 +931,14 @@ export function buildTrainingAdjustedRaceForecast(
     }
   }
 
-  const readinessRelevance = Math.max(0, Math.min(1, (84 - forecastHorizonDays) / 84));
+  const readinessRelevance = readiness.readinessRelevance;
   const adjustmentFactor = Math.exp(
-    (volumeEffect + longRunEffect + consistencyEffect + fitnessEffect) * readinessRelevance,
+    (readiness.logAdjustment + fitnessEffect) * readinessRelevance,
   );
 
   return {
     modelVersion: fitnessEffect !== 0 ? "race-training-readiness-v2" : "race-training-readiness-v1",
+    metrics: readiness.metrics,
     baseForecast,
     predictedSeconds: Math.round(baseForecast.predictedSeconds * adjustmentFactor),
     adjustmentFactor: rounded(adjustmentFactor, 5),
@@ -775,9 +956,11 @@ export function buildTrainingAdjustedRaceForecast(
         }
       : null,
     effects: {
-      volumePercent: rounded(volumeEffect * 100, 2),
-      longRunPercent: rounded(longRunEffect * 100, 2),
-      consistencyPercent: rounded(consistencyEffect * 100, 2),
+      volumePercent: rounded(readiness.effects.volume * 100, 2),
+      longRunPercent: rounded(readiness.effects.long_run * 100, 2),
+      consistencyPercent: rounded(readiness.effects.consistency * 100, 2),
+      hrEffortPercent: rounded(readiness.effects.hr_effort * 100, 2),
+      powerEffortPercent: rounded(readiness.effects.power_effort * 100, 2),
       fitnessPercent: rounded(fitnessEffect * 100, 2),
     },
     historicalErrorRange: null,
@@ -968,7 +1151,7 @@ function compareTrainingAdjusted(rows: HistoricalRaceAnalysisRow[]): RaceCandida
   };
 }
 
-function summarizePredictionPairs(pairs: Array<{
+export function summarizePredictionPairs(pairs: Array<{
   actualSeconds: number;
   predictedSeconds: number;
 }>): RaceBaselineSummary | null {
@@ -978,7 +1161,7 @@ function summarizePredictionPairs(pairs: Array<{
   );
 }
 
-function comparePredictionPairs(pairs: Array<{
+export function comparePredictionPairs(pairs: Array<{
   actualSeconds: number;
   baseSeconds: number;
   candidateSeconds: number;
