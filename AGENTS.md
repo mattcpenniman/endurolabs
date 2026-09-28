@@ -132,6 +132,9 @@ src/
 - The audited proposal/version tables from `reference/PLANNER_TODO.md` (Phase 3) are not implemented, so `--apply` writes no audit record and create only (not adjust) is supported. Add those tables before implementing `--adjust --apply`.
 - JSONB writes through postgres.js must use `sql.json(value)`. `${JSON.stringify(value)}::jsonb` double-encodes into a JSON string and corrupts `plan_data`; this bug previously affected `plan:rebuild-week --apply`.
 - Run `npm run planner:recommend -- ... --create --json` for a machine-readable proposal (`profile`, `forecast`, `summary`, `calendarGates`, `safetyGates`, `planId` when applied).
+- `npm run plan:compare -- --email runner@example.com` compares the current plan with the previous race cycle; `--plan-id A [--against B]` compares explicit plans. It reports planned volume, time near peak, long-run exposure, threshold/marathon-pace/VO2 mileage, recovery weeks, and taper reduction in human or `--json` (`plan-compare-v1`) form. Plans are labeled Before/After by creation time.
+- Without `--against`, the counterpart is the same athlete's plan with the latest race date before the subject plan's race, falling back to the most recently created other plan. `plan:compare` tolerates legacy `plan_data` stored as a JSON string; it does not mutate rows.
+- Plan summaries and the comparison live in the pure `src/lib/planner/plan-comparison.ts` (`summarizePlanTraining`, `comparePlanTraining`); keep metric definitions there so CLI and JSON output cannot drift.
 
 ## Conventions
 
@@ -160,7 +163,7 @@ src/
 - Test Garmin payload mapping as pure logic; DB idempotency requires an integration test against PostgreSQL.
 
 ## Key Configuration
-- `package.json` scripts include app lifecycle, `db:push`, user/plan utilities, `seed:dev`, `garmin:history`, `samples:backfill`, `summaries:recompute`, `execution:backfill`, `race:analyze`, `planner:recommend`, `plan:rebuild-week`, and Vitest commands
+- `package.json` scripts include app lifecycle, `db:push`, user/plan utilities, `seed:dev`, `garmin:history`, `samples:backfill`, `summaries:recompute`, `execution:backfill`, `race:analyze`, `planner:recommend`, `plan:compare`, `plan:rebuild-week`, and Vitest commands
 - `plan:rebuild-week` (`scripts/rebuild-plan-week.ts`) regenerates one stored plan week from the current generator and splices it back in, leaving every other week untouched. Defaults to the final (race) week; use `--week N` for another. Preview-first (`--apply` persists) and it refuses when the stored week start date no longer lines up or when activities/run logs already reference the replaced week's workouts.
 - `tsconfig.json`: strict mode, `@/*` → `./src/*`, ES2017 target, bundler module resolution
 - `vitest.config.ts`: jsdom environment, React plugin, globals true

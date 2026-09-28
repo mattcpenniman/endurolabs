@@ -170,6 +170,20 @@ Read-only analysis of an existing plan:
 npm run planner:recommend -- --email runner@example.com
 ```
 
+### Compare two plans
+
+`plan:compare` reports how a plan's planned load differs from the previous cycle (or any stored plan):
+
+```bash
+# Current plan vs the previous race cycle
+npm run plan:compare -- --email runner@example.com
+
+# Explicit pair (newest is labeled After)
+npm run plan:compare -- --plan-id PLAN_ID --against OTHER_PLAN_ID
+```
+
+It covers total and peak volume, weeks near peak, long-run exposure, threshold/marathon-pace/VO2 mileage, recovery weeks, and taper reduction. Add `--json` for a machine-readable `plan-compare-v1` payload.
+
 Training plans under `/plan` require login. Newly generated and saved plans are tied to the signed-in user.
 
 ### Change the port
