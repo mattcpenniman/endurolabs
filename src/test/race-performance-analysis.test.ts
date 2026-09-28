@@ -84,6 +84,34 @@ describe("race performance analysis", () => {
     expect(forecast?.weightedMeanSeconds).toBeGreaterThan(11_400);
   });
 
+  it("records execution quality on the evidence without reweighting it", () => {
+    const forecast = buildRaceForecast([
+      activity({
+        id: "blow-up",
+        localDate: "2026-01-01",
+        distanceMeters: 42_195,
+        durationSeconds: 11_765,
+        eventType: "race",
+        executionQuality: "blow_up",
+      }),
+      activity({
+        id: "solid",
+        localDate: "2026-01-01",
+        distanceMeters: 42_195,
+        durationSeconds: 11_292,
+        eventType: "race",
+        executionQuality: "well_executed",
+      }),
+    ], "2026-05-01", 42_195);
+
+    const blowUp = forecast?.evidence.find((item) => item.raceId === "blow-up");
+    const solid = forecast?.evidence.find((item) => item.raceId === "solid");
+    expect(blowUp?.executionQuality).toBe("blow_up");
+    expect(solid?.executionQuality).toBe("well_executed");
+    expect(blowUp?.executionWeight).toBe(1);
+    expect(blowUp?.combinedWeight).toBeCloseTo(solid?.combinedWeight ?? 0, 8);
+  });
+
   it("excludes same-day, future, stale, and non-standard source races", () => {
     const forecast = buildRaceForecast([
       activity({ id: "valid", localDate: "2026-01-01", distanceMeters: 10_000, eventType: "race" }),

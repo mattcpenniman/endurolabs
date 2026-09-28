@@ -19,7 +19,9 @@ describe("race prediction snapshots", () => {
       recencyWeight: 0.9,
       distanceWeight: 0.5,
       sameDistanceMultiplier: 1,
+      executionWeight: 1,
       combinedWeight: 0.45,
+      executionQuality: null,
     }];
     const prediction: RacePredictorResult = {
       key: "marathon",

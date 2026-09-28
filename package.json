@@ -16,6 +16,7 @@
     "seed:dev": "node scripts/seed-dev.mjs",
     "samples:backfill": "node scripts/backfill-samples.mjs",
     "summaries:recompute": "node scripts/recompute-activity-summaries.mjs",
+    "execution:backfill": "vite-node --config vitest.config.ts scripts/backfill-race-execution.ts",
     "power:analyze": "node scripts/analyze-missing-power.mjs",
     "power:p140-backtest": "vite-node scripts/backtest-power-at-140.ts",
     "race:analyze": "vite-node --config vitest.config.ts scripts/analyze-race-performance.ts",

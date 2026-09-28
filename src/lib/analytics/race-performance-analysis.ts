@@ -5,6 +5,7 @@
 // transparent race-equivalence baseline. It does not fit a model.
 
 import { classifyRaceDistance } from "../activities/race-comparison";
+import type { RaceExecutionQuality } from "./race-execution";
 
 const METERS_PER_MILE = 1609.344;
 const DAY_MS = 86_400_000;
@@ -16,6 +17,13 @@ const FORECAST_RECENCY_HALF_LIFE_DAYS = 180;
 const FORECAST_DISTANCE_DECAY = 1.5;
 const FORECAST_SAME_DISTANCE_TOLERANCE = 0.03;
 const FORECAST_SAME_DISTANCE_MULTIPLIER = 1.5;
+// An execution-limited race (a large positive split with a heart-rate,
+// power, or closing-10K fade) still happened, and its finish time is a
+// real outcome. Down-weighting these at 0.5 worsened the rolling-origin
+// backtest on the primary athlete (forecast MAE 5:48 -> 6:44, median
+// 4.77 -> 6.24), so the weight stays neutral until a candidate passes
+// the gate. executionQuality is still recorded on every evidence row.
+const FORECAST_EXECUTION_LIMITED_WEIGHT = 1;
 // Fitness effect is a fixed, unfitted sensitivity: per 1 W of Power@140
 // difference (target vs. reference) we shift the finish-time prediction by
 // 0.15%. It is clamped to ±50 W so a noisy trajectory cannot move a
@@ -40,6 +48,8 @@ export interface RaceAnalysisActivity {
   trainingExcluded?: boolean;
   resultSource?: "canonical" | "garmin";
   verificationStatus?: "unverified" | "self-reported" | "verified" | null;
+  /** race-execution-v1 classification from the race's own samples, when computed. */
+  executionQuality?: RaceExecutionQuality | null;
 }
 
 export interface RaceAnalysisPlanRun {
@@ -185,9 +195,12 @@ export interface RaceForecastEvidence {
   recencyWeight: number;
   distanceWeight: number;
   sameDistanceMultiplier: number;
+  /** Fixed execution factor; neutral (1) while the down-weight candidate is unvalidated. */
+  executionWeight: number;
   combinedWeight: number;
   resultSource?: "canonical" | "garmin";
   verificationStatus?: "unverified" | "self-reported" | "verified" | null;
+  executionQuality: RaceExecutionQuality | null;
 }
 
 export interface RaceHistoricalErrorRange {
@@ -214,6 +227,7 @@ export interface HistoricalRaceAnalysisRow {
   distanceLabel: string;
   distanceMeters: number;
   actualSeconds: number;
+  executionQuality: RaceExecutionQuality | null;
   baseline: RaceBaselinePrediction | null;
   errorSeconds: number | null;
   absoluteErrorPercent: number | null;
@@ -419,6 +433,8 @@ export function buildRaceForecast(
       const sameDistanceMultiplier = Math.abs(distanceRatio - 1) <= FORECAST_SAME_DISTANCE_TOLERANCE
         ? FORECAST_SAME_DISTANCE_MULTIPLIER
         : 1;
+      const executionQuality = race.executionQuality ?? null;
+      const executionWeight = executionQuality === "blow_up" ? FORECAST_EXECUTION_LIMITED_WEIGHT : 1;
       return {
         raceId: race.id,
         raceDate: race.localDate,
@@ -434,9 +450,11 @@ export function buildRaceForecast(
         recencyWeight: rounded(recencyWeight, 4),
         distanceWeight: rounded(distanceWeight, 4),
         sameDistanceMultiplier,
-        combinedWeight: rounded(recencyWeight * distanceWeight * sameDistanceMultiplier, 8),
+        executionWeight,
+        combinedWeight: rounded(recencyWeight * distanceWeight * sameDistanceMultiplier * executionWeight, 8),
         resultSource: race.resultSource ?? "garmin",
         verificationStatus: race.verificationStatus ?? null,
+        executionQuality,
       };
     });
   if (evidence.length === 0) return null;
@@ -1118,6 +1136,7 @@ export function analyzeRacePerformance(input: {
       distanceLabel: classifyRaceDistance(miles(race.distanceMeters)).label,
       distanceMeters: race.distanceMeters,
       actualSeconds: race.durationSeconds,
+      executionQuality: race.executionQuality ?? null,
       baseline,
       errorSeconds,
       absoluteErrorPercent: errorSeconds === null
@@ -1189,6 +1208,8 @@ export function analyzeRacePerformance(input: {
       };
     });
 
+  const executionLimitedRaces = races.filter((race) => race.executionQuality === "blow_up").length;
+
   return {
     algorithmVersion: "race-analysis-v3",
     asOf: input.asOf,
@@ -1212,6 +1233,9 @@ export function analyzeRacePerformance(input: {
     historicalRaces,
     planTargets,
     warnings: [
+      ...(executionLimitedRaces > 0
+        ? [`${executionLimitedRaces} execution-limited race(s) are in evidence; on those days finish times understate good-day fitness.`]
+        : []),
       "Race outcomes may mix reviewed canonical results with unreviewed Garmin GPS fallbacks; inspect source provenance.",
       "The Riegel baseline does not adjust for course, weather, fatigue, or race execution.",
       "The race-evidence forecast is a fixed heuristic; its range reflects historical errors and is not calibrated.",

@@ -6,8 +6,9 @@
 
 import { and, asc, eq, inArray, lt, lte, notInArray } from "drizzle-orm";
 import { db } from "@/lib/db/client";
-import { raceResults, runActivities } from "@/lib/db/schema";
+import { activityAnalytics, raceResults, runActivities } from "@/lib/db/schema";
 import type { RaceAnalysisActivity } from "@/lib/analytics/race-performance-analysis";
+import { RACE_EXECUTION_VERSION, parseExecutionQuality, type RaceExecutionQuality } from "@/lib/analytics/race-execution";
 import { isPredictionEligibleRaceResult } from "@/lib/races/results";
 
 export interface LoadedRaceEvidence {
@@ -97,6 +98,25 @@ export async function loadRaceEvidence(
     sameDay ? row.raceDate <= asOf : row.raceDate < asOf
   ));
 
+  const executionActivityIds = [...new Set([
+    ...activities.map((activity) => activity.id),
+    ...canonicalResults.flatMap((result) => result.linkedActivityId ? [result.linkedActivityId] : []),
+  ])];
+  const executionByActivity = new Map<string, RaceExecutionQuality>();
+  if (executionActivityIds.length > 0) {
+    const executionRows = await db.select({
+      activityId: activityAnalytics.activityId,
+      metrics: activityAnalytics.metrics,
+    }).from(activityAnalytics).where(and(
+      inArray(activityAnalytics.activityId, executionActivityIds),
+      eq(activityAnalytics.algorithmVersion, RACE_EXECUTION_VERSION),
+    ));
+    for (const row of executionRows) {
+      const quality = parseExecutionQuality(row.metrics);
+      if (quality !== null) executionByActivity.set(row.activityId, quality);
+    }
+  }
+
   let trainingActivities: RaceAnalysisActivity[] = [];
   if (options.includeTrainingActivities === true) {
     const trainingRows = await db.select({
@@ -136,6 +156,7 @@ export async function loadRaceEvidence(
     ...activity,
     resultSource: "garmin",
     verificationStatus: null,
+    executionQuality: executionByActivity.get(activity.id) ?? null,
   }));
   const canonicalActivities: RaceAnalysisActivity[] = usableResults.map((result) => ({
     id: result.id,
@@ -151,6 +172,7 @@ export async function loadRaceEvidence(
     excludedFromAnalytics: false,
     resultSource: "canonical",
     verificationStatus: result.verificationStatus as RaceAnalysisActivity["verificationStatus"],
+    executionQuality: result.linkedActivityId ? executionByActivity.get(result.linkedActivityId) ?? null : null,
   }));
   const races = [...labeledFallbackActivities, ...canonicalActivities]
     .sort((left, right) => left.localDate.localeCompare(right.localDate));
