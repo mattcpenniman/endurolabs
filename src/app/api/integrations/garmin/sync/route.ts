@@ -19,6 +19,7 @@ import {
 } from "@/lib/garmin/client";
 import { GarminActivityPayload, matchActivityToPlan, normalizeGarminActivity } from "@/lib/garmin/activities";
 import { ingestGarminActivityDetail, mapWithConcurrency, recomputeStoredActivityQuality } from "@/lib/garmin/sample-ingestion";
+import { detailFetchDueCondition } from "@/lib/garmin/detail-retry";
 import { recomputeFitnessSnapshotsForActivities } from "@/lib/analytics/fitness-cache";
 import { reconcileManualActivityMerges } from "@/lib/activities/manual-merge-persistence";
 import { applyCalculatedSummaryPower, loadSummaryPowerModel } from "@/lib/activities/summary-power-estimate";
@@ -189,13 +190,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       .where(and(
         eq(runActivities.userId, user.id),
         eq(runActivities.source, "garmin"),
-        or(
-          isNull(runActivities.detailFetchStatus),
-          and(
-            eq(runActivities.detailFetchStatus, "failed"),
-            or(isNull(runActivities.detailNextRetryAt), lte(runActivities.detailNextRetryAt, syncThrough)),
-          ),
-        ),
+        detailFetchDueCondition(syncThrough),
         gte(runActivities.startTimeGmt, detailCutoff),
         lte(runActivities.startTimeGmt, syncThrough)
       ))
