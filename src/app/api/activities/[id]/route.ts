@@ -6,9 +6,24 @@ import { NextRequest, NextResponse } from "next/server";
 import { and, asc, eq } from "drizzle-orm";
 import { getCurrentUser } from "@/lib/auth";
 import { db } from "@/lib/db/client";
-import { activitySamples, runActivities } from "@/lib/db/schema";
+import { activitySamples, plans, runActivities } from "@/lib/db/schema";
 import { downsampleActivitySamples, normalizeActivityCadence } from "@/lib/activities/activity-chart";
 import { buildActivityMileSplits } from "@/lib/activities/activity-splits";
+import { summarizeTimeAtEffort } from "@/lib/analytics/time-at-effort";
+import type { MarathonPlan } from "@/lib/training/models";
+
+/** Legacy plans may store plan_data as a JSON string; normalize before use. */
+function normalizePlanData(value: unknown): MarathonPlan | null {
+  if (value === null || value === undefined) return null;
+  if (typeof value === "string") {
+    try {
+      return JSON.parse(value) as MarathonPlan;
+    } catch {
+      return null;
+    }
+  }
+  return value as MarathonPlan;
+}
 
 export async function GET(
   _request: NextRequest,
@@ -23,6 +38,7 @@ export async function GET(
     distanceMeters: runActivities.distanceMeters,
     durationSeconds: runActivities.durationSeconds,
     powerSource: runActivities.powerSource,
+    planId: runActivities.planId,
   })
     .from(runActivities)
     .where(and(eq(runActivities.id, id), eq(runActivities.userId, user.id)))
@@ -43,11 +59,29 @@ export async function GET(
     .where(eq(activitySamples.activityId, id))
     .orderBy(asc(activitySamples.elapsedSeconds));
 
+  const hasMeasuredPower = !activity.powerSource.startsWith("estimated_");
+
   const splits = buildActivityMileSplits({
     summaryDistanceMeters: activity.distanceMeters,
     durationSeconds: activity.durationSeconds,
-    hasMeasuredPower: !activity.powerSource.startsWith("estimated_"),
+    hasMeasuredPower,
     samples,
+  });
+
+  const [planRow] = activity.planId
+    ? await db.select({ planData: plans.planData })
+      .from(plans)
+      .where(eq(plans.id, activity.planId))
+      .limit(1)
+    : [];
+  const plan = normalizePlanData(planRow?.planData);
+
+  const timeAtEffort = summarizeTimeAtEffort({
+    samples,
+    heartRateZones: plan?.paceZones?.heartRateZones ?? null,
+    powerZones: plan?.powerZones ?? null,
+    hasMeasuredPower,
+    durationSeconds: activity.durationSeconds,
   });
 
   const displaySamples = samples.map((sample) => ({
@@ -55,7 +89,7 @@ export async function GET(
     cadence: normalizeActivityCadence(sample.cadence),
   }));
 
-  return NextResponse.json({ samples: downsampleActivitySamples(displaySamples), splits });
+  return NextResponse.json({ samples: downsampleActivitySamples(displaySamples), splits, timeAtEffort });
 }
 
 export async function PATCH(

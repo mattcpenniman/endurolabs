@@ -2,6 +2,8 @@
 // EnduroLab - Synced Activity Models
 // ============================================================
 
+import type { TimeAtEffortSummary } from "@/lib/analytics/time-at-effort";
+
 export interface RunActivity {
   id: string;
   providerActivityId: string;
@@ -122,4 +124,5 @@ export interface ActivitySplit {
 export interface ActivityDetailResponse {
   samples: ActivityChartSample[];
   splits: ActivitySplit[];
+  timeAtEffort?: TimeAtEffortSummary | null;
 }
