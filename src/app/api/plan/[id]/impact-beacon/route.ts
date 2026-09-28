@@ -1,0 +1,40 @@
+// ============================================================
+// EnduroLab — Plan Impact Beacon API Route
+// ============================================================
+// Returns the plan-vs-actual impact beacon: where the athlete
+// stands against the goal-derived plan on the readiness metrics,
+// and the largest behind-plan gap the validation table allows to
+// be presented as impact. Read-only.
+
+import { NextRequest, NextResponse } from "next/server";
+import { getCurrentUser } from "@/lib/auth";
+import { buildImpactBeacon } from "@/lib/analytics/impact-beacon";
+import {
+  loadImpactBeaconPlan,
+  loadImpactBeaconRuns,
+} from "@/lib/analytics/plan-impact-beacon-loader";
+
+export async function GET(
+  _request: NextRequest,
+  { params }: { params: Promise<{ id: string }> },
+): Promise<NextResponse> {
+  try {
+    const user = await getCurrentUser();
+    if (!user) {
+      return NextResponse.json({ error: "Authentication required" }, { status: 401 });
+    }
+
+    const { id } = await params;
+    const plan = await loadImpactBeaconPlan(user.id, id);
+    if (!plan) {
+      return NextResponse.json({ error: "Plan not found" }, { status: 404 });
+    }
+
+    const asOf = new Date().toISOString().slice(0, 10);
+    const runs = await loadImpactBeaconRuns({ userId: user.id, planId: id, asOf });
+    return NextResponse.json(buildImpactBeacon({ plan, runs, asOf }));
+  } catch (error) {
+    console.error("Failed to build plan impact beacon:", error);
+    return NextResponse.json({ error: "Failed to build impact beacon" }, { status: 500 });
+  }
+}

@@ -152,7 +152,12 @@ export async function findRaceAnalysisUser(input: {
   return null;
 }
 
-async function loadTimeAtEffort(
+/**
+ * Computes per-activity time at effort from stored samples using each
+ * activity's linked plan zones. Returns only activities that produced a
+ * heart-rate or measured-power breakdown.
+ */
+export async function loadTimeAtEffort(
   activityRows: Array<{
     id: string;
     planId: string | null;

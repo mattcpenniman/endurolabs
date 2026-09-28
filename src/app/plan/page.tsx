@@ -20,6 +20,7 @@ import PaceZonesCard from "@/app/components/plan/PaceZonesCard";
 import WeeklyPlanCard from "@/app/components/plan/WeeklyPlanCard";
 import RaceDayPlanCard from "@/app/components/plan/RaceDayPlanCard";
 import Sub3Scorecard from "@/app/components/plan/Sub3Scorecard";
+import ImpactBeaconCard from "@/app/components/plan/ImpactBeaconCard";
 import MileageTrendChart from "@/app/components/charts/MileageTrendChart";
 import LongRunProgressionChart from "@/app/components/charts/LongRunProgressionChart";
 import IntensityDistributionChart from "@/app/components/charts/IntensityDistributionChart";
@@ -2077,6 +2078,7 @@ function PlanPageContent(): React.ReactNode {
                 Objective markers scored against the generated plan and logged actuals.
               </p>
             </div>
+            <ImpactBeaconCard planId={plan.id} refreshToken={dailyLogRefresh} />
             <Sub3Scorecard plan={plan} dailyLogs={dailyLogs} />
           </div>
         ) : (
