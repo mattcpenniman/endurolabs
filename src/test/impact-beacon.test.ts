@@ -480,6 +480,39 @@ describe("buildImpactBeacon", () => {
   });
 });
 
+describe("impact beacon targets", () => {
+  it("reports goal time/pace and the plan's HR targets", () => {
+    const report = buildImpactBeacon({ plan: makePlan(), runs: [], asOf: "2026-09-28" });
+
+    expect(report.targets.goalSeconds).toBe(180 * 60);
+    expect(report.targets.goalPaceMinutesPerMile).toBe(7);
+    expect(report.targets.heartRate).toEqual([
+      { key: "marathon", label: "Marathon effort", minBpm: 150, maxBpm: 155 },
+      { key: "threshold", label: "Threshold", minBpm: 163, maxBpm: 168 },
+      { key: "vo2", label: "VO2", minBpm: 175, maxBpm: 180 },
+    ]);
+    expect(report.targets.power).toBeNull();
+  });
+
+  it("reports power targets when the plan carries power zones", () => {
+    const plan = makePlan({
+      powerZones: {
+        easy: { min: 210, max: 250 },
+        marathon: 300,
+        threshold: 336,
+        vo2: 366,
+      },
+    });
+    const report = buildImpactBeacon({ plan, runs: [], asOf: "2026-09-28" });
+
+    expect(report.targets.power).toEqual([
+      { key: "marathon", label: "Marathon effort", watts: 300 },
+      { key: "threshold", label: "Threshold", watts: 336 },
+      { key: "vo2", label: "VO2", watts: 366 },
+    ]);
+  });
+});
+
 describe("impactBeaconLevel", () => {
   it("is red when an impact-eligible metric is behind", () => {
     const report = buildImpactBeacon({ plan: makePlan(), runs: TRAILING_RUNS, asOf: "2026-09-28" });

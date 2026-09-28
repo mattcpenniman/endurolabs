@@ -14,6 +14,12 @@ import type {
   ImpactBeaconMetricStatus,
   ImpactBeaconReport,
 } from "@/lib/analytics/impact-beacon";
+import {
+  formatGoalPace,
+  formatGoalTime,
+  formatHeartRateTargets,
+  formatPowerTargets,
+} from "@/app/components/plan/beacon-format";
 
 interface ImpactBeaconCardProps {
   planId: string;
@@ -139,6 +145,30 @@ export default function ImpactBeaconCard({ planId, refreshToken = 0 }: ImpactBea
         {report.beacon && (
           <p className="mt-1 text-xs text-amber-800">{report.beacon.evidence}</p>
         )}
+      </div>
+
+      <div className="mx-5 mt-4 grid gap-3 rounded-lg border border-gray-100 bg-gray-50 p-4 sm:grid-cols-3">
+        <div>
+          <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">Goal</p>
+          <p className="mt-1 text-sm font-medium text-gray-900">
+            {report.targets.goalSeconds !== null ? formatGoalTime(report.targets.goalSeconds) : "—"}
+            {report.targets.goalPaceMinutesPerMile !== null
+              ? ` · ${formatGoalPace(report.targets.goalPaceMinutesPerMile)}`
+              : ""}
+          </p>
+        </div>
+        <div>
+          <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">Heart rate</p>
+          <p className="mt-1 text-sm text-gray-700">{formatHeartRateTargets(report.targets.heartRate)}</p>
+        </div>
+        <div>
+          <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">Power</p>
+          <p className="mt-1 text-sm text-gray-700">
+            {report.targets.power
+              ? formatPowerTargets(report.targets.power)
+              : "Not configured on this plan"}
+          </p>
+        </div>
       </div>
 
       <div className="mt-4 grid grid-cols-[1.8fr_1fr_1fr_1fr] gap-3 border-b border-gray-100 bg-gray-50 px-5 py-3 text-xs font-semibold uppercase text-gray-500">

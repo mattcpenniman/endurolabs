@@ -105,6 +105,34 @@ export interface ImpactBeaconBaseline {
   actualEnd: string;
 }
 
+/** Effort zones the beacon measures, fastest-to-easiest anchor set. */
+export type ImpactBeaconEffortZone = "marathon" | "threshold" | "vo2";
+
+export interface ImpactBeaconHeartRateTarget {
+  key: ImpactBeaconEffortZone;
+  label: string;
+  minBpm: number | null;
+  maxBpm: number | null;
+}
+
+export interface ImpactBeaconPowerTarget {
+  key: ImpactBeaconEffortZone;
+  label: string;
+  watts: number | null;
+}
+
+/** What the plan asks the athlete to hit, shown beside the plan-vs-actual rows. */
+export interface ImpactBeaconTargets {
+  /** Goal finish time in seconds, when the plan carries one. */
+  goalSeconds: number | null;
+  /** Goal marathon pace in minutes per mile. */
+  goalPaceMinutesPerMile: number | null;
+  /** Heart-rate ranges for the marathon-or-faster effort zones. */
+  heartRate: ImpactBeaconHeartRateTarget[];
+  /** Power anchors for the same zones; null when the plan has no power zones. */
+  power: ImpactBeaconPowerTarget[] | null;
+}
+
 export interface ImpactBeaconComponent {
   label: string;
   planned: number | null;
@@ -168,6 +196,8 @@ export interface ImpactBeaconReport {
     date: string;
     goalSeconds: number | null;
   };
+  /** Goal time, pace, and the HR/power targets behind the effort metrics. */
+  targets: ImpactBeaconTargets;
   metrics: ImpactBeaconMetricStatus[];
   /** Behind-plan eligible metrics, worst completion ratio first. */
   gaps: ImpactBeaconGap[];
@@ -799,6 +829,46 @@ const METRIC_UNITS: Record<ReadinessMetricKey, ImpactBeaconUnit> = {
   power_effort: "minutes",
 };
 
+const EFFORT_ZONE_LABELS: Record<ImpactBeaconEffortZone, string> = {
+  marathon: "Marathon effort",
+  threshold: "Threshold",
+  vo2: "VO2",
+};
+
+const EFFORT_ZONE_KEYS: readonly ImpactBeaconEffortZone[] = ["marathon", "threshold", "vo2"];
+
+/** Goal time/pace and the HR/power anchors the plan's effort rows measure. */
+function beaconTargets(plan: MarathonPlan): ImpactBeaconTargets {
+  const heartRateZones = plan.paceZones?.heartRateZones;
+  const heartRate: ImpactBeaconHeartRateTarget[] = EFFORT_ZONE_KEYS.map((key) => ({
+    key,
+    label: EFFORT_ZONE_LABELS[key],
+    minBpm: heartRateZones?.[key]?.targetBpm?.min ?? null,
+    maxBpm: heartRateZones?.[key]?.targetBpm?.max ?? null,
+  }));
+
+  const powerZones = plan.powerZones;
+  const power: ImpactBeaconPowerTarget[] | null = powerZones
+    ? EFFORT_ZONE_KEYS.map((key) => ({
+        key,
+        label: EFFORT_ZONE_LABELS[key],
+        watts: typeof powerZones[key] === "number" ? powerZones[key] : null,
+      }))
+    : null;
+
+  const goalSeconds = typeof plan.runnerProfile?.goalMarathonTime === "number"
+    ? plan.runnerProfile.goalMarathonTime * 60
+    : null;
+  const planMarathonPace = plan.paceZones?.marathon;
+  const goalPaceMinutesPerMile = typeof planMarathonPace === "number" && planMarathonPace > 0
+    ? planMarathonPace
+    : goalSeconds !== null
+      ? goalSeconds / 60 / 26.2
+      : null;
+
+  return { goalSeconds, goalPaceMinutesPerMile, heartRate, power };
+}
+
 function collectGaps(metrics: ImpactBeaconMetricStatus[]): ImpactBeaconGap[] {
   return metrics
     .filter((metric) => metric.impactEligible && metric.direction === "behind" && metric.completionRatio !== null)
@@ -847,6 +917,7 @@ export function buildImpactBeacon(input: ImpactBeaconInput): ImpactBeaconReport 
       ? input.plan.runnerProfile.goalMarathonTime * 60
       : null,
   };
+  const targets = beaconTargets(input.plan);
 
   if (planStart === "") {
     const metrics = READINESS_METRIC_KEYS.map((key) => metricStatus({
@@ -868,6 +939,7 @@ export function buildImpactBeacon(input: ImpactBeaconInput): ImpactBeaconReport 
       planStarted: false,
       weeksElapsed: 0,
       race,
+      targets,
       metrics,
       gaps: [],
       beacon: null,
@@ -923,6 +995,7 @@ export function buildImpactBeacon(input: ImpactBeaconInput): ImpactBeaconReport 
       planStarted: false,
       weeksElapsed: 0,
       race,
+      targets,
       metrics,
       gaps,
       beacon,
@@ -970,6 +1043,7 @@ export function buildImpactBeacon(input: ImpactBeaconInput): ImpactBeaconReport 
     planStarted: true,
     weeksElapsed: planned.weeksElapsed,
     race,
+    targets,
     metrics,
     gaps,
     beacon,
