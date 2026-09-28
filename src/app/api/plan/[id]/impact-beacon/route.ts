@@ -45,7 +45,8 @@ export async function GET(
           asOf: baselineWindow.end,
         })
       : await loadImpactBeaconRuns({ userId: user.id, planId: id, asOf });
-    return NextResponse.json(buildImpactBeacon({ plan, runs, asOf }));
+    const report = buildImpactBeacon({ plan, runs, asOf });
+    return NextResponse.json(report, { headers: { "Cache-Control": "no-store" } });
   } catch (error) {
     console.error("Failed to build plan impact beacon:", error);
     return NextResponse.json({ error: "Failed to build impact beacon" }, { status: 500 });
