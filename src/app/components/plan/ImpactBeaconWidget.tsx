@@ -17,6 +17,12 @@ import {
   type ImpactBeaconMetricStatus,
   type ImpactBeaconReport,
 } from "@/lib/analytics/impact-beacon";
+import {
+  formatGoalPace,
+  formatGoalTime,
+  formatHeartRateTargets,
+  formatPowerTargets,
+} from "@/app/components/plan/beacon-format";
 
 interface ImpactBeaconWidgetProps {
   planId: string;
@@ -170,6 +176,27 @@ export default function ImpactBeaconWidget({
                 </p>
               </div>
             ))}
+          </div>
+          <div className="border-t border-gray-100 px-4 py-2.5 text-xs text-gray-600">
+            <p>
+              <span className="font-semibold text-gray-700">Goal</span>{" "}
+              {report.targets.goalSeconds !== null
+                ? formatGoalTime(report.targets.goalSeconds)
+                : "—"}
+              {report.targets.goalPaceMinutesPerMile !== null
+                ? ` · ${formatGoalPace(report.targets.goalPaceMinutesPerMile)}`
+                : ""}
+            </p>
+            <p className="mt-1">
+              <span className="font-semibold text-gray-700">HR</span>{" "}
+              {formatHeartRateTargets(report.targets.heartRate)}
+            </p>
+            <p className="mt-1">
+              <span className="font-semibold text-gray-700">Power</span>{" "}
+              {report.targets.power
+                ? formatPowerTargets(report.targets.power)
+                : "Not configured on this plan"}
+            </p>
           </div>
           <div className="flex items-center justify-between gap-3 border-t border-gray-100 bg-gray-50 px-4 py-2.5">
             <p className="text-[11px] text-gray-500">
