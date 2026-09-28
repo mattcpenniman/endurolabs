@@ -290,7 +290,7 @@ This creates or updates the `users`, `sessions`, and `plans` tables.
 1. **Fill in your profile** — Goal time, race date, current mileage, PRs, training days, preferences
 2. **VDOT estimation** — Your race times are used to estimate your VDTO (max oxygen uptake proxy)
 3. **Zone calculation** — Daniels-derived pace factors convert VDTO into training zones
-4. **Plan generation** — The engine divides your timeline into Base → Marathon Build → Peak & Taper phases, then assigns workouts week by week
+4. **Plan generation** — The engine divides your timeline into Base → Marathon Build → Peak & Taper phases, then assigns workouts week by week. The build ramps in three-week blocks (two build weeks plus a recovery week), and the final weeks taper to 70/70/60% of peak as documented in `docs/elite-training-plan.md`
 5. **Goal assessment** — Compares your goal against your current fitness, mileage history, and available time
 
 ## Color Palette

@@ -178,3 +178,12 @@ Zone calculation uses a **VDOT approximation** derived from race times (marathon
 - VO2: ~1.3× marathon pace
 
 Apple Watch power data is supported as optional anchors for power-based training zones.
+
+## Periodization & Taper
+
+- `buildMileageCurve` in `src/lib/training/plan-generator.ts` builds one mileage curve per plan; `dividePhases`, the recovery flags, and the taper all read that same curve, so they cannot drift.
+- The build ramp steps current → peak in three-week blocks: two build weeks then a recovery week. The recovery week is flagged `isDownWeek`, drops the week's key quality workout, and drives the UI badge and safety gates.
+- The last pre-race weeks taper to the documented percent of peak: 70% at three and two weeks out and 60% one week out (`docs/elite-training-plan.md`). Race week is built around the race itself and its training runs are excluded from the race total.
+- If the documented percent is not below the previous week (a runner starting far below peak), the taper steps the previous week down by 10% instead, so every taper week still reduces.
+- `runSafetyGates` compares a rebound after a down week with the pre-recovery week, not the down week itself, so the normal recovery/reload cycle does not warn.
+- Both the UI (`POST /api/plan/generate`) and `planner:recommend --create` call `generatePlan`; do not add a second planning engine.
