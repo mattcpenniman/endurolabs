@@ -56,6 +56,7 @@ export function buildRacePredictionSnapshotValues(input: RacePredictionSnapshotI
       raceId: item.raceId,
       raceDate: item.raceDate,
       combinedWeight: item.combinedWeight,
+      executionQuality: item.executionQuality,
     })),
     prediction: input.prediction,
     maximumSourceTimestamp: input.evidence.maximumSourceTimestamp,

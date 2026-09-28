@@ -11,7 +11,7 @@ import { GarminActivitySample } from "@/lib/garmin/activity-detail";
 import { mapGarminActivityDetail } from "@/lib/garmin/activity-detail";
 import { emptyDetailRetryAt } from "@/lib/garmin/detail-retry";
 import { computeActivityQualityScore } from "@/lib/analytics/activity-quality";
-import { recomputeActivityAnalytics } from "@/lib/analytics/activity-summary-persistence";
+import { recomputeActivityAnalytics, recomputeRaceExecution } from "@/lib/analytics/activity-summary-persistence";
 import { fetchActivityDetail } from "@/lib/garmin/client";
 import type { GarminConnectClient } from "garmin-connect-client";
 
@@ -68,6 +68,7 @@ export async function upsertActivitySamples(activityId: string, samples: GarminA
     updatedAt: new Date(),
   }).where(eq(runActivities.id, activityId));
   await recomputeActivityAnalytics(activityId);
+  await recomputeRaceExecution(activityId);
   return sampleCount;
 }
 

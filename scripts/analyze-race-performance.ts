@@ -11,6 +11,11 @@ import {
   type RaceAnalysisPlanRun,
 } from "../src/lib/analytics/race-performance-analysis";
 import { loadPower140Observations } from "../src/lib/analytics/fitness-trajectory";
+import {
+  RACE_EXECUTION_VERSION,
+  parseExecutionQuality,
+  type RaceExecutionQuality,
+} from "../src/lib/analytics/race-execution";
 import { endDb } from "../src/lib/db/client";
 import type { MarathonPlan, RunnerProfile, Workout } from "../src/lib/training/models";
 import { isPredictionEligibleRaceResult } from "../src/lib/races/results";
@@ -200,9 +205,25 @@ try {
   const canonicalActivityIds = new Set(canonicalResults.flatMap((result) => (
     result.linkedActivityId ? [result.linkedActivityId] : []
   )));
+  const executionActivityIds = [...new Set([
+    ...activityRows.map((activity) => activity.id),
+    ...canonicalActivityIds,
+  ])];
+  const executionRows = executionActivityIds.length === 0 ? [] : await sql<Array<{ activityId: string; metrics: unknown }>>`
+    select activity_id as "activityId", metrics
+    from activity_analytics
+    where algorithm_version = ${RACE_EXECUTION_VERSION}
+      and activity_id in ${sql(executionActivityIds)}
+  `;
+  const executionByActivity = new Map<string, RaceExecutionQuality>();
+  for (const row of executionRows) {
+    const quality = parseExecutionQuality(row.metrics);
+    if (quality !== null) executionByActivity.set(row.activityId, quality);
+  }
   const activities: RaceAnalysisActivity[] = [
     ...activityRows.map((activity): RaceAnalysisActivity => ({
       ...activity,
+      executionQuality: executionByActivity.get(activity.id) ?? null,
       eventType: canonicalActivityIds.has(activity.id)
         || activity.predictionExcluded
         || (activity.raceClassification !== null && activity.raceClassification !== "official")
@@ -224,6 +245,7 @@ try {
       trainingExcluded: true,
       resultSource: "canonical",
       verificationStatus: result.verificationStatus as RaceAnalysisActivity["verificationStatus"],
+      executionQuality: result.linkedActivityId ? executionByActivity.get(result.linkedActivityId) ?? null : null,
     })),
   ].sort((left, right) => left.localDate.localeCompare(right.localDate));
   const planRows = await sql<PlanRow[]>`
@@ -326,6 +348,7 @@ try {
         date: race.raceDate,
         distance: race.distanceLabel,
         actual: formatDuration(race.actualSeconds),
+        execution: race.executionQuality ?? "-",
         baseline: formatDuration(race.baseline?.predictedSeconds ?? null),
         forecast: formatDuration(race.forecast?.predictedSeconds ?? null),
         forecastErrorPercent: race.forecastAbsoluteErrorPercent,
@@ -366,6 +389,7 @@ try {
           distance: evidence.distanceLabel,
           result: formatDuration(evidence.actualSeconds),
           equivalent: formatDuration(evidence.equivalentSeconds),
+          execution: evidence.executionQuality ?? "-",
           ageDays: evidence.ageDays,
           weight: evidence.combinedWeight,
         })));

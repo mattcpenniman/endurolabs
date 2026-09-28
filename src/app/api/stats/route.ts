@@ -30,7 +30,7 @@ import {
 } from "@/lib/analytics/plan-fitness";
 import { ANALYTICS_QUALITY_THRESHOLD } from "@/lib/analytics/activity-quality";
 import { ACTIVITY_ANALYTICS_VERSION, StoredActivityAnalyticsMetrics } from "@/lib/analytics/activity-summary";
-import { recomputeActivityAnalytics } from "@/lib/analytics/activity-summary-persistence";
+import { recomputeActivityAnalytics, recomputeRaceExecution } from "@/lib/analytics/activity-summary-persistence";
 import {
   FitnessWindow,
   FitnessWindowData,
@@ -723,6 +723,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
         for (const activityId of analyticsBackfillIds) {
           try {
             await recomputeActivityAnalytics(activityId);
+            await recomputeRaceExecution(activityId);
           } catch (error) {
             console.error(`Failed to backfill activity analytics for ${activityId}:`, error);
           }
