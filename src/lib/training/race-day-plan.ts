@@ -7,6 +7,7 @@
 
 import {
   RaceDayPlan,
+  RaceDayPlanForecast,
   RaceSplit,
   NutritionCue,
   WeatherAdjustment,
@@ -16,7 +17,7 @@ import {
 // ─── Split Sheet Generation ────────────────────────────────
 
 function generateSplits(
-  goalPace: number,
+  anchorPace: number,
   raceDistanceMiles: number,
   pacingStrategy: "even" | "negative" | "positive" | "progressive"
 ): RaceSplit[] {
@@ -64,7 +65,7 @@ function generateSplits(
 
   segments.forEach((segment, index) => {
     const paceDeltaMinutes = (rawOffsetsSeconds[index] - weightedOffsetAverage) / 60;
-    const targetPace = Math.max(goalPace + paceDeltaMinutes, goalPace * 0.92);
+    const targetPace = Math.max(anchorPace + paceDeltaMinutes, anchorPace * 0.92);
     cumulativeTime += targetPace * segment.distance;
 
     let effort = "Easy — stay relaxed";
@@ -107,7 +108,7 @@ function generateSplits(
 
 // ─── Nutrition Plan ────────────────────────────────────────
 
-function generateNutritionPlan(goalTime: number): NutritionCue[] {
+function generateNutritionPlan(raceTime: number): NutritionCue[] {
   const cues: NutritionCue[] = [];
 
   // Pre-rake fueling
@@ -125,9 +126,9 @@ function generateNutritionPlan(goalTime: number): NutritionCue[] {
   });
 
   // During race — fuel every 45-60 min (~30-60g carbs/hr)
-  const fuelInterval = goalTime <= 240 ? 45 : 60; // faster runners fuel more often
-  for (let min = fuelInterval; min <= goalTime; min += fuelInterval) {
-    const mile = Math.round((min / goalTime) * 26.2);
+  const fuelInterval = raceTime <= 240 ? 45 : 60; // faster runners fuel more often
+  for (let min = fuelInterval; min <= raceTime; min += fuelInterval) {
+    const mile = Math.round((min / raceTime) * 26.2);
     cues.push({
       mile: Math.min(mile, 26),
       type: "fuel",
@@ -240,12 +241,17 @@ export function generateRaceDayPlan(
   expectedTempF: number,
   pacingStrategy: "even" | "negative" | "positive" | "progressive" = "even",
   raceDistanceMiles = 26.2,
-  raceDistanceLabel = "Marathon"
+  raceDistanceLabel = "Marathon",
+  forecast: RaceDayPlanForecast | null = null,
+  anchor: "goal" | "forecast" = "goal"
 ): RaceDayPlan {
+  const activeAnchor = anchor === "forecast" && forecast !== null ? "forecast" : "goal";
+  const anchorTime = activeAnchor === "forecast" && forecast !== null ? forecast.predictedTime : goalTime;
   const goalPace = goalTime / raceDistanceMiles;
-  const splits = generateSplits(goalPace, raceDistanceMiles, pacingStrategy);
-  const nutritionPlan = generateNutritionPlan(goalTime);
-  const weatherAdjustments = generateWeatherAdjustments(goalPace, expectedTempF);
+  const anchorPace = anchorTime / raceDistanceMiles;
+  const splits = generateSplits(anchorPace, raceDistanceMiles, pacingStrategy);
+  const nutritionPlan = generateNutritionPlan(anchorTime);
+  const weatherAdjustments = generateWeatherAdjustments(anchorPace, expectedTempF);
   const preRaceRoutine = generatePreRaceRoutine();
 
   return {
@@ -254,6 +260,10 @@ export function generateRaceDayPlan(
     raceDistanceLabel,
     goalTime,
     goalPace: Math.round(goalPace * 100) / 100,
+    anchorTime,
+    anchorPace: Math.round(anchorPace * 100) / 100,
+    anchor: activeAnchor,
+    forecast,
     splits,
     nutritionPlan,
     weatherAdjustments,

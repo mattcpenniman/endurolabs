@@ -11,8 +11,9 @@
 import React from "react";
 import { useState, useEffect } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { RunnerProfile, MarathonPlan, DailyLog, WeeklyPlan } from "@/lib/training/models";
+import { RunnerProfile, MarathonPlan, DailyLog, WeeklyPlan, RaceDayPlanForecast } from "@/lib/training/models";
 import type { PlanListSummary } from "@/lib/activities/plan-list-summary";
+import type { RacePredictorResponse } from "@/lib/analytics/race-predictor";
 import OnboardingForm from "@/app/components/onboarding/OnboardingForm";
 import PlanOverviewCard from "@/app/components/plan/PlanOverviewCard";
 import PaceZonesCard from "@/app/components/plan/PaceZonesCard";
@@ -253,6 +254,8 @@ function PlanPageContent(): React.ReactNode {
   const [phaseExpansionOverrides, setPhaseExpansionOverrides] = useState<Record<string, boolean>>({});
   const [error, setError] = useState<string | null>(null);
   const [pacingStrategy, setPacingStrategy] = useState<PacingStrategy>("even");
+  const [raceDayAnchor, setRaceDayAnchor] = useState<"goal" | "forecast">("forecast");
+  const [raceForecast, setRaceForecast] = useState<RaceDayPlanForecast | null>(null);
   const [expectedTempF, setExpectedTempF] = useState(50);
   const [savedPlans, setSavedPlans] = useState<SavedPlanRow[]>([]);
   const [isSaving, setIsSaving] = useState(false);
@@ -374,6 +377,41 @@ function PlanPageContent(): React.ReactNode {
       isMounted = false;
     };
   }, [plan?.id, dailyLogRefresh]);
+
+  useEffect(() => {
+    if (!plan?.id) {
+      setRaceForecast(null);
+      return;
+    }
+
+    const distanceKey = plan.runnerProfile.raceDistance ?? "marathon";
+    const distanceMiles = RACE_DISTANCES.find((distance) => distance.key === distanceKey)?.miles ?? 26.2;
+    let isMounted = true;
+
+    fetch(`/api/race-predictor?distanceMiles=${distanceMiles}`)
+      .then((response) => (response.ok ? response.json() : null))
+      .then((data: RacePredictorResponse | null) => {
+        if (!isMounted) return;
+        const prediction = data?.predictions?.[0];
+        setRaceForecast(prediction
+          ? {
+              predictedTime: prediction.predictedSeconds / 60,
+              predictedPace: prediction.paceSecondsPerMile / 60,
+              rangeLowerTime: prediction.range ? prediction.range.lowerSeconds / 60 : null,
+              rangeUpperTime: prediction.range ? prediction.range.upperSeconds / 60 : null,
+              confidence: prediction.confidence,
+              asOf: data?.asOf ?? "",
+            }
+          : null);
+      })
+      .catch(() => {
+        if (isMounted) setRaceForecast(null);
+      });
+
+    return () => {
+      isMounted = false;
+    };
+  }, [plan?.id, plan?.runnerProfile.raceDistance, dailyLogRefresh]);
 
   useEffect(() => {
     if (!plan?.id) return;
@@ -2020,8 +2058,11 @@ function PlanPageContent(): React.ReactNode {
                 expectedTempF,
                 pacingStrategy,
                 selectedRaceDistance.miles,
-                selectedRaceDistance.label
+                selectedRaceDistance.label,
+                raceForecast,
+                raceDayAnchor
               )}
+              onAnchorChange={setRaceDayAnchor}
             />
           </div>
         ) : activePlanTab === "scorecard" ? (
