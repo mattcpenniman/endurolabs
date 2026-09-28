@@ -312,12 +312,30 @@ export interface RaceSplit {
   notes: string;
 }
 
+/** Pre-race fitness forecast that can anchor the race-day split sheet. */
+export interface RaceDayPlanForecast {
+  predictedTime: number;        // total minutes
+  predictedPace: number;        // min/mile
+  rangeLowerTime: number | null; // total minutes, 90% historical-error range
+  rangeUpperTime: number | null;
+  confidence: "limited" | "developing";
+  asOf: string;                 // YYYY-MM-DD the forecast was computed for
+}
+
 export interface RaceDayPlan {
   raceDate: string;
   raceDistanceMiles: number;
   raceDistanceLabel: string;
   goalTime: number;         // total minutes
   goalPace: number;         // min/mile
+  /** Time the splits are paced to (minutes); equals goalTime for a goal anchor. */
+  anchorTime: number;
+  /** Pace corresponding to anchorTime (min/mile). */
+  anchorPace: number;
+  /** Which time the splits follow. */
+  anchor: "goal" | "forecast";
+  /** Current-fitness forecast, when the athlete's race history supports one. */
+  forecast: RaceDayPlanForecast | null;
   splits: RaceSplit[];
   nutritionPlan: NutritionCue[];
   weatherAdjustments: WeatherAdjustment[];

@@ -20,20 +20,32 @@ import {
 
 interface RaceDayPlanCardProps {
   plan: RaceDayPlan;
+  /** Switches the sheet between the goal time and the pre-race forecast. */
+  onAnchorChange?: (anchor: "goal" | "forecast") => void;
 }
 
 const TABS = ["splits", "nutrition", "pre-race", "weather"] as const;
 type Tab = (typeof TABS)[number];
 
-export default function RaceDayPlanCard({ plan }: RaceDayPlanCardProps) {
+function formatMinutes(totalMinutes: number): string {
+  return formatTime({
+    hours: Math.floor(totalMinutes / 60),
+    minutes: Math.floor(totalMinutes % 60),
+    seconds: Math.round((totalMinutes % 1) * 60),
+  });
+}
+
+export default function RaceDayPlanCard({ plan, onAnchorChange }: RaceDayPlanCardProps) {
   const { units } = useUnits();
   const [activeTab, setActiveTab] = useState<Tab>("splits");
 
-  const goalFormatted = formatTime({
-    hours: Math.floor(plan.goalTime / 60),
-    minutes: Math.floor(plan.goalTime % 60),
-    seconds: 0,
-  });
+  const goalFormatted = formatMinutes(plan.goalTime);
+  const anchorFormatted = formatMinutes(plan.anchorTime);
+  const forecast = plan.forecast;
+  const forecastFormatted = forecast ? formatMinutes(forecast.predictedTime) : null;
+  const forecastRange = forecast && forecast.rangeLowerTime !== null && forecast.rangeUpperTime !== null
+    ? `${formatMinutes(forecast.rangeLowerTime)}–${formatMinutes(forecast.rangeUpperTime)}`
+    : null;
 
   return (
     <div className="rounded-2xl border border-gray-200 bg-white p-6 shadow-sm">
@@ -41,9 +53,45 @@ export default function RaceDayPlanCard({ plan }: RaceDayPlanCardProps) {
       <div className="mb-6">
         <h3 className="text-xl font-bold text-gray-900">🏁 Race Day Plan</h3>
         <p className="mt-1 text-sm text-gray-500">
-          {plan.raceDistanceLabel} · {plan.raceDate} · Goal: {goalFormatted} · Pace: {formatPaceForSystem(plan.goalPace, units)}{paceUnitSuffix(units)}
+          {plan.raceDistanceLabel} · {plan.raceDate} · {plan.anchor === "forecast" ? "Pacing on current fitness" : "Pacing on goal"}: {anchorFormatted} · {formatPaceForSystem(plan.anchorPace, units)}{paceUnitSuffix(units)}
         </p>
-        <p className="text-xs text-gray-400 capitalize">{plan.pacingStrategy} pacing strategy</p>
+        <p className="text-xs text-gray-400 capitalize">
+          {plan.pacingStrategy} pacing strategy · Goal {goalFormatted}
+          {plan.anchor === "forecast" && forecastFormatted ? ` · Forecast ${forecastFormatted}` : ""}
+        </p>
+        {forecast && (
+          <div className="mt-3 flex flex-wrap items-center gap-2">
+            <span className="text-xs font-medium text-gray-500">Pace on:</span>
+            <div className="flex rounded-lg bg-gray-100 p-1">
+              <button
+                type="button"
+                onClick={() => onAnchorChange?.("forecast")}
+                className={`rounded-md px-3 py-1 text-xs font-medium transition-colors ${
+                  plan.anchor === "forecast" ? "bg-white text-enduro-700 shadow-sm" : "text-gray-500 hover:text-gray-700"
+                }`}
+              >
+                Current fitness
+              </button>
+              <button
+                type="button"
+                onClick={() => onAnchorChange?.("goal")}
+                className={`rounded-md px-3 py-1 text-xs font-medium transition-colors ${
+                  plan.anchor === "goal" ? "bg-white text-enduro-700 shadow-sm" : "text-gray-500 hover:text-gray-700"
+                }`}
+              >
+                Goal time
+              </button>
+            </div>
+            <span className="text-xs text-gray-400">
+              {forecastRange ? `90% historical range ${forecastRange} · ` : ""}base forecast {forecastFormatted} ({forecast.confidence} confidence, as of {forecast.asOf})
+            </span>
+          </div>
+        )}
+        {forecast && plan.anchor === "forecast" && (
+          <p className="mt-2 text-xs text-gray-400">
+            The forecast follows your prior race results, not the goal. The range is historical forecast error, not a calibrated interval.
+          </p>
+        )}
       </div>
 
       {/* Tabs */}

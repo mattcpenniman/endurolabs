@@ -4,7 +4,7 @@
 
 import { describe, it, expect } from "vitest";
 import { generateRaceDayPlan } from "@/lib/training/race-day-plan";
-import { RaceDayPlan } from "@/lib/training/models";
+import { RaceDayPlan, RaceDayPlanForecast } from "@/lib/training/models";
 
 describe("generateRaceDayPlan", () => {
   it("returns a RaceDayPlan with all required fields", () => {
@@ -115,5 +115,59 @@ describe("generateRaceDayPlan", () => {
     const coldAdj = coldPlan.weatherAdjustments.find((a) => a.threshold <= 25);
     expect(coldAdj).toBeDefined();
     expect(coldAdj!.paceDelta).toBeGreaterThan(0);
+  });
+});
+
+describe("generateRaceDayPlan forecast anchor", () => {
+  // Berlin 2026-09-27 scenario: the goal was 2:59 but the pre-race forecast was 3:08.
+  const goalTime = 179;
+  const forecast: RaceDayPlanForecast = {
+    predictedTime: 188.2,
+    predictedPace: 188.2 / 26.2,
+    rangeLowerTime: 169.5,
+    rangeUpperTime: 211.5,
+    confidence: "limited",
+    asOf: "2026-09-26",
+  };
+
+  it("keeps the goal anchor by default and retains the forecast", () => {
+    const plan = generateRaceDayPlan(goalTime, "2026-09-27", 50, "negative", 26.2, "Marathon", forecast);
+    expect(plan.anchor).toBe("goal");
+    expect(plan.anchorTime).toBe(goalTime);
+    expect(plan.anchorPace).toBeCloseTo(plan.goalPace, 5);
+    expect(plan.splits[plan.splits.length - 1].targetTime).toBeCloseTo(goalTime, 1);
+    expect(plan.forecast).toBe(forecast);
+  });
+
+  it("paces the splits on the forecast while keeping the goal time", () => {
+    const plan = generateRaceDayPlan(goalTime, "2026-09-27", 50, "negative", 26.2, "Marathon", forecast, "forecast");
+    expect(plan.anchor).toBe("forecast");
+    expect(plan.anchorTime).toBeCloseTo(forecast.predictedTime, 5);
+    expect(plan.anchorPace).toBeCloseTo(forecast.predictedTime / 26.2, 1);
+    expect(plan.goalTime).toBe(goalTime);
+    expect(plan.splits[plan.splits.length - 1].targetTime).toBeCloseTo(forecast.predictedTime, 1);
+  });
+
+  it("opens the negative-split sheet at goal pace versus forecast pace", () => {
+    const goalPlan = generateRaceDayPlan(goalTime, "2026-09-27", 50, "negative");
+    const forecastPlan = generateRaceDayPlan(goalTime, "2026-09-27", 50, "negative", 26.2, "Marathon", forecast, "forecast");
+    expect(goalPlan.splits[0].targetPace).toBeCloseTo(6.99, 2);
+    expect(forecastPlan.splits[0].targetPace).toBeCloseTo(7.34, 2);
+  });
+
+  it("falls back to the goal when the forecast anchor is requested without a forecast", () => {
+    const plan = generateRaceDayPlan(goalTime, "2026-09-27", 50, "even", 26.2, "Marathon", null, "forecast");
+    expect(plan.anchor).toBe("goal");
+    expect(plan.anchorTime).toBe(goalTime);
+    expect(plan.forecast).toBeNull();
+  });
+
+  it("schedules fueling against the anchor time", () => {
+    const goalPlan = generateRaceDayPlan(goalTime, "2026-09-27", 50, "even");
+    const forecastPlan = generateRaceDayPlan(goalTime, "2026-09-27", 50, "even", 26.2, "Marathon", forecast, "forecast");
+    const lastFuelMile = (plan: RaceDayPlan): number => Math.max(
+      ...plan.nutritionPlan.filter((cue) => cue.type === "fuel" && cue.mile > 0).map((cue) => cue.mile)
+    );
+    expect(lastFuelMile(forecastPlan)).toBeGreaterThanOrEqual(lastFuelMile(goalPlan));
   });
 });
