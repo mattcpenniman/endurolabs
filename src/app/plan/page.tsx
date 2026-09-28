@@ -19,7 +19,7 @@ import PlanOverviewCard from "@/app/components/plan/PlanOverviewCard";
 import PaceZonesCard from "@/app/components/plan/PaceZonesCard";
 import WeeklyPlanCard from "@/app/components/plan/WeeklyPlanCard";
 import RaceDayPlanCard from "@/app/components/plan/RaceDayPlanCard";
-import Sub3Scorecard from "@/app/components/plan/Sub3Scorecard";
+import GoalScorecard from "@/app/components/plan/GoalScorecard";
 import ImpactBeaconCard from "@/app/components/plan/ImpactBeaconCard";
 import MileageTrendChart from "@/app/components/charts/MileageTrendChart";
 import LongRunProgressionChart from "@/app/components/charts/LongRunProgressionChart";
@@ -2073,13 +2073,14 @@ function PlanPageContent(): React.ReactNode {
         ) : activePlanTab === "scorecard" ? (
           <div id="scorecard" className="mb-8 scroll-mt-24">
             <div className="mb-6">
-              <h2 className="text-2xl font-bold text-gray-900">Sub-3 Score Card</h2>
+              <h2 className="text-2xl font-bold text-gray-900">Goal Score Card</h2>
               <p className="text-sm text-gray-500">
-                Objective markers scored against the generated plan and logged actuals.
+                Objective markers scored against the generated plan and logged actuals. Standards follow the plan&apos;s
+                goal time and pace zones.
               </p>
             </div>
             <ImpactBeaconCard planId={plan.id} refreshToken={dailyLogRefresh} />
-            <Sub3Scorecard plan={plan} dailyLogs={dailyLogs} />
+            <GoalScorecard plan={plan} dailyLogs={dailyLogs} />
           </div>
         ) : (
           <div className="mb-8">

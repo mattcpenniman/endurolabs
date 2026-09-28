@@ -1,17 +1,17 @@
 "use client";
 
 // ============================================================
-// EnduroLab — Sub-3 Scorecard
+// EnduroLab — Goal Marathon Scorecard
 // ============================================================
-// Renders objective sub-3 readiness markers for the generated
-// plan and logged actuals.
+// Renders objective goal-readiness markers for the generated
+// plan and logged actuals. Standards follow the plan's goal.
 // ============================================================
 
 import React from "react";
-import { DailyLog, MarathonPlan } from "@/lib/training/models";
-import { buildSub3Scorecard, ScoreStatus } from "@/lib/training/sub3-scorecard";
+import { DailyLog, MarathonPlan, formatTime, minutesToTime } from "@/lib/training/models";
+import { buildGoalScorecard, ScoreStatus } from "@/lib/training/goal-scorecard";
 
-interface Sub3ScorecardProps {
+interface GoalScorecardProps {
   plan: MarathonPlan;
   dailyLogs: DailyLog[];
 }
@@ -35,11 +35,15 @@ function scoreClass(score: number): string {
   return "text-red-700";
 }
 
-export default function Sub3Scorecard({ plan, dailyLogs }: Sub3ScorecardProps) {
-  const scorecard = buildSub3Scorecard(plan, dailyLogs);
+export default function GoalScorecard({ plan, dailyLogs }: GoalScorecardProps) {
+  const scorecard = buildGoalScorecard(plan, dailyLogs);
 
   return (
     <div className="space-y-6">
+      <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">
+        {scorecard.standards.label} standards · goal {formatTime(minutesToTime(scorecard.standards.goalTimeMinutes))}
+      </p>
+
       <div className="grid gap-4 md:grid-cols-2">
         <div className="rounded-lg border border-gray-200 bg-white p-5">
           <p className="text-sm font-semibold text-gray-700">Planned Score</p>
