@@ -9,6 +9,7 @@ import { db } from "@/lib/db/client";
 import { activitySamples, runActivities } from "@/lib/db/schema";
 import { GarminActivitySample } from "@/lib/garmin/activity-detail";
 import { mapGarminActivityDetail } from "@/lib/garmin/activity-detail";
+import { emptyDetailRetryAt } from "@/lib/garmin/detail-retry";
 import { computeActivityQualityScore } from "@/lib/analytics/activity-quality";
 import { recomputeActivityAnalytics } from "@/lib/analytics/activity-summary-persistence";
 import { fetchActivityDetail } from "@/lib/garmin/client";
@@ -17,7 +18,10 @@ import type { GarminConnectClient } from "garmin-connect-client";
 const INSERT_BATCH_SIZE = 500;
 
 export async function upsertActivitySamples(activityId: string, samples: GarminActivitySample[]): Promise<number> {
-  const [activity] = await db.select({ durationSeconds: runActivities.durationSeconds })
+  const [activity] = await db.select({
+    durationSeconds: runActivities.durationSeconds,
+    detailAttemptCount: runActivities.detailAttemptCount,
+  })
     .from(runActivities)
     .where(eq(runActivities.id, activityId))
     .limit(1);
@@ -60,7 +64,7 @@ export async function upsertActivitySamples(activityId: string, samples: GarminA
     detailFetchStatus: sampleCount > 0 ? "success" : "empty",
     detailLastAttemptAt: new Date(),
     detailLastError: null,
-    detailNextRetryAt: null,
+    detailNextRetryAt: sampleCount > 0 ? null : emptyDetailRetryAt(activity.detailAttemptCount),
     updatedAt: new Date(),
   }).where(eq(runActivities.id, activityId));
   await recomputeActivityAnalytics(activityId);

@@ -19,6 +19,11 @@ import {
 } from "@/lib/garmin/client";
 import { GarminActivityPayload, isRunningActivity, normalizeGarminActivity } from "@/lib/garmin/activities";
 import { ingestGarminActivityDetail, mapWithConcurrency } from "@/lib/garmin/sample-ingestion";
+import {
+  detailFetchDueCondition,
+  EMPTY_DETAIL_RETRY_WINDOW_DAYS,
+  MAX_EMPTY_DETAIL_ATTEMPTS,
+} from "@/lib/garmin/detail-retry";
 import { reconcileManualActivityMerges } from "@/lib/activities/manual-merge-persistence";
 import { applyCalculatedSummaryPower, loadSummaryPowerModel } from "@/lib/activities/summary-power-estimate";
 
@@ -87,13 +92,7 @@ async function processDetailPass(job: typeof garminSyncJobs.$inferSelect, client
     eq(runActivities.source, "garmin"),
     ...(parameters.planId ? [eq(runActivities.planId, parameters.planId)] : []),
     lte(runActivities.startTimeGmt, through),
-    or(
-      isNull(runActivities.detailFetchStatus),
-      and(
-        eq(runActivities.detailFetchStatus, "failed"),
-        or(isNull(runActivities.detailNextRetryAt), lte(runActivities.detailNextRetryAt, new Date())),
-      ),
-    ),
+    detailFetchDueCondition(new Date()),
     ...(windowCondition ? [windowCondition] : []),
     ...(cursorCondition ? [cursorCondition] : []),
   );
@@ -281,14 +280,21 @@ export async function processGarminJob(jobId: string, maxPasses = 4): Promise<vo
     if (complete && progress.kind === "detail") {
       const parameters = progress.parameters as DetailJobParameters;
       const windowCondition = detailWindow(parameters);
+      const emptyRetryCutoff = new Date(Date.now() - EMPTY_DETAIL_RETRY_WINDOW_DAYS * 86_400_000);
       const [retry] = await db.select({ nextRetryAt: runActivities.detailNextRetryAt })
         .from(runActivities)
         .where(and(
           eq(runActivities.userId, progress.userId),
           eq(runActivities.source, "garmin"),
           ...(parameters.planId ? [eq(runActivities.planId, parameters.planId)] : []),
-          eq(runActivities.detailFetchStatus, "failed"),
-          lt(runActivities.detailAttemptCount, 3),
+          or(
+            and(eq(runActivities.detailFetchStatus, "failed"), lt(runActivities.detailAttemptCount, 3)),
+            and(
+              eq(runActivities.detailFetchStatus, "empty"),
+              lt(runActivities.detailAttemptCount, MAX_EMPTY_DETAIL_ATTEMPTS),
+              gte(runActivities.startTimeGmt, emptyRetryCutoff),
+            ),
+          ),
           lte(runActivities.startTimeGmt, new Date(parameters.through)),
           ...(windowCondition ? [windowCondition] : []),
         ))
