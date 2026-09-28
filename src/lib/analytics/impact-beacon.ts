@@ -145,6 +145,14 @@ export interface ImpactBeaconGap {
   evidence: string;
 }
 
+/**
+ * Traffic-light status for the floating beacon: `red` when an
+ * impact-eligible metric is behind plan, `amber` when eligible metrics are
+ * on/ahead but a context-only metric is behind or its sample detail is
+ * missing, `green` when all eligible metrics are on/ahead.
+ */
+export type ImpactBeaconLevel = "red" | "amber" | "green";
+
 export interface ImpactBeaconReport {
   version: typeof IMPACT_BEACON_VERSION;
   planId: string;
@@ -972,4 +980,16 @@ export function buildImpactBeacon(input: ImpactBeaconInput): ImpactBeaconReport 
 /** Converts meters to miles; exported for loaders that read activity summaries. */
 export function metersToMiles(meters: number): number {
   return Number.isFinite(meters) ? meters / METERS_PER_MILE : 0;
+}
+
+/**
+ * Traffic-light status for the floating beacon. Rejected metrics never turn
+ * the beacon red; at most they make it amber as unresolved context.
+ */
+export function impactBeaconLevel(report: ImpactBeaconReport): ImpactBeaconLevel {
+  if (report.gaps.length > 0) return "red";
+  const contextConcern = report.metrics.some(
+    (metric) => !metric.impactEligible && (metric.direction === "behind" || metric.dataMissing),
+  );
+  return contextConcern ? "amber" : "green";
 }

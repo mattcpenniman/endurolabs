@@ -78,7 +78,7 @@ export default function ImpactBeaconCard({ planId, refreshToken = 0 }: ImpactBea
 
   useEffect(() => {
     let active = true;
-    fetch(`/api/plan/${planId}/impact-beacon`)
+    fetch(`/api/plan/${planId}/impact-beacon`, { cache: "no-store" })
       .then((response) => (response.ok ? response.json() : null))
       .then((data: ImpactBeaconReport | null) => {
         if (!active) return;

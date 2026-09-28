@@ -6,7 +6,11 @@
 // ============================================================
 
 import { describe, expect, it } from "vitest";
-import { buildImpactBeacon, type ImpactBeaconRun } from "@/lib/analytics/impact-beacon";
+import {
+  buildImpactBeacon,
+  impactBeaconLevel,
+  type ImpactBeaconRun,
+} from "@/lib/analytics/impact-beacon";
 import { beaconReadinessMetrics } from "@/lib/analytics/readiness-metrics";
 import type {
   EffortZone,
@@ -473,5 +477,65 @@ describe("buildImpactBeacon", () => {
 
     expect(report.metrics).toHaveLength(5);
     expect(report.beacon === null || ["volume", "long_run"].includes(report.beacon.key)).toBe(true);
+  });
+});
+
+describe("impactBeaconLevel", () => {
+  it("is red when an impact-eligible metric is behind", () => {
+    const report = buildImpactBeacon({ plan: makePlan(), runs: TRAILING_RUNS, asOf: "2026-09-28" });
+
+    expect(report.gaps.length).toBeGreaterThan(0);
+    expect(impactBeaconLevel(report)).toBe("red");
+  });
+
+  it("is amber when only context metrics are behind or missing data", () => {
+    const frontLoaded = Array.from({ length: 8 }, (_, index) => (
+      run(addDays("2026-09-07", index), 20)
+    ));
+    const report = buildImpactBeacon({ plan: makePlan(), runs: frontLoaded, asOf: "2026-09-28" });
+
+    expect(report.beacon).toBeNull();
+    expect(report.metrics.find((metric) => metric.key === "consistency")?.direction).toBe("behind");
+    expect(report.metrics.find((metric) => metric.key === "power_effort")?.dataMissing).toBe(true);
+    expect(impactBeaconLevel(report)).toBe("amber");
+  });
+
+  it("is amber before the plan starts when eligible metrics are on/ahead but power has no zones", () => {
+    const runs: ImpactBeaconRun[] = [
+      run("2026-08-06", 20),
+      run("2026-08-09", 20),
+      run("2026-08-13", 20),
+      run("2026-08-16", 20),
+      run("2026-08-20", 20),
+      run("2026-08-23", 20),
+      run("2026-08-27", 20),
+      run("2026-08-30", 20),
+      run("2026-09-01", 16),
+    ];
+    const report = buildImpactBeacon({ plan: makePlan(), runs, asOf: "2026-09-01" });
+
+    expect(report.beacon).toBeNull();
+    expect(impactBeaconLevel(report)).toBe("amber");
+  });
+
+  it("is green when eligible and context metrics are all on/ahead", () => {
+    const easyPlan = makePlan({
+      weeks: [makeWeek({
+        weekNumber: 1,
+        startDate: "2026-09-07",
+        totalMileage: 40,
+        longRunDistance: 14,
+        entries: { "2026-09-13": longRun("w1-long", 14, 0, 110) },
+      })],
+      totalWeeks: 1,
+    });
+    const report = buildImpactBeacon({
+      plan: easyPlan,
+      runs: [run("2026-09-08", 20), run("2026-09-10", 18)],
+      asOf: "2026-09-28",
+    });
+
+    expect(report.beacon).toBeNull();
+    expect(impactBeaconLevel(report)).toBe("green");
   });
 });
