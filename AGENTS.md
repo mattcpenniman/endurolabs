@@ -105,7 +105,7 @@ src/
 - UI/API response construction lives in `src/lib/analytics/race-predictor.ts` and must reuse the same pure forecast functions as the CLI so displayed predictions and backtests cannot drift.
 - The Race Predictor labels uncertainty as a `90% historical range`, not a calibrated confidence interval. Keep the explanatory disclaimer visible anywhere the range is displayed.
 - Add `--as-of YYYY-MM-DD` for a historical cutoff, `--lookback-days N` for the training window (minimum 28, default 112), and `--json` for complete machine-readable feature rows.
-- The CLI builds one leakage-aware row per tagged historical race and current plan target. It reports trailing mileage, consistency, long-run exposure, elevation, HR/power coverage, plan intent/adherence, and a latest-prior-race Riegel baseline backtest.
+- The CLI builds one leakage-aware row per tagged historical race and current plan target. It reports trailing mileage, consistency, long-run exposure, time at marathon-or-faster HR effort, elevation, HR/power coverage, plan intent/adherence, and a latest-prior-race Riegel baseline backtest.
 - Feature construction lives in `src/lib/analytics/race-performance-analysis.ts`; keep it pure and reuse it for future forecast models rather than rebuilding SQL-specific features.
 - The current `race-evidence-v1` candidate converts every eligible prior 5K-through-marathon result with Riegel, then takes a weighted median. Fixed weights use a 180-day recency half-life, exponential source/target-distance similarity, and a 1.5x same-distance multiplier; evidence older than five years is excluded.
 - `race-execution-v1` (`src/lib/analytics/race-execution.ts`) classifies each race from its own samples: positive split, heart-rate/power/cadence fade, and closing-10K degradation. `recomputeRaceExecution` persists it per activity in `activity_analytics` during detail ingestion; backfill existing rows with `npm run execution:backfill` (add `--apply` to persist; the default is a preview).
@@ -120,6 +120,17 @@ src/
 - `calculated_power` is derived from speed. The CLI reports its coverage separately but never uses it as independent evidence for a pace prediction.
 - Validate future models with rolling-origin race backtests and athlete-held-out folds. Compare against goal time, PR, latest same-distance race, and Riegel equivalents; report MAE/RMSE, bias, interval coverage, and probability calibration.
 - Do not display a goal-achievement probability until it is calibrated out of sample. The intended product output is predicted finish time, uncertainty interval, goal probability, confidence, and the strongest positive/negative drivers.
+- Training features now include time at effort: `buildRaceTrainingFeatures` aggregates `hrEffortMinutes*` / `powerEffortMinutes*` at marathon-or-faster intensity from `activity_samples` (via `summarizeTimeAtEffort` and the activity-linked plan's zones). Power effort requires measured sensor power; modeled power is never bucketed. `race:analyze` loads samples by default (`--no-effort` skips it); the shared DB loader is `src/lib/analytics/race-analysis-loader.ts`.
+
+## Readiness Metric Validation and the Impact Beacon
+
+- `npm run readiness:validate -- [--email runner@example.com] [--as-of YYYY-MM-DD] [--lookback-days 112] [--horizons 7,28,84] [--json]` is the read-only ranking of the candidate readiness metrics (volume, long-run exposure, consistency, minutes at HR effort, minutes at power effort) with the rolling-origin race backtest and athlete-held-out folds. It pools pairs across horizons and reports MAE/RMSE/bias, wins/ties/losses, and the promotion decision.
+- The harness, the fixed promotion policy, and the frozen promotion table live in `src/lib/analytics/readiness-metrics.ts` (`evaluateReadinessMetrics`, `evaluateReadinessPromotionGate`, `READINESS_METRIC_PROMOTIONS`, `beaconReadinessMetrics`). Do not hand-edit tiers from intuition; re-run validation and record the run.
+- The plan-vs-actual impact beacon (VEC-341) may highlight only the metrics in `beaconReadinessMetrics()` (tier `validated` or `provisional`). Rejected metrics must not be rendered as impact reasons even when the plans differ on them.
+- The metric effects stay fixed and unfitted in `computeReadinessAdjustment` (`race-performance-analysis.ts`); validation decides which metrics are promoted, never fits coefficients. `DEFAULT_READINESS_METRICS` (the incumbent `race-training-readiness-v1`) does not change when a metric is promoted, so the product forecast cannot shift silently.
+- Promotion policy: at least 8 common rolling-origin pairs; MAE improvement ≥ 0.15% of mean actual time; wins > losses; the median absolute error improves on the pairs the metric actually moves; marathon-only MAE regression ≤ 0.1%; metric coverage ≥ 50% of pairs. Athlete-held-out folds are required for a `validated` tier; with one athlete the tier is `provisional` and must be labeled athlete-specific.
+- 2026-09-28 run (1 athlete, 13 races, 34 pooled pairs, as-of 2026-09-28): base `race-evidence-v1` MAE 5:31, RMSE 7:28, bias +2:08. Promoted: long-run exposure (MAE 5:18, −14 s / 0.19%, 7W/4L) and volume (5:20, −11 s / 0.15%, 11W/6L), both provisional. Rejected: consistency (2 s worse), HR effort (94% coverage, MAE 14 s worse, 3W/13L, marathon-only +36 s), power effort (0% coverage — no stored plan carries power zones). Re-run after a second athlete has race history or after power zones exist.
+- `race:analyze` and `readiness:validate` both read through `loadRaceAnalysisDataset`, which normalizes legacy double-encoded `plan_data` (those plans used to be dropped from coverage) and computes per-activity time at effort in bounded sample batches.
 
 ## Goal-Directed Planner CLI
 
@@ -164,7 +175,7 @@ src/
 - Test Garmin payload mapping as pure logic; DB idempotency requires an integration test against PostgreSQL.
 
 ## Key Configuration
-- `package.json` scripts include app lifecycle, `db:push`, user/plan utilities, `seed:dev`, `garmin:history`, `samples:backfill`, `summaries:recompute`, `execution:backfill`, `race:analyze`, `planner:recommend`, `plan:compare`, `plan:rebuild-week`, and Vitest commands
+- `package.json` scripts include app lifecycle, `db:push`, user/plan utilities, `seed:dev`, `garmin:history`, `samples:backfill`, `summaries:recompute`, `execution:backfill`, `race:analyze`, `readiness:validate`, `planner:recommend`, `plan:compare`, `plan:rebuild-week`, and Vitest commands
 - `plan:rebuild-week` (`scripts/rebuild-plan-week.ts`) regenerates one stored plan week from the current generator and splices it back in, leaving every other week untouched. Defaults to the final (race) week; use `--week N` for another. Preview-first (`--apply` persists) and it refuses when the stored week start date no longer lines up or when activities/run logs already reference the replaced week's workouts.
 - `tsconfig.json`: strict mode, `@/*` → `./src/*`, ES2017 target, bundler module resolution
 - `vitest.config.ts`: jsdom environment, React plugin, globals true

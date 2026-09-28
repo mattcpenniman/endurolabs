@@ -2,76 +2,18 @@
 
 /** Reports leakage-aware race prediction features and a Riegel baseline backtest. */
 
-import postgres from "postgres";
-import {
-  analyzeRacePerformance,
-  type RaceAnalysisActivity,
-  type RaceAnalysisLog,
-  type RaceAnalysisPlan,
-  type RaceAnalysisPlanRun,
-} from "../src/lib/analytics/race-performance-analysis";
+import { analyzeRacePerformance } from "../src/lib/analytics/race-performance-analysis";
 import { loadPower140Observations } from "../src/lib/analytics/fitness-trajectory";
 import {
-  RACE_EXECUTION_VERSION,
-  parseExecutionQuality,
-  type RaceExecutionQuality,
-} from "../src/lib/analytics/race-execution";
+  findRaceAnalysisUser,
+  loadRaceAnalysisDataset,
+} from "../src/lib/analytics/race-analysis-loader";
 import { endDb } from "../src/lib/db/client";
-import type { MarathonPlan, RunnerProfile, Workout } from "../src/lib/training/models";
-import { isPredictionEligibleRaceResult } from "../src/lib/races/results";
 
 try {
   process.loadEnvFile(".env");
 } catch (error) {
   if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
-}
-
-const METERS_PER_MILE = 1609.344;
-const DISTANCE_METERS = {
-  marathon: 42_195,
-  half_marathon: 21_097.5,
-  "10k": 10_000,
-  "5k": 5_000,
-} as const;
-
-interface UserRow {
-  id: string;
-  email: string;
-}
-
-interface PlanRow {
-  id: string;
-  raceName: string | null;
-  runnerProfile: RunnerProfile;
-  planData: MarathonPlan;
-  createdAt: Date;
-  updatedAt: Date;
-}
-
-interface LogRow {
-  planId: string;
-  date: string;
-  completed: number;
-  actualMileage: number;
-  loggedAt: Date;
-  isAdditionalRun: number;
-}
-
-interface CanonicalResultRow {
-  id: string;
-  raceDate: string;
-  officialDistanceMeters: number;
-  chipTimeSeconds: number | null;
-  gunTimeSeconds: number | null;
-  status: string;
-  classification: string;
-  predictionExcluded: boolean;
-  linkedActivityId: string | null;
-  elevationGainMeters: number | null;
-  verificationStatus: string;
-  activityAverageHeartRate: number | null;
-  activityAveragePower: number | null;
-  activityCalculatedPower: number | null;
 }
 
 function argument(name: string): string | undefined {
@@ -83,56 +25,18 @@ function argument(name: string): string | undefined {
 
 function usage(): void {
   console.error(`Usage:
-  npm run race:analyze -- --email runner@example.com [--as-of YYYY-MM-DD] [--lookback-days 112] [--fitness] [--json]
-  npm run race:analyze -- --plan-id UUID [--as-of YYYY-MM-DD] [--lookback-days 112] [--fitness] [--json]
+  npm run race:analyze -- --email runner@example.com [--as-of YYYY-MM-DD] [--lookback-days 112] [--fitness] [--no-effort] [--json]
+  npm run race:analyze -- --plan-id UUID [--as-of YYYY-MM-DD] [--lookback-days 112] [--fitness] [--no-effort] [--json]
 
-  --fitness  Enable the experimental Power @ 140 readiness effect (model v2).
-             Off by default; v1 (volume + long-run + consistency) is active.
+  --fitness   Enable the experimental Power @ 140 readiness effect (model v2).
+              Off by default; v1 (volume + long-run + consistency) is active.
+  --no-effort Skip loading samples for time-at-effort training features.
 
 The command is read-only. JSON output is suitable for later model notebooks or scripts.`);
 }
 
 function validDate(value: string): boolean {
   return /^\d{4}-\d{2}-\d{2}$/.test(value) && !Number.isNaN(Date.parse(`${value}T00:00:00Z`));
-}
-
-function workouts(plan: MarathonPlan): RaceAnalysisPlanRun[] {
-  return plan.weeks.flatMap((week) => week.days.flatMap((day) => {
-    const values: Workout[] = [day.workout, day.secondaryWorkout].filter(
-      (workout): workout is Workout => workout !== null && workout !== undefined,
-    );
-    return values.map((workout) => ({
-      date: day.date.slice(0, 10),
-      miles: workout.totalDistance,
-      workoutType: workout.type,
-    }));
-  }));
-}
-
-function normalizePlan(row: PlanRow, logs: LogRow[]): RaceAnalysisPlan | null {
-  const profile = row.runnerProfile;
-  if (typeof profile.raceDate !== "string" || !validDate(profile.raceDate)) return null;
-  const raceDistance = profile.raceDistance ?? "marathon";
-  const normalizedLogs: RaceAnalysisLog[] = logs
-    .filter((log) => log.planId === row.id)
-    .map((log) => ({
-      date: log.date.slice(0, 10),
-      completed: log.completed === 1,
-      actualMiles: log.actualMileage / 100,
-      loggedAt: log.loggedAt.toISOString(),
-      isAdditionalRun: log.isAdditionalRun === 1,
-    }));
-  return {
-    id: row.id,
-    raceName: row.raceName ?? profile.raceName ?? null,
-    raceDate: profile.raceDate.slice(0, 10),
-    raceDistanceMeters: DISTANCE_METERS[raceDistance],
-    goalSeconds: raceDistance === "marathon" ? profile.goalMarathonTime * 60 : null,
-    createdAt: row.createdAt.toISOString(),
-    updatedAt: row.updatedAt.toISOString(),
-    plannedRuns: workouts(row.planData),
-    logs: normalizedLogs,
-  };
 }
 
 function formatDuration(seconds: number | null): string {
@@ -151,8 +55,7 @@ const asOf = argument("as-of") ?? new Date().toISOString().slice(0, 10);
 const lookbackDays = Number(argument("lookback-days") ?? 112);
 const json = process.argv.includes("--json");
 const fitnessEnabled = process.argv.includes("--fitness");
-const databaseUrl = process.env.DATABASE_URL ?? "postgresql://enduro:endurodev@localhost:5432/endurolab";
-const sql = postgres(databaseUrl, { prepare: false });
+const includeEffort = !process.argv.includes("--no-effort");
 
 try {
   if ((!email && !planId) || (email && planId)) {
@@ -164,112 +67,19 @@ try {
     throw new Error("--lookback-days must be an integer of at least 28");
   }
 
-  const [user] = await sql<UserRow[]>`
-    select u.id, u.email
-    from users u
-    where ${email ? sql`u.email = ${email}` : sql`u.id = (select user_id from plans where id = ${planId ?? null})`}
-    limit 1
-  `;
+  const user = await findRaceAnalysisUser({ email, planId });
   if (!user) throw new Error("No matching user or plan found");
 
-  const activityRows = await sql<Array<RaceAnalysisActivity & {
-    predictionExcluded: boolean;
-    raceClassification: string | null;
-  }>>`
-    select id, local_date as "localDate", distance_meters as "distanceMeters",
-      duration_seconds as "durationSeconds", moving_duration_seconds as "movingDurationSeconds",
-      event_type as "eventType", average_heart_rate as "averageHeartRate",
-      average_power as "averagePower", calculated_power as "calculatedPower",
-      elevation_gain_meters as "elevationGainMeters",
-      excluded_from_analytics as "excludedFromAnalytics",
-      prediction_excluded as "predictionExcluded",
-      race_classification as "raceClassification"
-    from run_activities
-    where user_id = ${user.id} and local_date::date <= ${asOf}::date
-    order by local_date, start_time_gmt
-  `;
-  const canonicalResults = await sql<CanonicalResultRow[]>`
-    select rr.id, rr.race_date as "raceDate",
-      rr.official_distance_meters as "officialDistanceMeters",
-      rr.chip_time_seconds as "chipTimeSeconds", rr.gun_time_seconds as "gunTimeSeconds",
-      rr.status, rr.classification, rr.prediction_excluded as "predictionExcluded",
-      rr.linked_activity_id as "linkedActivityId", rr.elevation_gain_meters as "elevationGainMeters",
-      rr.verification_status as "verificationStatus",
-      ra.average_heart_rate as "activityAverageHeartRate",
-      ra.average_power as "activityAveragePower", ra.calculated_power as "activityCalculatedPower"
-    from race_results rr
-    left join run_activities ra on ra.id = rr.linked_activity_id
-    where rr.user_id = ${user.id} and rr.race_date::date <= ${asOf}::date
-    order by rr.race_date, rr.created_at
-  `;
-  const canonicalActivityIds = new Set(canonicalResults.flatMap((result) => (
-    result.linkedActivityId ? [result.linkedActivityId] : []
-  )));
-  const executionActivityIds = [...new Set([
-    ...activityRows.map((activity) => activity.id),
-    ...canonicalActivityIds,
-  ])];
-  const executionRows = executionActivityIds.length === 0 ? [] : await sql<Array<{ activityId: string; metrics: unknown }>>`
-    select activity_id as "activityId", metrics
-    from activity_analytics
-    where algorithm_version = ${RACE_EXECUTION_VERSION}
-      and activity_id in ${sql(executionActivityIds)}
-  `;
-  const executionByActivity = new Map<string, RaceExecutionQuality>();
-  for (const row of executionRows) {
-    const quality = parseExecutionQuality(row.metrics);
-    if (quality !== null) executionByActivity.set(row.activityId, quality);
-  }
-  const activities: RaceAnalysisActivity[] = [
-    ...activityRows.map((activity): RaceAnalysisActivity => ({
-      ...activity,
-      executionQuality: executionByActivity.get(activity.id) ?? null,
-      eventType: canonicalActivityIds.has(activity.id)
-        || activity.predictionExcluded
-        || (activity.raceClassification !== null && activity.raceClassification !== "official")
-        ? null
-        : activity.eventType,
-    })),
-    ...canonicalResults.filter(isPredictionEligibleRaceResult).map((result): RaceAnalysisActivity => ({
-      id: result.id,
-      localDate: result.raceDate,
-      distanceMeters: result.officialDistanceMeters,
-      durationSeconds: result.chipTimeSeconds ?? result.gunTimeSeconds as number,
-      movingDurationSeconds: null,
-      eventType: "race",
-      averageHeartRate: result.activityAverageHeartRate,
-      averagePower: result.activityAveragePower,
-      calculatedPower: result.activityCalculatedPower,
-      elevationGainMeters: result.elevationGainMeters,
-      excludedFromAnalytics: false,
-      trainingExcluded: true,
-      resultSource: "canonical",
-      verificationStatus: result.verificationStatus as RaceAnalysisActivity["verificationStatus"],
-      executionQuality: result.linkedActivityId ? executionByActivity.get(result.linkedActivityId) ?? null : null,
-    })),
-  ].sort((left, right) => left.localDate.localeCompare(right.localDate));
-  const planRows = await sql<PlanRow[]>`
-    select id, race_name as "raceName", runner_profile as "runnerProfile",
-      plan_data as "planData", created_at as "createdAt", updated_at as "updatedAt"
-    from plans
-    where user_id = ${user.id}
-      and ${planId ? sql`id = ${planId}` : sql`true`}
-    order by created_at
-  `;
-  const logs = planRows.length === 0 ? [] : await sql<LogRow[]>`
-    select plan_id as "planId", date, completed, actual_mileage_hundredths as "actualMileage",
-      logged_at as "loggedAt", is_additional_run as "isAdditionalRun"
-    from plan_run_logs
-    where plan_id in ${sql(planRows.map((plan) => plan.id))}
-    order by date, logged_at
-  `;
-  const plans = planRows
-    .map((plan) => normalizePlan(plan, logs))
-    .filter((plan): plan is RaceAnalysisPlan => plan !== null);
+  const dataset = await loadRaceAnalysisDataset({
+    userId: user.id,
+    asOf,
+    planId,
+    includeTimeAtEffort: includeEffort,
+  });
   const fitness = fitnessEnabled ? await loadPower140Observations(user.id, asOf) : [];
   const result = analyzeRacePerformance({
-    activities,
-    plans,
+    activities: dataset.activities,
+    plans: dataset.plans,
     asOf,
     lookbackDays,
     fitness,
@@ -278,12 +88,11 @@ try {
 
   if (json) {
     console.log(JSON.stringify({ user: user.email, ...result }, null, 2));
-    await sql.end();
     await endDb();
     process.exit(0);
   } else {
     console.log(`Race performance analysis for ${user.email} as of ${asOf}`);
-    console.table([result.dataCoverage]);
+    console.table([{ ...result.dataCoverage, timeAtEffortActivities: dataset.timeAtEffortActivities }]);
     if (result.baselineSummary) {
       console.log("Historical Riegel baseline");
       console.table([{
@@ -358,6 +167,7 @@ try {
         miles112d: race.training.miles,
         longest: race.training.longestRunMiles,
         activeWeeks: race.training.activeWeeks,
+        hrEffortMinutes: race.training.hrEffortMinutes,
         planAdherence: race.plan?.workoutCompletionPercent ?? null,
       })));
     }
@@ -379,6 +189,7 @@ try {
         evidenceRaces: target.forecast?.evidence.length ?? 0,
         miles112d: target.training.miles,
         longest: target.training.longestRunMiles,
+        hrEffortMinutes: target.training.hrEffortMinutes,
         planAdherence: target.plan.workoutCompletionPercent,
       })));
       for (const target of result.planTargets) {
@@ -403,6 +214,5 @@ try {
   console.error("Race performance analysis failed:", error instanceof Error ? error.message : error);
   process.exitCode = 1;
 } finally {
-  await sql.end();
   await endDb();
 }
