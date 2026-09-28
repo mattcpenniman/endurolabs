@@ -21,6 +21,7 @@ import WeeklyPlanCard from "@/app/components/plan/WeeklyPlanCard";
 import RaceDayPlanCard from "@/app/components/plan/RaceDayPlanCard";
 import GoalScorecard from "@/app/components/plan/GoalScorecard";
 import ImpactBeaconCard from "@/app/components/plan/ImpactBeaconCard";
+import ImpactBeaconWidget from "@/app/components/plan/ImpactBeaconWidget";
 import MileageTrendChart from "@/app/components/charts/MileageTrendChart";
 import LongRunProgressionChart from "@/app/components/charts/LongRunProgressionChart";
 import IntensityDistributionChart from "@/app/components/charts/IntensityDistributionChart";
@@ -2421,6 +2422,15 @@ function PlanPageContent(): React.ReactNode {
           </div>
         )}
       </div>
+
+      <ImpactBeaconWidget
+        planId={plan.id}
+        refreshToken={dailyLogRefresh}
+        onOpenDetails={() => {
+          setActivePlanTab("scorecard");
+          updatePlanRoute({ tab: "scorecard" });
+        }}
+      />
 
       {runMapActivity && (
         <div
