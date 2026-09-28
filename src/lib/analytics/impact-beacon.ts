@@ -59,7 +59,12 @@ export interface ImpactBeaconRun {
   date: string;
   miles: number;
   durationSeconds?: number | null;
-  /** True for a race; races count as load but not training long-run or effort exposure. */
+  /**
+   * True for a race. Races count in every metric just like training runs,
+   * matching the readiness feature definitions (`buildRaceTrainingFeatures`),
+   * so a marathon the athlete just ran shows up as long-run and effort
+   * evidence instead of being invisible.
+   */
   race?: boolean;
   /** Time at effort from stored samples; null when detail was not loaded. */
   timeAtEffort?: TimeAtEffortSummary | null;
@@ -450,7 +455,6 @@ function actualTraining(
     const date = day(run.date ?? "");
     return date !== "" && date >= start && date <= through;
   });
-  const trainingRuns = inWindow.filter((run) => !run.race);
 
   let miles = 0;
   let minutes = 0;
@@ -475,7 +479,7 @@ function actualTraining(
     }
   }
 
-  for (const run of trainingRuns) {
+  for (const run of inWindow) {
     const runMiles = Number.isFinite(run.miles) ? run.miles : 0;
     longestRunMiles = Math.max(longestRunMiles, runMiles);
     if (runMiles >= 18) longRunsAtLeast18 += 1;
