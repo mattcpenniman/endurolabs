@@ -3,8 +3,11 @@
 // ============================================================
 // EnduroLab — Recommend Training Plan CLI
 // ============================================================
-// Phase 1: read-only analysis. Outputs forecast, goal gap,
-// training state, limiting factors, recommendations, gates.
+// Read-only analysis: forecast, goal gap, training state,
+// limiting factors, recommendations, gates.
+//
+// --create generates a fresh plan for a target race from the
+// athlete's stored profile; --apply persists it (preview-first).
 // ============================================================
 
 try { process.loadEnvFile('.env'); } catch (e) {
@@ -12,12 +15,21 @@ try { process.loadEnvFile('.env'); } catch (e) {
 }
 
 import postgres from 'postgres';
-import { parseGoalTime, parseDistance, type ParsedGoal } from '@/lib/planner/models';
+import { randomUUID } from 'crypto';
+import { parseGoalTime, parseDistance, type ParsedGoal, type PlannerPlanData } from '@/lib/planner/models';
 import { buildAthleteSnapshot } from '@/lib/planner/athlete-snapshot';
 import { computeGoalGap, identifyLimiters } from '@/lib/planner/goal-gap';
 import { runSafetyGates } from '@/lib/planner/safety-gates';
 import { buildRecommendations, formatReport } from '@/lib/planner/recommendations';
-import type { MarathonPlan } from '@/lib/training/models';
+import {
+  buildCreateProfile,
+  summarizePlan,
+  validateCreateOptions,
+  validatePlanCalendar,
+  type CreatePlanOptions,
+} from '@/lib/planner/plan-creation';
+import { generatePlan } from '@/lib/training/plan-generator';
+import type { MarathonPlan, RunnerProfile } from '@/lib/training/models';
 import type { RaceAnalysisActivity } from '@/lib/analytics/race-performance-analysis';
 
 // ─── Arg helpers ──────────────────────────────────────────────
@@ -38,8 +50,27 @@ const goalTimeStr = argument('goal');
 const asOfStr = argument('as-of') ?? new Date().toISOString().slice(0, 10);
 const jsonOnly = argv.includes('--json');
 
+const createMode = argv.includes('--create');
+const applyMode = argv.includes('--apply');
+const setCurrent = argv.includes('--set-current');
+const noDoubles = argv.includes('--no-doubles');
+const resetWeeklyOverrides = argv.includes('--reset-weekly-overrides');
+const raceName = argument('race-name') ?? argument('name');
+const raceDate = argument('race-date');
+const weeksArg = argument('weeks');
+const daysArg = argument('days');
+const longRunDay = argument('long-run-day');
+const maxWeeklyArg = argument('max-weekly-mileage');
+const maxLongArg = argument('max-long-run');
+const todayStr = new Date().toISOString().slice(0, 10);
+
 if ((!email && !planId) || (email && planId)) {
   console.error('Error: provide exactly one of --plan-id or --email');
+  process.exit(1);
+}
+
+if (applyMode && !createMode) {
+  console.error('Error: --apply currently requires --create (--adjust is not implemented)');
   process.exit(1);
 }
 
@@ -59,6 +90,41 @@ if (goalTimeStr) {
   parsedGoal = { goalMinutes, distanceMeters: parsedDist.meters, distanceLabel: parsedDist.label };
 }
 
+let createOptions: CreatePlanOptions | null = null;
+if (createMode) {
+  if (parsedDist.label !== 'Marathon') {
+    console.error('Error: --create currently supports marathon plans only (--distance marathon)');
+    process.exit(1);
+  }
+  if (!raceDate) {
+    console.error('Error: --create requires --race-date YYYY-MM-DD');
+    process.exit(1);
+  }
+  if (!parsedGoal) {
+    console.error('Error: --create requires --goal H:MM:SS');
+    process.exit(1);
+  }
+
+  createOptions = {
+    raceDate,
+    goalMinutes: parsedGoal.goalMinutes,
+    raceName,
+    weeks: weeksArg === undefined ? undefined : Number(weeksArg),
+    maxWeeklyMileage: maxWeeklyArg === undefined ? undefined : Number(maxWeeklyArg),
+    maxLongRun: maxLongArg === undefined ? undefined : Number(maxLongArg),
+    trainingDays: daysArg === undefined ? undefined : daysArg.split(',').map((day) => day.trim()).filter(Boolean).length,
+    longRunDay,
+    noDoubles,
+    resetWeeklyOverrides,
+  };
+
+  const optionErrors = validateCreateOptions(createOptions, todayStr);
+  if (optionErrors.length > 0) {
+    for (const error of optionErrors) console.error(`Error: ${error}`);
+    process.exit(1);
+  }
+}
+
 // ─── DB helpers ──────────────────────────────────────────────
 
 function secondsToHMS(secs: number): string {
@@ -70,6 +136,138 @@ function secondsToHMS(secs: number): string {
   return `${sign}${h}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
 }
 
+// ─── Shared row types ────────────────────────────────────────
+
+interface UserRow { id: string; email: string }
+interface PlanRow {
+  id: string; raceName: string | null; runnerProfile: RunnerProfile; planData: MarathonPlan; createdAt: Date; updatedAt: Date;
+}
+interface ActivityRaw {
+  id: string; localDate: string; distanceMeters: number; durationSeconds: number;
+  movingDurationSeconds: number | null; eventType: string | null; averageHeartRate: number | null;
+  averagePower: number | null; calculatedPower: number | null; elevationGainMeters: number | null;
+  excludedFromAnalytics: boolean;
+}
+
+// ─── Create mode ─────────────────────────────────────────────
+
+/** postgres.js serializes JSONB via sql.json(); plain objects are not JSONValue by default. */
+function toJson(value: unknown): postgres.JSONValue {
+  return value as unknown as postgres.JSONValue;
+}
+
+interface CreatePlanContext {
+  sql: postgres.Sql;
+  user: UserRow;
+  basePlan: PlanRow;
+  planData: PlannerPlanData;
+  snapshot: ReturnType<typeof buildAthleteSnapshot>;
+  options: CreatePlanOptions;
+  goal: ParsedGoal;
+  apply: boolean;
+  setCurrent: boolean;
+  jsonOnly: boolean;
+  today: string;
+}
+
+async function runCreatePlan(context: CreatePlanContext): Promise<void> {
+  const { sql, user, basePlan, planData, snapshot, options, goal, apply, setCurrent, jsonOnly, today } = context;
+
+  const baseProfile = basePlan.planData.runnerProfile ?? basePlan.runnerProfile;
+  const profile = buildCreateProfile(baseProfile, options);
+  const plan = generatePlan(profile);
+  const summary = summarizePlan(plan);
+  const calendarGates = validatePlanCalendar(plan, today, options.raceDate);
+  const safetyGates = runSafetyGates(plan, snapshot, {
+    maxWeeklyMileage: options.maxWeeklyMileage,
+    maxLongRun: options.maxLongRun,
+    longRunDay: options.longRunDay,
+    noDoubles: options.noDoubles,
+  });
+  const gates = [...calendarGates, ...safetyGates];
+  const refusals = gates.filter((gate) => gate.result === 'refuse');
+  const forecast = computeGoalGap(planData, goal);
+
+  let planId: string | null = null;
+  if (apply) {
+    if (refusals.length > 0) {
+      console.error('Refusing to apply — calendar or safety gates failed:');
+      for (const refusal of refusals) console.error(`  [REFUSE] ${refusal.checkId}: ${refusal.message}`);
+      process.exitCode = 1;
+      return;
+    }
+
+    const newPlanId = randomUUID();
+    const persistedPlan: MarathonPlan = { ...plan, id: newPlanId };
+    await sql.begin(async (tx) => {
+      await tx`
+        insert into plans (id, user_id, runner_profile, peak_mileage_override, weeks_override, plan_data, race_name)
+        values (${newPlanId}, ${user.id}, ${tx.json(toJson(profile))}, ${profile.peakMileageOverride ?? null}, ${profile.weeksOverride ?? null}, ${tx.json(toJson(persistedPlan))}, ${options.raceName ?? null})
+      `;
+      if (setCurrent) {
+        await tx`update users set current_plan_id = ${newPlanId}, updated_at = now() where id = ${user.id}`;
+      }
+    });
+    planId = newPlanId;
+  }
+
+  const appUrl = process.env.APP_URL?.replace(/\/$/, '');
+
+  if (jsonOnly) {
+    console.log(JSON.stringify({
+      version: 'planner-v1-alpha',
+      mode: apply ? 'applied' : 'preview',
+      planId,
+      athlete: user.email,
+      basePlanId: basePlan.id,
+      raceName: options.raceName ?? null,
+      raceDate: options.raceDate,
+      goal: { minutes: options.goalMinutes, seconds: Math.round(options.goalMinutes * 60) },
+      profile,
+      forecast,
+      summary,
+      calendarGates,
+      safetyGates,
+    }, null, 2));
+    return;
+  }
+
+  const start = summary.startDate.slice(0, 10);
+  const end = summary.endDate.slice(0, 10);
+  const gapSeconds = Math.abs(forecast.gapSeconds);
+  const gapDirection = forecast.gapSeconds > 0 ? 'behind' : forecast.gapSeconds < 0 ? 'ahead of' : 'on';
+
+  console.log(`=== EnduroLab Plan ${apply ? 'Create' : 'Create Preview'} ===`);
+  console.log(`Athlete:     ${user.email}`);
+  console.log(`Base plan:   ${basePlan.id}${basePlan.raceName ? ` (${basePlan.raceName})` : ''}`);
+  console.log(`Race:        ${options.raceName ?? 'Target race'} on ${options.raceDate}`);
+  console.log(`Goal:        ${secondsToHMS(options.goalMinutes * 60)} marathon`);
+  console.log(`Calendar:    ${plan.totalWeeks} weeks, ${start} → ${end}`);
+  console.log(`Volume:      peak ${summary.peakWeeklyMileage} mi, total ${summary.totalMileage} mi, ${summary.downWeeks}/${plan.totalWeeks} down weeks`);
+  console.log(`Phases:      ${summary.phases.map((phase) => `${phase.name} w${phase.startWeek}-${phase.endWeek}`).join(', ')}`);
+  console.log(`Weekly mi:   ${summary.weeks.map((week) => week.miles).join(' ')}`);
+  console.log(`Long runs:   ${summary.weeks.map((week) => week.longRunMiles).join(' ')}`);
+  console.log(`Feasibility: ${summary.feasibility} — ${plan.goalAssessment.reasoning}`);
+  console.log(`Forecast:    ${secondsToHMS(forecast.predictedSeconds)} today; goal is ${forecast.classification} (${secondsToHMS(gapSeconds)} ${gapDirection} goal)`);
+
+  console.log('\nGates:');
+  for (const gate of gates) {
+    console.log(`  [${gate.result.toUpperCase().padEnd(6)}] ${gate.checkId}: ${gate.message}`);
+  }
+
+  if (plan.riskWarnings.length > 0) {
+    console.log('\nRisk warnings:');
+    for (const warning of plan.riskWarnings) console.log(`  - ${warning}`);
+  }
+
+  if (apply) {
+    console.log(`\nCreated plan ${planId}${setCurrent ? ' and set it as the current plan' : ''}.`);
+    if (appUrl) console.log(`Open: ${appUrl}/plan`);
+  } else {
+    console.log('\nNot persisted. Re-run with --apply to create the plan.');
+  }
+}
+
 // ─── Main ─────────────────────────────────────────────────────
 
 async function main() {
@@ -77,17 +275,6 @@ async function main() {
   const sql = postgres(databaseUrl, { prepare: false });
 
   // Resolve user
-  interface UserRow { id: string; email: string }
-  interface PlanRow {
-    id: string; raceName: string | null; runnerProfile: any; planData: MarathonPlan; createdAt: Date; updatedAt: Date;
-  }
-  interface ActivityRaw {
-    id: string; localDate: string; distanceMeters: number; durationSeconds: number;
-    movingDurationSeconds: number | null; eventType: string | null; averageHeartRate: number | null;
-    averagePower: number | null; calculatedPower: number | null; elevationGainMeters: number | null;
-    excludedFromAnalytics: boolean;
-  }
-
   const [user] = await sql<UserRow[]>`
     select u.id, u.email from users u
     where ${email ? sql`u.email = ${email}` : sql`u.id = (select user_id from plans where id = ${planId ?? null})`}
@@ -95,11 +282,17 @@ async function main() {
   `;
   if (!user) throw new Error('No matching user or plan found');
 
-  const [dbPlan] = await sql<PlanRow[]>`
-    select id, race_name as "raceName", runner_profile as "runnerProfile",
-      plan_data as "planData", created_at as "createdAt", updated_at as "updatedAt"
-    from plans where user_id = ${user.id} order by updated_at desc limit 1
-  `;
+  const [dbPlan] = planId
+    ? await sql<PlanRow[]>`
+        select id, race_name as "raceName", runner_profile as "runnerProfile",
+          plan_data as "planData", created_at as "createdAt", updated_at as "updatedAt"
+        from plans where id = ${planId} limit 1
+      `
+    : await sql<PlanRow[]>`
+        select id, race_name as "raceName", runner_profile as "runnerProfile",
+          plan_data as "planData", created_at as "createdAt", updated_at as "updatedAt"
+        from plans where user_id = ${user.id} order by updated_at desc limit 1
+      `;
 
   if (!dbPlan) throw new Error('No plan found');
 
@@ -123,8 +316,27 @@ async function main() {
     excludedFromAnalytics: Boolean(a.excludedFromAnalytics),
   }));
 
-  // Determine goal minutes (CLI flag > plan runner profile)
   const planP = dbPlan.planData;
+
+  // Build snapshot / gap / limiters / recommendations / safety gates
+  const planData: PlannerPlanData = {
+    plan: planP as MarathonPlan, activities, fitnessObservations: [], logs: [],
+    asOf: asOfStr, sourceMaxTimestamp: asOfStr,
+  };
+
+  const snapshot = buildAthleteSnapshot(planData);
+
+  if (createMode && createOptions && parsedGoal) {
+    await runCreatePlan({
+      sql, user, basePlan: dbPlan, planData, snapshot,
+      options: createOptions, goal: parsedGoal,
+      apply: applyMode, setCurrent, jsonOnly, today: todayStr,
+    });
+    await sql.end();
+    return;
+  }
+
+  // Determine goal minutes (CLI flag > plan runner profile)
   const goalMinutes = parsedGoal?.goalMinutes ?? planP.runnerProfile?.goalMarathonTime ?? null;
 
   if (goalMinutes == null) {
@@ -136,13 +348,6 @@ async function main() {
     goalMinutes, distanceMeters: 42195, distanceLabel: 'Marathon',
   };
 
-  // Build snapshot / gap / limiters / recommendations / safety gates
-  const planData = {
-    plan: planP as MarathonPlan, activities, fitnessObservations: [], logs: [],
-    asOf: asOfStr, sourceMaxTimestamp: asOfStr,
-  };
-
-  const snapshot = buildAthleteSnapshot(planData);
   const goalGap = computeGoalGap(planData, finalGoal);
   const limiters = identifyLimiters(
     {

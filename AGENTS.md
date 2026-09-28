@@ -120,6 +120,19 @@ src/
 - Validate future models with rolling-origin race backtests and athlete-held-out folds. Compare against goal time, PR, latest same-distance race, and Riegel equivalents; report MAE/RMSE, bias, interval coverage, and probability calibration.
 - Do not display a goal-achievement probability until it is calibrated out of sample. The intended product output is predicted finish time, uncertainty interval, goal probability, confidence, and the strongest positive/negative drivers.
 
+## Goal-Directed Planner CLI
+
+- `npm run planner:recommend -- --email runner@example.com` (or `--plan-id UUID`) is the Phase 1 read-only analysis: forecast, goal gap, training state, limiting factors, recommendations, and safety gates. `--as-of YYYY-MM-DD` sets a leakage-safe cutoff and `--json` emits the versioned `planner-v1-alpha` payload.
+- `--create` generates a fresh plan for a target race from the athlete's most recent stored plan (or the `--plan-id` plan):
+  `npm run planner:recommend -- --email runner@example.com --create --race-date 2027-04-17 --goal 2:59:59 --name "Newport Marathon 2027" --weeks 28`
+- Creation requires `--race-date` and `--goal` and currently supports marathon plans only. `--name` labels the race; `--weeks N` (14-28) overrides the auto-derived length; `--max-weekly-mileage`, `--max-long-run`, `--days Mon,Wed,...` (sets the training-day count), `--long-run-day`, `--no-doubles`, and `--reset-weekly-overrides` apply constraints. Without `--reset-weekly-overrides` the base plan's per-week mileage and intensity overrides carry over.
+- `--create` is preview-only until `--apply`; `--apply --set-current` inserts the new plan row and points `users.current_plan_id` at it. It refuses to apply when any calendar or safety gate returns `refuse` and never overwrites an existing plan.
+- Calendar gates require the generated plan to start today or later, match the requested race date, cover race week, and stay within 14-28 weeks. The race week is the final plan week; a Saturday race therefore ends the plan on Sunday.
+- Profile merging and calendar validation live in the pure `src/lib/planner/plan-creation.ts` (`buildCreateProfile`, `validateCreateOptions`, `validatePlanCalendar`, `summarizePlan`); keep them pure and tested instead of adding logic to the script.
+- The audited proposal/version tables from `reference/PLANNER_TODO.md` (Phase 3) are not implemented, so `--apply` writes no audit record and create only (not adjust) is supported. Add those tables before implementing `--adjust --apply`.
+- JSONB writes through postgres.js must use `sql.json(value)`. `${JSON.stringify(value)}::jsonb` double-encodes into a JSON string and corrupts `plan_data`; this bug previously affected `plan:rebuild-week --apply`.
+- Run `npm run planner:recommend -- ... --create --json` for a machine-readable proposal (`profile`, `forecast`, `summary`, `calendarGates`, `safetyGates`, `planId` when applied).
+
 ## Conventions
 
 ### Code Style
@@ -147,7 +160,7 @@ src/
 - Test Garmin payload mapping as pure logic; DB idempotency requires an integration test against PostgreSQL.
 
 ## Key Configuration
-- `package.json` scripts include app lifecycle, `db:push`, user/plan utilities, `seed:dev`, `garmin:history`, `samples:backfill`, `summaries:recompute`, `execution:backfill`, `race:analyze`, `plan:rebuild-week`, and Vitest commands
+- `package.json` scripts include app lifecycle, `db:push`, user/plan utilities, `seed:dev`, `garmin:history`, `samples:backfill`, `summaries:recompute`, `execution:backfill`, `race:analyze`, `planner:recommend`, `plan:rebuild-week`, and Vitest commands
 - `plan:rebuild-week` (`scripts/rebuild-plan-week.ts`) regenerates one stored plan week from the current generator and splices it back in, leaving every other week untouched. Defaults to the final (race) week; use `--week N` for another. Preview-first (`--apply` persists) and it refuses when the stored week start date no longer lines up or when activities/run logs already reference the replaced week's workouts.
 - `tsconfig.json`: strict mode, `@/*` → `./src/*`, ES2017 target, bundler module resolution
 - `vitest.config.ts`: jsdom environment, React plugin, globals true

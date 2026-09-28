@@ -153,6 +153,23 @@ You can target by id instead of email:
 npm run user:set-password -- --id 11111111-2222-3333-4444-555555555555 --password 'new-secret-pass'
 ```
 
+### Create a plan from the CLI
+
+`planner:recommend` analyzes an athlete and can generate and persist a new plan without the UI. Preview first:
+
+```bash
+npm run planner:recommend -- --email runner@example.com \
+  --create --race-date 2027-04-17 --goal 2:59:59 --name "Newport Marathon 2027" --weeks 28
+```
+
+Add `--apply --set-current` to create the plan and make it the athlete's current plan. Creation starts from the athlete's most recent stored plan (or `--plan-id UUID`), requires `--race-date` and `--goal`, and refuses to apply when the plan's calendar or safety gates fail. Use `--reset-weekly-overrides` for a fresh cycle that drops the base plan's per-week mileage and intensity overrides; `--max-weekly-mileage`, `--max-long-run`, `--days`, `--long-run-day`, and `--no-doubles` apply constraints. Add `--json` for a machine-readable proposal.
+
+Read-only analysis of an existing plan:
+
+```bash
+npm run planner:recommend -- --email runner@example.com
+```
+
 Training plans under `/plan` require login. Newly generated and saved plans are tied to the signed-in user.
 
 ### Change the port
