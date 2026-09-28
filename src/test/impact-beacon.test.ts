@@ -345,7 +345,7 @@ describe("buildImpactBeacon", () => {
     expect(fridayVolume?.actual).toBe(53);
   });
 
-  it("ignores runs and long runs after the cutoff, and treats races as load only", () => {
+  it("ignores runs after the cutoff and counts races as exposure", () => {
     const runs: ImpactBeaconRun[] = [
       run("2026-10-03", 20),
       run("2026-10-04", 26.2, { race: true }),
@@ -355,9 +355,24 @@ describe("buildImpactBeacon", () => {
     const longRun = report.metrics.find((metric) => metric.key === "long_run");
     const volume = report.metrics.find((metric) => metric.key === "volume");
 
-    expect(longRun?.actual).toBe(20);
+    expect(longRun?.actual).toBe(26.2);
     expect(volume?.actual).toBe(46.2);
     expect(volume?.planned).toBe(190);
+  });
+
+  it("counts a just-run marathon as long-run and effort exposure", () => {
+    const marathon = run("2026-08-30", 26.5, {
+      race: true,
+      timeAtEffort: effort({ marathon: 9000, threshold: 1200 }),
+    });
+    const report = buildImpactBeacon({ plan: makePlan(), runs: [marathon], asOf: "2026-09-01" });
+    const longRun = report.metrics.find((metric) => metric.key === "long_run");
+    const hr = report.metrics.find((metric) => metric.key === "hr_effort");
+
+    expect(longRun?.actual).toBe(26.5);
+    expect(longRun?.direction).toBe("ahead");
+    expect(hr?.actual).toBeCloseTo((9000 + 1200) / 60, 2);
+    expect(hr?.dataMissing).toBe(false);
   });
 
   it("compares the plan's opening block with trailing actuals before the plan starts", () => {
