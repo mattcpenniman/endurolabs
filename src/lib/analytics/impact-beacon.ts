@@ -159,10 +159,11 @@ export interface ImpactBeaconTargets {
   /** Heart-rate ranges for the marathon-or-faster effort zones. */
   heartRate: ImpactBeaconHeartRateTarget[];
   /**
-   * Power anchors for the same zones. The plan's configured zones win when
-   * present; otherwise the anchors are derived from the athlete's measured
-   * run summaries (speed-to-power fit) and labeled as measured. Null when
-   * neither the plan nor the measured runs can supply them.
+   * Power anchors for the same zones, in precedence order: explicit
+   * runner-provided anchors on the plan win, otherwise the anchors are
+   * derived from the athlete's measured run summaries (speed-to-power fit)
+   * and labeled as measured, otherwise the plan's pace-estimated fallback
+   * zones are shown. Null when none of the three exists.
    */
   power: ImpactBeaconPowerTarget[] | null;
   /** Provenance for `power`; null when `power` is null. */
@@ -927,6 +928,28 @@ interface DerivedPowerTargets {
   basis: ImpactBeaconPowerBasis | null;
 }
 
+function planPowerTargets(
+  powerZones: NonNullable<MarathonPlan["powerZones"]>,
+): ImpactBeaconPowerTarget[] {
+  return EFFORT_ZONE_KEYS.map((key) => ({
+    key,
+    label: EFFORT_ZONE_LABELS[key],
+    watts: typeof powerZones[key] === "number" ? powerZones[key] : null,
+    extrapolated: false,
+  }));
+}
+
+/**
+ * True when the plan's zones were built from runner-provided power anchors
+ * rather than `calculatePowerZones`' pace fallback. Only a truthy marathon
+ * anchor selects the anchored branch in the zone calculator, so it is the
+ * trigger for treating the plan's zones as user-configured.
+ */
+function hasExplicitPowerAnchors(plan: MarathonPlan): boolean {
+  const marathonPower = plan.runnerProfile?.appleWatchPowerData?.marathonPower;
+  return typeof marathonPower === "number" && Number.isFinite(marathonPower) && marathonPower > 0;
+}
+
 /**
  * Power anchors derived from the athlete's own measured run summaries. The
  * model is the same athlete-specific speed-to-power fit used for
@@ -978,18 +1001,21 @@ function beaconTargets(plan: MarathonPlan, runs: ImpactBeaconRun[]): ImpactBeaco
   }));
 
   const powerZones = plan.powerZones;
-  let power: ImpactBeaconPowerTarget[] | null;
-  let powerBasis: ImpactBeaconPowerBasis | null;
-  if (powerZones) {
-    power = EFFORT_ZONE_KEYS.map((key) => ({
-      key,
-      label: EFFORT_ZONE_LABELS[key],
-      watts: typeof powerZones[key] === "number" ? powerZones[key] : null,
-      extrapolated: false,
-    }));
+  let power: ImpactBeaconPowerTarget[] | null = null;
+  let powerBasis: ImpactBeaconPowerBasis | null = null;
+  if (powerZones && hasExplicitPowerAnchors(plan)) {
+    power = planPowerTargets(powerZones);
     powerBasis = { source: "plan", measuredRuns: null, note: "Configured on this plan." };
   } else {
     ({ power, basis: powerBasis } = derivePowerTargets(plan, runs));
+    if (power === null && powerZones) {
+      power = planPowerTargets(powerZones);
+      powerBasis = {
+        source: "plan",
+        measuredRuns: null,
+        note: "Estimated on this plan from pace; not enough measured runs for a measured fit.",
+      };
+    }
   }
 
   const goalSeconds = typeof plan.runnerProfile?.goalMarathonTime === "number"
