@@ -29,6 +29,7 @@ import {
   fitSpeedPowerModel,
   summarySpeed,
   type PowerActivitySummary,
+  type SpeedPowerModel,
 } from "./modeled-power";
 import type {
   EffortZone,
@@ -37,6 +38,7 @@ import type {
 } from "./time-at-effort";
 import type {
   MarathonPlan,
+  PowerZones,
   WeeklyPlan,
   Workout,
   WorkoutSegment,
@@ -175,6 +177,8 @@ export interface ImpactBeaconComponent {
   planned: number | null;
   actual: number | null;
   unit: ImpactBeaconUnit;
+  /** Effort zone this component splits; absent on non-zone components. */
+  zoneKey?: ImpactBeaconEffortZone;
 }
 
 export interface ImpactBeaconMetricStatus {
@@ -299,6 +303,38 @@ export function impactBeaconBaselineWindow(
   return { start: isoDay(startMs), end: isoDay(endMs), weeks, windows };
 }
 
+export interface ImpactBeaconComparisonWindow {
+  mode: ImpactBeaconMode;
+  /** First day of the compared actual window. */
+  start: string;
+  /** Last day of the compared actual window. */
+  end: string;
+}
+
+/**
+ * The actual-side window the beacon compares against `asOf`: the plan's own
+ * schedule through the cutoff once it has started, otherwise the trailing
+ * window matched to the plan's opening block. Null when the plan has no weeks.
+ * Builders and loaders share it so the displayed targets, the derived power
+ * zones, and the effort buckets can never drift apart.
+ */
+export function impactBeaconComparisonWindow(
+  plan: MarathonPlan,
+  asOf: string,
+): ImpactBeaconComparisonWindow | null {
+  const weeks = planWeeks(plan);
+  const start = planStartDate(plan);
+  if (start === null) return null;
+  if (start > asOf) {
+    const baselineWeeks = Math.min(IMPACT_BEACON_BASELINE_WEEKS, weeks.length);
+    const window = impactBeaconBaselineWindow(asOf, baselineWeeks);
+    return { mode: "opening_block", start: window.start, end: window.end };
+  }
+  const planEnd = day(weeks[weeks.length - 1].endDate ?? weeks[weeks.length - 1].startDate ?? "");
+  const effectiveEnd = planEnd !== "" && planEnd < asOf ? planEnd : asOf;
+  return { mode: "plan_to_date", start, end: effectiveEnd };
+}
+
 /** Plan weeks that have started by the cutoff, each clipped to it. */
 function planWeekWindows(plan: MarathonPlan, through: string): Array<{ start: string; end: string }> {
   const windows: Array<{ start: string; end: string }> = [];
@@ -321,6 +357,7 @@ interface PlannedTraining {
   effortMinutes: number;
   thresholdMinutes: number;
   marathonPaceMinutes: number;
+  vo2Minutes: number;
   longRunEffortMinutes: number;
   weeksElapsed: number;
 }
@@ -399,6 +436,7 @@ function plannedTraining(plan: MarathonPlan, through: string): PlannedTraining {
   let effortMinutes = 0;
   let thresholdMinutes = 0;
   let marathonPaceMinutes = 0;
+  let vo2Minutes = 0;
   let longRunEffortMinutes = 0;
 
   for (const workout of collectScheduledWorkouts(plan, through)) {
@@ -425,6 +463,7 @@ function plannedTraining(plan: MarathonPlan, through: string): PlannedTraining {
         thresholdMinutes += segmentValue;
       } else if (segment.type === "vo2") {
         effortMinutes += segmentValue;
+        vo2Minutes += segmentValue;
       }
     }
   }
@@ -439,6 +478,7 @@ function plannedTraining(plan: MarathonPlan, through: string): PlannedTraining {
     effortMinutes,
     thresholdMinutes,
     marathonPaceMinutes,
+    vo2Minutes,
     longRunEffortMinutes,
     weeksElapsed,
   };
@@ -448,7 +488,7 @@ function plannedTraining(plan: MarathonPlan, through: string): PlannedTraining {
 
 const AT_OR_FASTER = new Set<EffortZone>(["marathon", "threshold", "vo2"]);
 
-function bucketSeconds(breakdown: TimeAtEffortBreakdown, zone: "marathon" | "threshold"): number {
+function bucketSeconds(breakdown: TimeAtEffortBreakdown, zone: ImpactBeaconEffortZone): number {
   let seconds = 0;
   for (const bucket of breakdown.buckets) {
     if (bucket.zone === zone) seconds += bucket.seconds;
@@ -474,12 +514,14 @@ interface ActualTraining {
   hrEffortMinutes: number | null;
   hrThresholdMinutes: number | null;
   hrMarathonMinutes: number | null;
+  hrVo2Minutes: number | null;
   longRunFinishMeasuredRuns: number;
   longRunFinishMinutes: number | null;
   powerMeasuredRuns: number;
   powerEffortMinutes: number | null;
   powerThresholdMinutes: number | null;
   powerMarathonMinutes: number | null;
+  powerVo2Minutes: number | null;
 }
 
 function actualTraining(
@@ -501,12 +543,14 @@ function actualTraining(
   let hrEffortSeconds = 0;
   let hrThresholdSeconds = 0;
   let hrMarathonSeconds = 0;
+  let hrVo2Seconds = 0;
   let longRunFinishMeasuredRuns = 0;
   let longRunFinishSeconds = 0;
   let powerMeasuredRuns = 0;
   let powerEffortSeconds = 0;
   let powerThresholdSeconds = 0;
   let powerMarathonSeconds = 0;
+  let powerVo2Seconds = 0;
 
   for (const run of inWindow) {
     const runMiles = Number.isFinite(run.miles) ? run.miles : 0;
@@ -527,6 +571,7 @@ function actualTraining(
       hrEffortSeconds += atOrFasterSeconds(heartRate);
       hrThresholdSeconds += bucketSeconds(heartRate, "threshold");
       hrMarathonSeconds += bucketSeconds(heartRate, "marathon");
+      hrVo2Seconds += bucketSeconds(heartRate, "vo2");
       if (runMiles >= LONG_RUN_FINISH_MIN_MILES) {
         longRunFinishMeasuredRuns += 1;
         longRunFinishSeconds += bucketSeconds(heartRate, "marathon");
@@ -539,6 +584,7 @@ function actualTraining(
       powerEffortSeconds += atOrFasterSeconds(power);
       powerThresholdSeconds += bucketSeconds(power, "threshold");
       powerMarathonSeconds += bucketSeconds(power, "marathon");
+      powerVo2Seconds += bucketSeconds(power, "vo2");
     }
   }
 
@@ -562,12 +608,14 @@ function actualTraining(
     hrEffortMinutes: hrMeasuredRuns > 0 ? hrEffortSeconds / 60 : null,
     hrThresholdMinutes: hrMeasuredRuns > 0 ? hrThresholdSeconds / 60 : null,
     hrMarathonMinutes: hrMeasuredRuns > 0 ? hrMarathonSeconds / 60 : null,
+    hrVo2Minutes: hrMeasuredRuns > 0 ? hrVo2Seconds / 60 : null,
     longRunFinishMeasuredRuns,
     longRunFinishMinutes: longRunFinishMeasuredRuns > 0 ? longRunFinishSeconds / 60 : null,
     powerMeasuredRuns,
     powerEffortMinutes: powerMeasuredRuns > 0 ? powerEffortSeconds / 60 : null,
     powerThresholdMinutes: powerMeasuredRuns > 0 ? powerThresholdSeconds / 60 : null,
     powerMarathonMinutes: powerMeasuredRuns > 0 ? powerMarathonSeconds / 60 : null,
+    powerVo2Minutes: powerMeasuredRuns > 0 ? powerVo2Seconds / 60 : null,
   };
 }
 
@@ -798,29 +846,40 @@ function effortMetric(
   eligible: Set<ReadinessMetricKey>,
   labels: ComparisonLabels,
   powerZonesConfigured: boolean,
+  powerZonesDerived: boolean,
 ): ImpactBeaconMetricStatus {
   const isHeartRate = key === "hr_effort";
   const measuredRuns = isHeartRate ? actual.hrMeasuredRuns : actual.powerMeasuredRuns;
   const effortMinutes = isHeartRate ? actual.hrEffortMinutes : actual.powerEffortMinutes;
   const thresholdMinutes = isHeartRate ? actual.hrThresholdMinutes : actual.powerThresholdMinutes;
   const marathonMinutes = isHeartRate ? actual.hrMarathonMinutes : actual.powerMarathonMinutes;
+  const vo2Minutes = isHeartRate ? actual.hrVo2Minutes : actual.powerVo2Minutes;
   const source = isHeartRate ? "heart-rate" : "measured-power";
   const dataMissing = planned.effortMinutes > 0 && measuredRuns === 0;
-  const missingMeasure = !isHeartRate && !powerZonesConfigured
+  const missingMeasure = !isHeartRate && !powerZonesConfigured && !powerZonesDerived
     ? "the plan has no power zones, so measured power was not bucketed"
     : "no stored sample detail is available to measure it";
 
   const components: ImpactBeaconComponent[] = [
     {
-      label: "Minutes at threshold",
+      label: EFFORT_ZONE_LABELS.marathon,
+      zoneKey: "marathon",
+      planned: round1(planned.marathonPaceMinutes),
+      actual: marathonMinutes === null ? null : round1(marathonMinutes),
+      unit: "minutes",
+    },
+    {
+      label: EFFORT_ZONE_LABELS.threshold,
+      zoneKey: "threshold",
       planned: round1(planned.thresholdMinutes),
       actual: thresholdMinutes === null ? null : round1(thresholdMinutes),
       unit: "minutes",
     },
     {
-      label: "Minutes at marathon pace",
-      planned: round1(planned.marathonPaceMinutes),
-      actual: marathonMinutes === null ? null : round1(marathonMinutes),
+      label: EFFORT_ZONE_LABELS.vo2,
+      zoneKey: "vo2",
+      planned: round1(planned.vo2Minutes),
+      actual: vo2Minutes === null ? null : round1(vo2Minutes),
       unit: "minutes",
     },
   ];
@@ -923,7 +982,19 @@ function measuredSummaryRuns(runs: ImpactBeaconRun[]): PowerActivitySummary[] {
   return measured;
 }
 
-interface DerivedPowerTargets {
+interface DerivedPower {
+  zones: PowerZones | null;
+  power: ImpactBeaconPowerTarget[];
+  basis: ImpactBeaconPowerBasis;
+}
+
+/** Effective power zones and displayed anchors behind the report. */
+export interface ResolvedBeaconPower {
+  /**
+   * Watt boundaries behind both the displayed targets and the actual
+   * power-effort buckets, when one of the three precedence sources exists.
+   */
+  zones: PowerZones | null;
   power: ImpactBeaconPowerTarget[] | null;
   basis: ImpactBeaconPowerBasis | null;
 }
@@ -950,17 +1021,28 @@ function hasExplicitPowerAnchors(plan: MarathonPlan): boolean {
   return typeof marathonPower === "number" && Number.isFinite(marathonPower) && marathonPower > 0;
 }
 
+/** Watts at the plan's easy-pace endpoints, or null when that pace is absent. */
+function easyPowerRange(model: SpeedPowerModel, plan: MarathonPlan): PowerZones["easy"] | null {
+  const paces = [plan.paceZones?.easy?.min, plan.paceZones?.easy?.max];
+  const watts = paces
+    .filter((pace): pace is number => typeof pace === "number" && Number.isFinite(pace) && pace > 0)
+    .map((pace) => model.intercept + model.slope * paceSpeedMetersPerSecond(pace));
+  if (watts.length === 0) return null;
+  return { min: Math.round(Math.min(...watts)), max: Math.round(Math.max(...watts)) };
+}
+
 /**
  * Power anchors derived from the athlete's own measured run summaries. The
  * model is the same athlete-specific speed-to-power fit used for
  * `calculated_power`; each plan pace zone is converted to speed and evaluated
  * on that fit. Anchors outside the measured pace range are flagged so the UI
- * never presents an extrapolation as if it were directly observed.
+ * never presents an extrapolation as if it were directly observed. The same
+ * boundaries bucket measured sample power when no plan power zones exist.
  */
-function derivePowerTargets(plan: MarathonPlan, runs: ImpactBeaconRun[]): DerivedPowerTargets {
+function derivePower(plan: MarathonPlan, runs: ImpactBeaconRun[]): DerivedPower | null {
   const measured = measuredSummaryRuns(runs);
   const model = fitSpeedPowerModel(measured);
-  if (!model) return { power: null, basis: null };
+  if (!model) return null;
 
   const speeds = measured.map((run) => summarySpeed(run));
   const minSpeed = Math.min(...speeds);
@@ -975,12 +1057,22 @@ function derivePowerTargets(plan: MarathonPlan, runs: ImpactBeaconRun[]): Derive
     if (extrapolated) extrapolatedAnchors += 1;
     return { key, label: EFFORT_ZONE_LABELS[key], watts, extrapolated };
   });
-  if (power.every((target) => target.watts === null)) return { power: null, basis: null };
+  if (power.every((target) => target.watts === null)) return null;
+
+  const marathon = power.find((target) => target.key === "marathon")?.watts ?? null;
+  const threshold = power.find((target) => target.key === "threshold")?.watts ?? null;
+  const vo2 = power.find((target) => target.key === "vo2")?.watts ?? null;
+  const easy = easyPowerRange(model, plan)
+    ?? (marathon === null ? null : { min: Math.round(marathon * 0.72), max: Math.round(marathon * 0.85) });
+  const zones = marathon !== null && threshold !== null && vo2 !== null && easy !== null
+    ? { easy, marathon, threshold, vo2 }
+    : null;
 
   const extrapolationNote = extrapolatedAnchors === 0
     ? ""
     : `; ${extrapolatedAnchors} anchor${extrapolatedAnchors === 1 ? " is" : "s are"} beyond your measured pace range`;
   return {
+    zones,
     power,
     basis: {
       source: "measured",
@@ -988,6 +1080,38 @@ function derivePowerTargets(plan: MarathonPlan, runs: ImpactBeaconRun[]): Derive
       note: `Derived from ${measured.length} measured runs (speed-to-power fit)${extrapolationNote}.`,
     },
   };
+}
+
+/**
+ * Resolves the power zones behind the beacon with the same precedence as the
+ * displayed targets: explicit runner-provided anchors, then the athlete's
+ * measured speed-to-power fit, then the plan's pace-estimated zones. The
+ * loader buckets measured sample power against the resolved zones, so the
+ * targets shown and the effort rows can never describe different bands.
+ */
+export function resolveBeaconPower(plan: MarathonPlan, runs: ImpactBeaconRun[]): ResolvedBeaconPower {
+  const powerZones = plan.powerZones;
+  if (powerZones && hasExplicitPowerAnchors(plan)) {
+    return {
+      zones: powerZones,
+      power: planPowerTargets(powerZones),
+      basis: { source: "plan", measuredRuns: null, note: "Configured on this plan." },
+    };
+  }
+  const derived = derivePower(plan, runs);
+  if (derived) return { zones: derived.zones, power: derived.power, basis: derived.basis };
+  if (powerZones) {
+    return {
+      zones: powerZones,
+      power: planPowerTargets(powerZones),
+      basis: {
+        source: "plan",
+        measuredRuns: null,
+        note: "Estimated on this plan from pace; not enough measured runs for a measured fit.",
+      },
+    };
+  }
+  return { zones: null, power: null, basis: null };
 }
 
 /** Goal time/pace and the HR/power anchors the plan's effort rows measure. */
@@ -1000,23 +1124,7 @@ function beaconTargets(plan: MarathonPlan, runs: ImpactBeaconRun[]): ImpactBeaco
     maxBpm: heartRateZones?.[key]?.targetBpm?.max ?? null,
   }));
 
-  const powerZones = plan.powerZones;
-  let power: ImpactBeaconPowerTarget[] | null = null;
-  let powerBasis: ImpactBeaconPowerBasis | null = null;
-  if (powerZones && hasExplicitPowerAnchors(plan)) {
-    power = planPowerTargets(powerZones);
-    powerBasis = { source: "plan", measuredRuns: null, note: "Configured on this plan." };
-  } else {
-    ({ power, basis: powerBasis } = derivePowerTargets(plan, runs));
-    if (power === null && powerZones) {
-      power = planPowerTargets(powerZones);
-      powerBasis = {
-        source: "plan",
-        measuredRuns: null,
-        note: "Estimated on this plan from pace; not enough measured runs for a measured fit.",
-      };
-    }
-  }
+  const { power, basis: powerBasis } = resolveBeaconPower(plan, runs);
 
   const goalSeconds = typeof plan.runnerProfile?.goalMarathonTime === "number"
     ? plan.runnerProfile.goalMarathonTime * 60
@@ -1066,12 +1174,8 @@ export function buildImpactBeacon(input: ImpactBeaconInput): ImpactBeaconReport 
   const eligible = new Set<ReadinessMetricKey>(input.beaconMetrics ?? beaconReadinessMetrics());
   const powerZonesConfigured = Boolean(input.plan.powerZones);
   const weeks = planWeeks(input.plan);
+  const comparison = impactBeaconComparisonWindow(input.plan, input.asOf);
   const planStart = planStartDate(input.plan) ?? "";
-  const planEnd = weeks.length > 0
-    ? day(weeks[weeks.length - 1].endDate ?? weeks[weeks.length - 1].startDate ?? "")
-    : "";
-  const planStarted = planStart !== "" && planStart <= input.asOf;
-  const effectiveEnd = planEnd !== "" && planEnd < input.asOf ? planEnd : input.asOf;
 
   const race = {
     name: input.plan.runnerProfile?.raceName ?? null,
@@ -1081,7 +1185,7 @@ export function buildImpactBeacon(input: ImpactBeaconInput): ImpactBeaconReport 
       : null,
   };
 
-  if (planStart === "") {
+  if (planStart === "" || comparison === null) {
     const targets = beaconTargets(input.plan, []);
     const metrics = READINESS_METRIC_KEYS.map((key) => metricStatus({
       key,
@@ -1110,22 +1214,23 @@ export function buildImpactBeacon(input: ImpactBeaconInput): ImpactBeaconReport 
     };
   }
 
-  if (!planStarted) {
+  if (comparison.mode === "opening_block") {
     const baselineWeeks = Math.min(IMPACT_BEACON_BASELINE_WEEKS, weeks.length);
     const opening = weeks[baselineWeeks - 1];
     const openingEnd = day(opening.endDate ?? opening.startDate ?? "");
     const window = impactBeaconBaselineWindow(input.asOf, baselineWeeks);
     const labels = comparisonLabels("opening_block", baselineWeeks);
     const planned = plannedTraining(input.plan, openingEnd);
-    const actual = actualTraining(input.runs, window.start, window.end, window.windows);
-    const targets = beaconTargets(input.plan, runsBetween(input.runs, window.start, window.end));
+    const actual = actualTraining(input.runs, comparison.start, comparison.end, window.windows);
+    const targets = beaconTargets(input.plan, runsBetween(input.runs, comparison.start, comparison.end));
+    const powerZonesDerived = targets.powerBasis?.source === "measured";
 
     const metrics: ImpactBeaconMetricStatus[] = [
       volumeMetric(planned, actual, eligible, labels),
       longRunMetric(planned, actual, eligible, labels),
       consistencyMetric(planned, actual, eligible, labels),
-      effortMetric("hr_effort", planned, actual, eligible, labels, powerZonesConfigured),
-      effortMetric("power_effort", planned, actual, eligible, labels, powerZonesConfigured),
+      effortMetric("hr_effort", planned, actual, eligible, labels, powerZonesConfigured, powerZonesDerived),
+      effortMetric("power_effort", planned, actual, eligible, labels, powerZonesConfigured, powerZonesDerived),
     ];
     const gaps = collectGaps(metrics);
     const beacon = gaps[0] ?? null;
@@ -1167,21 +1272,22 @@ export function buildImpactBeacon(input: ImpactBeaconInput): ImpactBeaconReport 
     };
   }
 
-  const planned = plannedTraining(input.plan, effectiveEnd);
+  const planned = plannedTraining(input.plan, comparison.end);
   const actual = actualTraining(
     input.runs,
-    planStart,
-    effectiveEnd,
-    planWeekWindows(input.plan, effectiveEnd),
+    comparison.start,
+    comparison.end,
+    planWeekWindows(input.plan, comparison.end),
   );
-  const targets = beaconTargets(input.plan, runsBetween(input.runs, planStart, effectiveEnd));
+  const targets = beaconTargets(input.plan, runsBetween(input.runs, comparison.start, comparison.end));
+  const powerZonesDerived = targets.powerBasis?.source === "measured";
   const labels = comparisonLabels("plan_to_date", planned.weeksElapsed);
   const metrics: ImpactBeaconMetricStatus[] = [
     volumeMetric(planned, actual, eligible, labels),
     longRunMetric(planned, actual, eligible, labels),
     consistencyMetric(planned, actual, eligible, labels),
-    effortMetric("hr_effort", planned, actual, eligible, labels, powerZonesConfigured),
-    effortMetric("power_effort", planned, actual, eligible, labels, powerZonesConfigured),
+    effortMetric("hr_effort", planned, actual, eligible, labels, powerZonesConfigured, powerZonesDerived),
+    effortMetric("power_effort", planned, actual, eligible, labels, powerZonesConfigured, powerZonesDerived),
   ];
 
   const gaps = collectGaps(metrics);

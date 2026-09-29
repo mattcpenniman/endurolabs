@@ -9,12 +9,17 @@
 import { and, asc, eq, gte, inArray, lte, or } from "drizzle-orm";
 import { db } from "@/lib/db/client";
 import { planRunLogs, plans, runActivities } from "@/lib/db/schema";
-import { metersToMiles, type ImpactBeaconRun } from "@/lib/analytics/impact-beacon";
+import {
+  impactBeaconComparisonWindow,
+  metersToMiles,
+  resolveBeaconPower,
+  type ImpactBeaconRun,
+} from "@/lib/analytics/impact-beacon";
 import {
   loadTimeAtEffort,
   normalizePlanData,
 } from "@/lib/analytics/race-analysis-loader";
-import type { MarathonPlan } from "@/lib/training/models";
+import type { MarathonPlan, PowerZones } from "@/lib/training/models";
 
 /** Loads a user-owned plan, tolerating legacy string-encoded plan data. */
 export async function loadImpactBeaconPlan(
@@ -52,9 +57,8 @@ const ACTIVITY_COLUMNS = {
   powerSource: runActivities.powerSource,
 };
 
-async function activityRuns(activityRows: ImpactBeaconActivityRow[]): Promise<ImpactBeaconRun[]> {
-  const effortByActivity = await loadTimeAtEffort(activityRows);
-  return activityRows.map((activity) => ({
+function toSummaryRun(activity: ImpactBeaconActivityRow): ImpactBeaconRun {
+  return {
     date: activity.localDate,
     miles: metersToMiles(activity.distanceMeters),
     durationSeconds: activity.durationSeconds,
@@ -62,6 +66,36 @@ async function activityRuns(activityRows: ImpactBeaconActivityRow[]): Promise<Im
     averagePower: activity.averagePower,
     powerSource: activity.powerSource,
     race: activity.eventType === "race",
+    timeAtEffort: null,
+  };
+}
+
+/**
+ * Resolved watt boundaries for the compared plan, measured from the same
+ * window the report compares. They bucket measured sample power for activities
+ * whose linked plan carries no power zones, so the beacon can measure power
+ * effort wherever it can already display power targets.
+ */
+function fallbackPowerZones(
+  plan: MarathonPlan,
+  asOf: string,
+  activityRows: ImpactBeaconActivityRow[],
+): PowerZones | null {
+  const comparison = impactBeaconComparisonWindow(plan, asOf);
+  if (!comparison) return null;
+  const inWindow = activityRows
+    .map(toSummaryRun)
+    .filter((run) => run.date >= comparison.start && run.date <= comparison.end);
+  return resolveBeaconPower(plan, inWindow).zones;
+}
+
+async function activityRuns(
+  activityRows: ImpactBeaconActivityRow[],
+  powerZones: PowerZones | null,
+): Promise<ImpactBeaconRun[]> {
+  const effortByActivity = await loadTimeAtEffort(activityRows, { fallbackPowerZones: powerZones });
+  return activityRows.map((activity) => ({
+    ...toSummaryRun(activity),
     timeAtEffort: effortByActivity.get(activity.id) ?? null,
   }));
 }
@@ -85,6 +119,8 @@ function appendManualLogs(runs: ImpactBeaconRun[], logs: Array<{
 export interface LoadImpactBeaconRunsInput {
   userId: string;
   planId: string;
+  /** The compared plan, whose resolved zones bucket activities without plan zones. */
+  plan: MarathonPlan;
   asOf: string;
 }
 
@@ -124,13 +160,18 @@ export async function loadImpactBeaconRuns(
     ))
     .orderBy(asc(runActivities.localDate));
 
-  const runs = await activityRuns(activityRows);
+  const runs = await activityRuns(
+    activityRows,
+    fallbackPowerZones(input.plan, input.asOf, activityRows),
+  );
   appendManualLogs(runs, logs);
   return runs;
 }
 
 export interface LoadImpactBeaconBaselineRunsInput {
   userId: string;
+  /** The proposed plan, whose resolved zones bucket activities without plan zones. */
+  plan: MarathonPlan;
   /** First day of the trailing window (YYYY-MM-DD). */
   since: string;
   /** Last day of the trailing window (YYYY-MM-DD). */
@@ -170,7 +211,10 @@ export async function loadImpactBeaconBaselineRuns(
     ))
     .orderBy(asc(runActivities.localDate));
 
-  const runs = await activityRuns(activityRows);
+  const runs = await activityRuns(
+    activityRows,
+    fallbackPowerZones(input.plan, input.asOf, activityRows),
+  );
   appendManualLogs(runs, logs);
   return runs;
 }

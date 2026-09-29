@@ -10,8 +10,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getCurrentUser } from "@/lib/auth";
 import {
   buildImpactBeacon,
-  impactBeaconBaselineWindow,
-  planStartDate,
+  impactBeaconComparisonWindow,
 } from "@/lib/analytics/impact-beacon";
 import {
   loadImpactBeaconBaselineRuns,
@@ -36,15 +35,15 @@ export async function GET(
     }
 
     const asOf = new Date().toISOString().slice(0, 10);
-    const planStart = planStartDate(plan);
-    const baselineWindow = impactBeaconBaselineWindow(asOf);
-    const runs = planStart !== null && planStart > asOf
+    const comparison = impactBeaconComparisonWindow(plan, asOf);
+    const runs = comparison?.mode === "opening_block"
       ? await loadImpactBeaconBaselineRuns({
           userId: user.id,
-          since: baselineWindow.start,
-          asOf: baselineWindow.end,
+          plan,
+          since: comparison.start,
+          asOf: comparison.end,
         })
-      : await loadImpactBeaconRuns({ userId: user.id, planId: id, asOf });
+      : await loadImpactBeaconRuns({ userId: user.id, planId: id, plan, asOf });
     const report = buildImpactBeacon({ plan, runs, asOf });
     return NextResponse.json(report, { headers: { "Cache-Control": "no-store" } });
   } catch (error) {

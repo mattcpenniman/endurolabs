@@ -4,7 +4,11 @@
 // Shared formatting for the goal targets shown by the Score Card
 // beacon panel and the floating beacon widget.
 
-import type { ImpactBeaconTargets } from "@/lib/analytics/impact-beacon";
+import type {
+  ImpactBeaconEffortZone,
+  ImpactBeaconMetricStatus,
+  ImpactBeaconTargets,
+} from "@/lib/analytics/impact-beacon";
 
 export function formatGoalTime(seconds: number): string {
   const totalMinutes = Math.round(seconds / 60);
@@ -35,4 +39,28 @@ export function formatPowerTargets(targets: NonNullable<ImpactBeaconTargets["pow
       : null)
     .filter((value): value is string => value !== null);
   return parts.length > 0 ? parts.join(" · ") : "—";
+}
+
+/**
+ * The zone anchor an effort metric's component measures against, e.g.
+ * `405 W` or `154-165 bpm`; null when that zone has no target on the plan.
+ */
+export function formatComponentTarget(
+  metric: Pick<ImpactBeaconMetricStatus, "key">,
+  zoneKey: ImpactBeaconEffortZone,
+  targets: ImpactBeaconTargets,
+): string | null {
+  if (metric.key === "power_effort") {
+    const target = targets.power?.find((entry) => entry.key === zoneKey);
+    return target && target.watts !== null
+      ? `${target.extrapolated ? "~" : ""}${target.watts} W`
+      : null;
+  }
+  if (metric.key === "hr_effort") {
+    const target = targets.heartRate.find((entry) => entry.key === zoneKey);
+    return target && target.minBpm !== null && target.maxBpm !== null
+      ? `${target.minBpm}-${target.maxBpm} bpm`
+      : null;
+  }
+  return null;
 }

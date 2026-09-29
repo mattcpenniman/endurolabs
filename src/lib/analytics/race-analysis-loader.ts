@@ -32,7 +32,7 @@ import type {
   RaceAnalysisPlan,
   RaceAnalysisPlanRun,
 } from "@/lib/analytics/race-performance-analysis";
-import type { MarathonPlan, RunnerProfile, Workout } from "@/lib/training/models";
+import type { MarathonPlan, PowerZones, RunnerProfile, Workout } from "@/lib/training/models";
 
 const DISTANCE_METERS: Record<string, number> = {
   marathon: 42_195,
@@ -152,6 +152,15 @@ export async function findRaceAnalysisUser(input: {
   return null;
 }
 
+export interface LoadTimeAtEffortOptions {
+  /**
+   * Watt boundaries used for activities whose linked plan carries no power
+   * zones. Callers that leave it out (race analysis, readiness validation)
+   * keep bucketing power only against plan zones.
+   */
+  fallbackPowerZones?: PowerZones | null;
+}
+
 /**
  * Computes per-activity time at effort from stored samples using each
  * activity's linked plan zones. Returns only activities that produced a
@@ -164,6 +173,7 @@ export async function loadTimeAtEffort(
     durationSeconds: number;
     powerSource: string;
   }>,
+  options?: LoadTimeAtEffortOptions,
 ): Promise<Map<string, NonNullable<RaceAnalysisActivity["timeAtEffort"]>>> {
   const result = new Map<string, NonNullable<RaceAnalysisActivity["timeAtEffort"]>>();
   const planIds = [...new Set(activityRows.flatMap((row) => (row.planId ? [row.planId] : [])))];
@@ -216,7 +226,7 @@ export async function loadTimeAtEffort(
       const summary = summarizeTimeAtEffort({
         samples,
         heartRateZones: zones?.heartRateZones ?? null,
-        powerZones: zones?.powerZones ?? null,
+        powerZones: zones?.powerZones ?? options?.fallbackPowerZones ?? null,
         hasMeasuredPower: !activity.powerSource.startsWith("estimated_"),
         durationSeconds: activity.durationSeconds,
       });
