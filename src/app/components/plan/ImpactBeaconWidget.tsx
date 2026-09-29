@@ -197,6 +197,9 @@ export default function ImpactBeaconWidget({
                 ? formatPowerTargets(report.targets.power)
                 : "Not configured on this plan"}
             </p>
+            {report.targets.powerBasis?.source === "measured" && (
+              <p className="mt-1 text-[11px] text-gray-500">{report.targets.powerBasis.note}</p>
+            )}
           </div>
           <div className="flex items-center justify-between gap-3 border-t border-gray-100 bg-gray-50 px-4 py-2.5">
             <p className="text-[11px] text-gray-500">

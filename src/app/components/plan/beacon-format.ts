@@ -30,7 +30,9 @@ export function formatHeartRateTargets(targets: ImpactBeaconTargets["heartRate"]
 
 export function formatPowerTargets(targets: NonNullable<ImpactBeaconTargets["power"]>): string {
   const parts = targets
-    .map((target) => target.watts !== null ? `${target.label} ${target.watts} W` : null)
+    .map((target) => target.watts !== null
+      ? `${target.label} ${target.extrapolated ? "~" : ""}${target.watts} W`
+      : null)
     .filter((value): value is string => value !== null);
   return parts.length > 0 ? parts.join(" · ") : "—";
 }
