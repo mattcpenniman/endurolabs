@@ -18,6 +18,7 @@ import {
   type ImpactBeaconReport,
 } from "@/lib/analytics/impact-beacon";
 import {
+  formatComponentTarget,
   formatGoalPace,
   formatGoalTime,
   formatHeartRateTargets,
@@ -153,29 +154,42 @@ export default function ImpactBeaconWidget({
             <p className="mt-2 text-sm text-gray-700">{report.summary}</p>
           </div>
           <div className="max-h-72 divide-y divide-gray-100 overflow-y-auto">
-            {report.metrics.map((metric) => (
-              <div key={metric.key} className="px-4 py-2.5">
-                <div className="flex items-center justify-between gap-2">
-                  <span className="flex items-center gap-2">
-                    <span className="text-sm font-medium text-gray-900">{metric.label}</span>
-                    {!metric.impactEligible && (
-                      <span className="rounded bg-gray-100 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-gray-500">
-                        Context
-                      </span>
-                    )}
-                  </span>
-                  <span className={`shrink-0 rounded px-2 py-0.5 text-xs font-semibold ${directionClass[metric.direction]}`}>
-                    {directionLabel[metric.direction]}
-                  </span>
+            {report.metrics.map((metric) => {
+              const zoneParts = metric.components.flatMap((component) => {
+                if (!component.zoneKey || (component.planned ?? 0) <= 0) return [];
+                const target = formatComponentTarget(metric, component.zoneKey, report.targets);
+                const planned = component.planned === null
+                  ? "—"
+                  : formatValue(component.planned, component.unit);
+                return [`${component.label} ${planned}${target ? ` @ ${target}` : ""}`];
+              });
+              return (
+                <div key={metric.key} className="px-4 py-2.5">
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="flex items-center gap-2">
+                      <span className="text-sm font-medium text-gray-900">{metric.label}</span>
+                      {!metric.impactEligible && (
+                        <span className="rounded bg-gray-100 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-gray-500">
+                          Context
+                        </span>
+                      )}
+                    </span>
+                    <span className={`shrink-0 rounded px-2 py-0.5 text-xs font-semibold ${directionClass[metric.direction]}`}>
+                      {directionLabel[metric.direction]}
+                    </span>
+                  </div>
+                  <p className="mt-1 text-xs text-gray-500">
+                    {metric.actual === null
+                      ? "No measured data"
+                      : `${formatValue(metric.actual, metric.unit)} actual`}
+                    {metric.planned !== null ? ` · ${formatValue(metric.planned, metric.unit)} planned` : ""}
+                  </p>
+                  {zoneParts.length > 0 && (
+                    <p className="mt-1 text-[11px] text-gray-500">Plan: {zoneParts.join(" · ")}</p>
+                  )}
                 </div>
-                <p className="mt-1 text-xs text-gray-500">
-                  {metric.actual === null
-                    ? "No measured data"
-                    : `${formatValue(metric.actual, metric.unit)} actual`}
-                  {metric.planned !== null ? ` · ${formatValue(metric.planned, metric.unit)} planned` : ""}
-                </p>
-              </div>
-            ))}
+              );
+            })}
           </div>
           <div className="border-t border-gray-100 px-4 py-2.5 text-xs text-gray-600">
             <p>

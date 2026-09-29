@@ -15,6 +15,7 @@ import type {
   ImpactBeaconReport,
 } from "@/lib/analytics/impact-beacon";
 import {
+  formatComponentTarget,
   formatGoalPace,
   formatGoalTime,
   formatHeartRateTargets,
@@ -191,6 +192,22 @@ export default function ImpactBeaconCard({ planId, refreshToken = 0 }: ImpactBea
                 </span>
               </div>
               <p className="mt-1 text-xs text-gray-500">{metric.evidence}</p>
+              {metric.components.length > 0 && (
+                <ul className="mt-1 space-y-0.5 text-xs text-gray-500">
+                  {metric.components.map((component) => {
+                    const target = component.zoneKey
+                      ? formatComponentTarget(metric, component.zoneKey, report.targets)
+                      : null;
+                    return (
+                      <li key={component.label}>
+                        {component.label}
+                        {target ? ` (${target})` : ""}: {formatValue(component.planned, component.unit)} plan /{" "}
+                        {formatValue(component.actual, component.unit)} actual
+                      </li>
+                    );
+                  })}
+                </ul>
+              )}
             </div>
             <p className="text-gray-700">{formatValue(metric.planned, metric.unit)}</p>
             <p className="text-gray-700">{formatValue(metric.actual, metric.unit)}</p>
