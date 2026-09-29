@@ -8,8 +8,15 @@
 // ============================================================
 
 import React from "react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { RunnerProfile } from "@/lib/training/models";
+import type { PowerZoneDefaults } from "@/lib/training/power-anchors";
+
+interface StoredProfileResponse {
+  profile?: {
+    powerZoneDefaults?: PowerZoneDefaults | null;
+  };
+}
 
 interface OnboardingFormProps {
   onSubmit: (profile: RunnerProfile) => void;
@@ -70,6 +77,24 @@ export default function OnboardingForm({ onSubmit, isLoading }: OnboardingFormPr
   const [strength, setStrength] = useState<"none" | "light" | "regular">("light");
   const [injuryHistory, setInjuryHistory] = useState("");
   const [hasPower, setHasPower] = useState(false);
+
+  // A saved profile preference preselects the power checkbox; the anchors
+  // themselves are merged server-side at generation time.
+  useEffect(() => {
+    let active = true;
+    fetch("/api/profile")
+      .then((response) => (response.ok ? response.json() : null))
+      .then((body: StoredProfileResponse | null) => {
+        if (!active || !body?.profile?.powerZoneDefaults?.hasPower) return;
+        setHasPower(true);
+      })
+      .catch(() => {
+        // Anonymous or offline: keep the default unchecked state.
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
 
   const goalMinutes = goalTime.hours * 60 + goalTime.minutes;
 

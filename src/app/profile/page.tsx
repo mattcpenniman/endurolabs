@@ -10,6 +10,7 @@ import GarminConnectCard from "@/app/components/profile/GarminConnectCard";
 import { useUnits } from "@/app/components/units/UnitsProvider";
 import type { GarminConnectionStatus } from "@/lib/activities/models";
 import { kilogramsToPounds, poundsToKilograms } from "@/lib/profile/weight";
+import type { PowerZoneDefaults } from "@/lib/training/power-anchors";
 import type { UnitSystem } from "@/lib/units/format";
 
 const EMPTY_GARMIN_STATUS: GarminConnectionStatus = { connected: false, activities: [] };
@@ -21,7 +22,19 @@ interface ProfileResponse {
     weightPounds: number | null;
     weightMeasuredAt: string | null;
     unitsSystem: UnitSystem;
+    powerZoneDefaults: PowerZoneDefaults | null;
   };
+}
+
+function anchorInput(value: number | null | undefined): string {
+  return typeof value === "number" && Number.isFinite(value) ? String(value) : "";
+}
+
+/** Unparsable text is passed through so the API rejects it instead of silently clearing it. */
+function parseAnchorInput(value: string): number | null | string {
+  if (value.trim() === "") return null;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : value;
 }
 
 export default function ProfilePage(): React.ReactNode {
@@ -35,6 +48,13 @@ export default function ProfilePage(): React.ReactNode {
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [garminConnection, setGarminConnection] = useState<GarminConnectionStatus>(EMPTY_GARMIN_STATUS);
+  const [powerEnabled, setPowerEnabled] = useState(false);
+  const [easyPower, setEasyPower] = useState("");
+  const [marathonPower, setMarathonPower] = useState("");
+  const [thresholdPower, setThresholdPower] = useState("");
+  const [savingZones, setSavingZones] = useState(false);
+  const [zonesMessage, setZonesMessage] = useState<string | null>(null);
+  const [zonesError, setZonesError] = useState<string | null>(null);
 
   const refreshGarminConnection = useCallback(async (): Promise<void> => {
     try {
@@ -62,6 +82,11 @@ export default function ProfilePage(): React.ReactNode {
         setProfile(body.profile);
         setPendingUnits(body.profile.unitsSystem);
         setWeight(weightInput(body.profile.weightPounds, body.profile.unitsSystem));
+        const defaults = body.profile.powerZoneDefaults;
+        setPowerEnabled(defaults?.hasPower ?? false);
+        setEasyPower(anchorInput(defaults?.easyPower));
+        setMarathonPower(anchorInput(defaults?.marathonPower));
+        setThresholdPower(anchorInput(defaults?.thresholdPower));
         return refreshGarminConnection();
       })
       .catch((loadError: Error) => setError(loadError.message))
@@ -108,6 +133,46 @@ export default function ProfilePage(): React.ReactNode {
       setError(saveError instanceof Error ? saveError.message : "Failed to save profile");
     } finally {
       setSaving(false);
+    }
+  };
+
+  const handleZonesSubmit = async (event: FormEvent<HTMLFormElement>): Promise<void> => {
+    event.preventDefault();
+    setSavingZones(true);
+    setZonesMessage(null);
+    setZonesError(null);
+    try {
+      const response = await fetch("/api/profile", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          powerZoneDefaults: {
+            hasPower: powerEnabled,
+            easyPower: parseAnchorInput(easyPower),
+            marathonPower: parseAnchorInput(marathonPower),
+            thresholdPower: parseAnchorInput(thresholdPower),
+          },
+        }),
+      });
+      const body = (await response.json()) as {
+        error?: string;
+        powerZoneDefaults?: PowerZoneDefaults;
+        planUpdated?: boolean;
+      };
+      if (!response.ok) throw new Error(body.error ?? "Failed to save power zones");
+      if (body.powerZoneDefaults) {
+        const saved = body.powerZoneDefaults;
+        setProfile((current) => current ? { ...current, powerZoneDefaults: saved } : current);
+      }
+      setZonesMessage(
+        body.planUpdated
+          ? "Power zones saved and applied to your current plan."
+          : "Power zones saved. They will apply to your next generated plan.",
+      );
+    } catch (saveError) {
+      setZonesError(saveError instanceof Error ? saveError.message : "Failed to save power zones");
+    } finally {
+      setSavingZones(false);
     }
   };
 
@@ -186,6 +251,84 @@ export default function ProfilePage(): React.ReactNode {
               className="mt-5 rounded-lg bg-enduro-700 px-4 py-2 text-sm font-semibold text-white hover:bg-enduro-800 disabled:cursor-not-allowed disabled:opacity-60"
             >
               {saving ? "Saving..." : "Save profile"}
+            </button>
+          </form>
+
+          <form onSubmit={handleZonesSubmit} className="mt-6 rounded-xl border border-gray-200 bg-white p-6 shadow-sm">
+            <h2 className="text-sm font-semibold text-gray-900">Power zones</h2>
+            <p className="mt-1 text-sm text-gray-600">
+              Plans recommend power targets from your logged runs automatically. Set explicit
+              anchors here to override that. Saving applies them to your current plan and to
+              plans you generate later.
+            </p>
+            <div className="mt-4 flex items-center gap-3">
+              <input
+                type="checkbox"
+                id="power-zones-enabled"
+                checked={powerEnabled}
+                onChange={(event) => setPowerEnabled(event.target.checked)}
+                className="h-5 w-5 rounded border-gray-300 text-enduro-500 focus:ring-enduro-500"
+              />
+              <label htmlFor="power-zones-enabled" className="text-sm text-gray-700">
+                Use these power anchors
+              </label>
+            </div>
+            <div className="mt-4 grid gap-3 sm:grid-cols-3">
+              <label className="block">
+                <span className="text-xs font-medium uppercase tracking-wide text-gray-500">Marathon power</span>
+                <input
+                  type="number"
+                  min={50}
+                  max={700}
+                  step={1}
+                  value={marathonPower}
+                  onChange={(event) => setMarathonPower(event.target.value)}
+                  disabled={!powerEnabled}
+                  placeholder="e.g. 300"
+                  className="mt-1 w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 focus:border-enduro-500 focus:outline-none focus:ring-2 focus:ring-enduro-100 disabled:bg-gray-50 disabled:text-gray-400"
+                />
+              </label>
+              <label className="block">
+                <span className="text-xs font-medium uppercase tracking-wide text-gray-500">Threshold power</span>
+                <input
+                  type="number"
+                  min={50}
+                  max={700}
+                  step={1}
+                  value={thresholdPower}
+                  onChange={(event) => setThresholdPower(event.target.value)}
+                  disabled={!powerEnabled}
+                  placeholder="e.g. 336"
+                  className="mt-1 w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 focus:border-enduro-500 focus:outline-none focus:ring-2 focus:ring-enduro-100 disabled:bg-gray-50 disabled:text-gray-400"
+                />
+              </label>
+              <label className="block">
+                <span className="text-xs font-medium uppercase tracking-wide text-gray-500">Easy power</span>
+                <input
+                  type="number"
+                  min={50}
+                  max={700}
+                  step={1}
+                  value={easyPower}
+                  onChange={(event) => setEasyPower(event.target.value)}
+                  disabled={!powerEnabled}
+                  placeholder="e.g. 240"
+                  className="mt-1 w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 focus:border-enduro-500 focus:outline-none focus:ring-2 focus:ring-enduro-100 disabled:bg-gray-50 disabled:text-gray-400"
+                />
+              </label>
+            </div>
+            <p className="mt-2 text-xs text-gray-500">
+              Marathon power is required when enabled. Threshold and easy are optional; when
+              blank EnduroLab derives threshold as 112% and easy as 78% of marathon power.
+            </p>
+            {zonesMessage && <p className="mt-4 text-sm text-enduro-700">{zonesMessage}</p>}
+            {zonesError && <p className="mt-4 text-sm text-red-600">{zonesError}</p>}
+            <button
+              type="submit"
+              disabled={savingZones}
+              className="mt-5 rounded-lg bg-enduro-700 px-4 py-2 text-sm font-semibold text-white hover:bg-enduro-800 disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              {savingZones ? "Saving..." : "Save power zones"}
             </button>
           </form>
           <div className="mt-6">
