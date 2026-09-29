@@ -523,13 +523,18 @@ describe("impact beacon targets", () => {
     expect(report.targets.powerBasis).toBeNull();
   });
 
-  it("reports power targets when the plan carries power zones", () => {
+  it("reports explicit power anchors when the plan carries them", () => {
     const plan = makePlan({
       powerZones: {
         easy: { min: 210, max: 250 },
         marathon: 300,
         threshold: 336,
         vo2: 366,
+      },
+      runnerProfile: {
+        ...makeProfile(),
+        hasAppleWatchPower: true,
+        appleWatchPowerData: { easyPower: 250, marathonPower: 300, thresholdPower: 336 },
       },
     });
     const report = buildImpactBeacon({ plan, runs: [], asOf: "2026-09-28" });
@@ -543,6 +548,25 @@ describe("impact beacon targets", () => {
       source: "plan",
       measuredRuns: null,
       note: "Configured on this plan.",
+    });
+  });
+
+  it("reports pace-estimated plan zones only when no measured fit exists", () => {
+    const plan = makePlan({
+      powerZones: {
+        easy: { min: 210, max: 250 },
+        marathon: 300,
+        threshold: 336,
+        vo2: 366,
+      },
+    });
+    const report = buildImpactBeacon({ plan, runs: [], asOf: "2026-09-28" });
+
+    expect(report.targets.power?.map((target) => target.watts)).toEqual([300, 336, 366]);
+    expect(report.targets.powerBasis).toEqual({
+      source: "plan",
+      measuredRuns: null,
+      note: "Estimated on this plan from pace; not enough measured runs for a measured fit.",
     });
   });
 
@@ -561,14 +585,29 @@ describe("impact beacon targets", () => {
     });
   });
 
-  it("prefers configured power zones over a derived fit", () => {
+  it("prefers explicit anchors over a derived fit", () => {
     const plan = makePlan({
       powerZones: { easy: { min: 210, max: 250 }, marathon: 300, threshold: 336, vo2: 366 },
+      runnerProfile: {
+        ...makeProfile(),
+        hasAppleWatchPower: true,
+        appleWatchPowerData: { easyPower: null, marathonPower: 300, thresholdPower: null },
+      },
     });
     const report = buildImpactBeacon({ plan, runs: MEASURED_RUNS, asOf: "2026-09-28" });
 
     expect(report.targets.powerBasis?.source).toBe("plan");
     expect(report.targets.power?.map((target) => target.watts)).toEqual([300, 336, 366]);
+  });
+
+  it("prefers the measured fit over pace-estimated plan zones", () => {
+    const plan = makePlan({
+      powerZones: { easy: { min: 210, max: 250 }, marathon: 300, threshold: 336, vo2: 366 },
+    });
+    const report = buildImpactBeacon({ plan, runs: MEASURED_RUNS, asOf: "2026-09-28" });
+
+    expect(report.targets.powerBasis?.source).toBe("measured");
+    expect(report.targets.power?.map((target) => target.watts)).toEqual([383, 413, 447]);
   });
 
   it("does not derive power bands from estimated or power-less runs", () => {
