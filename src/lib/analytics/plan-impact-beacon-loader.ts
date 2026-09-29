@@ -33,6 +33,8 @@ interface ImpactBeaconActivityRow {
   localDate: string;
   distanceMeters: number;
   durationSeconds: number;
+  movingDurationSeconds: number | null;
+  averagePower: number | null;
   eventType: string | null;
   planId: string | null;
   powerSource: string;
@@ -43,6 +45,8 @@ const ACTIVITY_COLUMNS = {
   localDate: runActivities.localDate,
   distanceMeters: runActivities.distanceMeters,
   durationSeconds: runActivities.durationSeconds,
+  movingDurationSeconds: runActivities.movingDurationSeconds,
+  averagePower: runActivities.averagePower,
   eventType: runActivities.eventType,
   planId: runActivities.planId,
   powerSource: runActivities.powerSource,
@@ -54,6 +58,9 @@ async function activityRuns(activityRows: ImpactBeaconActivityRow[]): Promise<Im
     date: activity.localDate,
     miles: metersToMiles(activity.distanceMeters),
     durationSeconds: activity.durationSeconds,
+    movingDurationSeconds: activity.movingDurationSeconds,
+    averagePower: activity.averagePower,
+    powerSource: activity.powerSource,
     race: activity.eventType === "race",
     timeAtEffort: effortByActivity.get(activity.id) ?? null,
   }));

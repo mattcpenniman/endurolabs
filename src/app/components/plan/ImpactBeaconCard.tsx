@@ -168,6 +168,9 @@ export default function ImpactBeaconCard({ planId, refreshToken = 0 }: ImpactBea
               ? formatPowerTargets(report.targets.power)
               : "Not configured on this plan"}
           </p>
+          {report.targets.powerBasis?.source === "measured" && (
+            <p className="mt-1 text-xs text-gray-500">{report.targets.powerBasis.note}</p>
+          )}
         </div>
       </div>
 

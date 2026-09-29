@@ -11,6 +11,7 @@ import {
   impactBeaconLevel,
   type ImpactBeaconRun,
 } from "@/lib/analytics/impact-beacon";
+import { formatPowerTargets } from "@/app/components/plan/beacon-format";
 import { beaconReadinessMetrics } from "@/lib/analytics/readiness-metrics";
 import type {
   EffortZone,
@@ -254,7 +255,7 @@ describe("buildImpactBeacon", () => {
       asOf: "2026-09-28",
     });
 
-    expect(report.version).toBe("impact-beacon-v1");
+    expect(report.version).toBe("impact-beacon-v2");
     expect(report.mode).toBe("plan_to_date");
     expect(report.baseline).toBeNull();
     expect(report.planStarted).toBe(true);
@@ -327,11 +328,14 @@ describe("buildImpactBeacon", () => {
   it("reports missing sample detail instead of inventing actual effort", () => {
     const report = buildImpactBeacon({ plan: makePlan(), runs: TRAILING_RUNS, asOf: "2026-09-28" });
     const hr = report.metrics.find((metric) => metric.key === "hr_effort");
+    const power = report.metrics.find((metric) => metric.key === "power_effort");
 
     expect(hr?.actual).toBeNull();
     expect(hr?.dataMissing).toBe(true);
     expect(hr?.direction).toBe("no_data");
     expect(hr?.evidence).toContain("no stored sample detail");
+    expect(power?.dataMissing).toBe(true);
+    expect(power?.evidence).toContain("the plan has no power zones, so measured power was not bucketed");
   });
 
   it("pro-rates the in-progress week on both the planned and actual side", () => {
@@ -480,6 +484,30 @@ describe("buildImpactBeacon", () => {
   });
 });
 
+/** Measured run whose power sits exactly on `watts = 100 * speed_mps`. */
+function measuredRun(date: string, paceMinutesPerMile: number): ImpactBeaconRun {
+  const miles = 6;
+  const durationSeconds = paceMinutesPerMile * miles * 60;
+  const speed = (miles * 1609.344) / durationSeconds;
+  return {
+    date,
+    miles,
+    durationSeconds,
+    movingDurationSeconds: durationSeconds,
+    averagePower: 100 * speed,
+    powerSource: "garmin",
+  };
+}
+
+const MEASURED_RUNS: ImpactBeaconRun[] = [
+  measuredRun("2026-09-08", 6.5),
+  measuredRun("2026-09-10", 7),
+  measuredRun("2026-09-12", 7.5),
+  measuredRun("2026-09-15", 8),
+  measuredRun("2026-09-17", 8.5),
+  measuredRun("2026-09-19", 9),
+];
+
 describe("impact beacon targets", () => {
   it("reports goal time/pace and the plan's HR targets", () => {
     const report = buildImpactBeacon({ plan: makePlan(), runs: [], asOf: "2026-09-28" });
@@ -492,6 +520,7 @@ describe("impact beacon targets", () => {
       { key: "vo2", label: "VO2", minBpm: 175, maxBpm: 180 },
     ]);
     expect(report.targets.power).toBeNull();
+    expect(report.targets.powerBasis).toBeNull();
   });
 
   it("reports power targets when the plan carries power zones", () => {
@@ -506,10 +535,73 @@ describe("impact beacon targets", () => {
     const report = buildImpactBeacon({ plan, runs: [], asOf: "2026-09-28" });
 
     expect(report.targets.power).toEqual([
-      { key: "marathon", label: "Marathon effort", watts: 300 },
-      { key: "threshold", label: "Threshold", watts: 336 },
-      { key: "vo2", label: "VO2", watts: 366 },
+      { key: "marathon", label: "Marathon effort", watts: 300, extrapolated: false },
+      { key: "threshold", label: "Threshold", watts: 336, extrapolated: false },
+      { key: "vo2", label: "VO2", watts: 366, extrapolated: false },
     ]);
+    expect(report.targets.powerBasis).toEqual({
+      source: "plan",
+      measuredRuns: null,
+      note: "Configured on this plan.",
+    });
+  });
+
+  it("derives power bands from measured run summaries when the plan has no power zones", () => {
+    const report = buildImpactBeacon({ plan: makePlan(), runs: MEASURED_RUNS, asOf: "2026-09-28" });
+
+    expect(report.targets.power).toEqual([
+      { key: "marathon", label: "Marathon effort", watts: 383, extrapolated: false },
+      { key: "threshold", label: "Threshold", watts: 413, extrapolated: false },
+      { key: "vo2", label: "VO2", watts: 447, extrapolated: true },
+    ]);
+    expect(report.targets.powerBasis).toEqual({
+      source: "measured",
+      measuredRuns: 6,
+      note: "Derived from 6 measured runs (speed-to-power fit); 1 anchor is beyond your measured pace range.",
+    });
+  });
+
+  it("prefers configured power zones over a derived fit", () => {
+    const plan = makePlan({
+      powerZones: { easy: { min: 210, max: 250 }, marathon: 300, threshold: 336, vo2: 366 },
+    });
+    const report = buildImpactBeacon({ plan, runs: MEASURED_RUNS, asOf: "2026-09-28" });
+
+    expect(report.targets.powerBasis?.source).toBe("plan");
+    expect(report.targets.power?.map((target) => target.watts)).toEqual([300, 336, 366]);
+  });
+
+  it("does not derive power bands from estimated or power-less runs", () => {
+    const runs = MEASURED_RUNS.map((run) => ({ ...run, powerSource: "estimated_garmin" }));
+    const noFit = buildImpactBeacon({ plan: makePlan(), runs, asOf: "2026-09-28" });
+    const tooFew = buildImpactBeacon({
+      plan: makePlan(),
+      runs: MEASURED_RUNS.slice(0, 4),
+      asOf: "2026-09-28",
+    });
+
+    expect(noFit.targets.power).toBeNull();
+    expect(noFit.targets.powerBasis).toBeNull();
+    expect(tooFew.targets.power).toBeNull();
+    expect(tooFew.targets.powerBasis).toBeNull();
+  });
+
+  it("ignores runs outside the compared window when deriving power bands", () => {
+    const future = MEASURED_RUNS.map((run, index) => ({
+      ...run,
+      date: addDays("2026-10-05", index),
+    }));
+    const report = buildImpactBeacon({ plan: makePlan(), runs: future, asOf: "2026-09-28" });
+
+    expect(report.targets.power).toBeNull();
+    expect(report.targets.powerBasis).toBeNull();
+  });
+
+  it("marks extrapolated anchors with a leading tilde in the UI", () => {
+    expect(formatPowerTargets([
+      { key: "marathon", label: "Marathon effort", watts: 410, extrapolated: false },
+      { key: "threshold", label: "Threshold", watts: 440, extrapolated: true },
+    ])).toBe("Marathon effort 410 W · Threshold ~440 W");
   });
 });
 
