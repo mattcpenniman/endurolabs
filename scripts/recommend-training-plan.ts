@@ -29,6 +29,7 @@ import {
   type CreatePlanOptions,
 } from '@/lib/planner/plan-creation';
 import { generatePlan } from '@/lib/training/plan-generator';
+import { mergePowerZoneDefaults, parsePowerZoneDefaults } from '@/lib/training/power-anchors';
 import type { MarathonPlan, RunnerProfile } from '@/lib/training/models';
 import type { RaceAnalysisActivity } from '@/lib/analytics/race-performance-analysis';
 
@@ -138,7 +139,7 @@ function secondsToHMS(secs: number): string {
 
 // ─── Shared row types ────────────────────────────────────────
 
-interface UserRow { id: string; email: string }
+interface UserRow { id: string; email: string; powerZoneDefaults: unknown }
 interface PlanRow {
   id: string; raceName: string | null; runnerProfile: RunnerProfile; planData: MarathonPlan; createdAt: Date; updatedAt: Date;
 }
@@ -174,7 +175,10 @@ async function runCreatePlan(context: CreatePlanContext): Promise<void> {
   const { sql, user, basePlan, planData, snapshot, options, goal, apply, setCurrent, jsonOnly, today } = context;
 
   const baseProfile = basePlan.planData.runnerProfile ?? basePlan.runnerProfile;
-  const profile = buildCreateProfile(baseProfile, options);
+  const profile = mergePowerZoneDefaults(
+    buildCreateProfile(baseProfile, options),
+    parsePowerZoneDefaults(user.powerZoneDefaults),
+  );
   const plan = generatePlan(profile);
   const summary = summarizePlan(plan);
   const calendarGates = validatePlanCalendar(plan, today, options.raceDate);
@@ -276,7 +280,7 @@ async function main() {
 
   // Resolve user
   const [user] = await sql<UserRow[]>`
-    select u.id, u.email from users u
+    select u.id, u.email, u.power_zone_defaults as "powerZoneDefaults" from users u
     where ${email ? sql`u.email = ${email}` : sql`u.id = (select user_id from plans where id = ${planId ?? null})`}
     limit 1
   `;

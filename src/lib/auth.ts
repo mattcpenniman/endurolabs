@@ -12,6 +12,10 @@ import { randomBytes, scryptSync, timingSafeEqual, createHash } from "crypto";
 import { and, eq, gt } from "drizzle-orm";
 import { db } from "@/lib/db/client";
 import { sessions, users } from "@/lib/db/schema";
+import {
+  parsePowerZoneDefaults,
+  type PowerZoneDefaults,
+} from "@/lib/training/power-anchors";
 import { DEFAULT_UNIT_SYSTEM, parseUnitSystem, type UnitSystem } from "@/lib/units/format";
 
 export const SESSION_COOKIE_NAME = "endurlab_session";
@@ -26,6 +30,8 @@ export interface AuthenticatedUser {
   currentPlanId: string | null;
   /** Display preference: "imperial" (ft, min/mi) or "metric" (m, min/km). */
   unitsSystem: UnitSystem;
+  /** Stored user-level power anchor defaults; null when unset. */
+  powerZoneDefaults: PowerZoneDefaults | null;
 }
 
 export function normalizeEmail(email: string): string {
@@ -112,6 +118,7 @@ export async function getCurrentUser(): Promise<AuthenticatedUser | null> {
       name: users.name,
       currentPlanId: users.currentPlanId,
       unitsSystem: users.unitsSystem,
+      powerZoneDefaults: users.powerZoneDefaults,
     })
     .from(sessions)
     .innerJoin(users, eq(sessions.userId, users.id))
@@ -122,5 +129,6 @@ export async function getCurrentUser(): Promise<AuthenticatedUser | null> {
   return {
     ...row,
     unitsSystem: parseUnitSystem(row.unitsSystem) ?? DEFAULT_UNIT_SYSTEM,
+    powerZoneDefaults: parsePowerZoneDefaults(row.powerZoneDefaults),
   };
 }

@@ -27,6 +27,8 @@ export const users = pgTable("users", {
   currentPlanId: uuid("current_plan_id"),
   // Display preference for elevation/pace: "imperial" (ft, min/mi) or "metric" (m, min/km).
   unitsSystem: varchar("units_system", { length: 16 }).default("imperial").notNull(),
+  // User-level power anchor defaults: seeds newly generated plans and the current plan.
+  powerZoneDefaults: jsonb("power_zone_defaults"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 });

@@ -2,8 +2,9 @@
 // EnduroLab - User Profile API
 // ============================================================
 // Reads account details and appends body-weight measurements.
-// PUT accepts either a new weight, a new elevation/pace unit
-// preference, or both.
+// PUT accepts a new weight, a new elevation/pace unit
+// preference, and/or user-level power anchor defaults; saving
+// anchors also applies them to the current plan.
 // ============================================================
 
 import { NextRequest, NextResponse } from "next/server";
@@ -11,7 +12,9 @@ import { desc, eq } from "drizzle-orm";
 import { getCurrentUser } from "@/lib/auth";
 import { db } from "@/lib/db/client";
 import { users, weightMeasurements } from "@/lib/db/schema";
+import { applyPowerZoneDefaultsToCurrentPlan } from "@/lib/profile/power-zone-plan";
 import { kilogramsToPounds, poundsToKilograms } from "@/lib/profile/weight";
+import { validatePowerZoneDefaults } from "@/lib/training/power-anchors";
 import { parseUnitSystem } from "@/lib/units/format";
 
 export async function GET(): Promise<NextResponse> {
@@ -33,6 +36,7 @@ export async function GET(): Promise<NextResponse> {
       weightPounds: measurement ? kilogramsToPounds(measurement.weightKg) : null,
       weightMeasuredAt: measurement?.measuredAt.toISOString() ?? null,
       unitsSystem: user.unitsSystem,
+      powerZoneDefaults: user.powerZoneDefaults,
     },
   });
 }
@@ -44,11 +48,16 @@ export async function PUT(request: NextRequest): Promise<NextResponse> {
   const body = (await request.json().catch(() => ({}))) as {
     weightPounds?: unknown;
     unitsSystem?: unknown;
+    powerZoneDefaults?: unknown;
   };
   const hasWeight = body.weightPounds !== undefined && body.weightPounds !== null;
   const hasUnits = body.unitsSystem !== undefined;
-  if (!hasWeight && !hasUnits) {
-    return NextResponse.json({ error: "Provide weightPounds and/or unitsSystem" }, { status: 400 });
+  const hasPowerZoneDefaults = body.powerZoneDefaults !== undefined;
+  if (!hasWeight && !hasUnits && !hasPowerZoneDefaults) {
+    return NextResponse.json(
+      { error: "Provide weightPounds, unitsSystem, and/or powerZoneDefaults" },
+      { status: 400 },
+    );
   }
 
   const weightPounds = hasWeight ? body.weightPounds : undefined;
@@ -80,10 +89,32 @@ export async function PUT(request: NextRequest): Promise<NextResponse> {
     unitsSystem = parsed;
   }
 
+  let powerZoneDefaults = user.powerZoneDefaults;
+  let planUpdated = false;
+  if (hasPowerZoneDefaults) {
+    const validated = validatePowerZoneDefaults(
+      (body.powerZoneDefaults ?? {}) as Record<string, unknown>,
+    );
+    if ("error" in validated) {
+      return NextResponse.json({ error: validated.error }, { status: 400 });
+    }
+    powerZoneDefaults = validated.defaults;
+    await db.update(users)
+      .set({ powerZoneDefaults: validated.defaults, updatedAt: new Date() })
+      .where(eq(users.id, user.id));
+    ({ updated: planUpdated } = await applyPowerZoneDefaultsToCurrentPlan({
+      userId: user.id,
+      planId: user.currentPlanId,
+      defaults: validated.defaults,
+    }));
+  }
+
   return NextResponse.json({
     success: true,
     weightPounds: weightPounds ?? null,
     weightMeasuredAt: measurementAt ? measurementAt.toISOString() : null,
     unitsSystem,
+    powerZoneDefaults,
+    planUpdated,
   });
 }

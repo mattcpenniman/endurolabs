@@ -10,6 +10,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { RunnerProfile } from "@/lib/training/models";
 import { generatePlan } from "@/lib/training/plan-generator";
+import { mergePowerZoneDefaults } from "@/lib/training/power-anchors";
 import { getCurrentUser } from "@/lib/auth";
 
 export async function POST(request: NextRequest): Promise<NextResponse> {
@@ -30,7 +31,10 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       );
     }
 
-    const plan = generatePlan(body);
+    // Stored profile anchors seed power zones when the runner asked for
+    // power in the form but supplied no anchors of their own.
+    const profile = mergePowerZoneDefaults(body, user.powerZoneDefaults);
+    const plan = generatePlan(profile);
 
     return NextResponse.json(plan, { status: 200 });
   } catch (error) {
