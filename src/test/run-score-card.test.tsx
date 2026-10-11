@@ -36,7 +36,7 @@ describe("Run card score tab", () => {
     expect(scoreTab.getAttribute("aria-selected")).toBe("true");
     const panel = container.querySelector('[role="tabpanel"]')!;
     expect(panel.textContent).toContain("10.0/10 · partial");
-    expect(panel.textContent).toContain("No matched workout with usable targets");
+    expect(panel.textContent).toContain("Easy selected; no configured pace/power zones available");
     expect(panel.textContent).toContain("remaining weights are renormalized");
     expect([...panel.querySelectorAll("p")].map((element) => element.textContent)).not.toContain("0.0/10");
   });
@@ -49,6 +49,33 @@ describe("Run card score tab", () => {
     const panel = container.querySelector('[role="tabpanel"]')!;
     expect(panel.textContent).toContain("No valid cadence recorded");
     expect(panel.textContent).not.toContain("10.0/10");
+  });
+
+  it("saves selected effort, refreshes the score and propagates it to aggregate views", async () => {
+    const run = activity("effort-edit", 180);
+    const updated = { ...run.runScore!, effort: "threshold" as const, effortOverride: "threshold" as const, score: 7 };
+    const onScoreChange = vi.fn();
+    const fetcher = vi.fn(async (_url: string, init?: RequestInit) => ({ ok: true,
+      json: async () => init?.method === "PATCH" ? { runScore: updated } : { samples: [], splits: [], runScore: run.runScore },
+    }));
+    vi.stubGlobal("fetch", fetcher);
+    await act(async () => root.render(<GarminActivityMapCard activities={[run]} onScoreChange={onScoreChange} />));
+    await act(async () => [...container.querySelectorAll<HTMLButtonElement>('[role="tab"]')].find((button) => button.textContent === "Score")!.click());
+    const selector = container.querySelector<HTMLSelectElement>('select[aria-label="Target effort"]')!;
+    await act(async () => { selector.value = "threshold"; selector.dispatchEvent(new Event("change", { bubbles: true })); });
+    expect(fetcher).toHaveBeenCalledWith("/api/activities/effort-edit", expect.objectContaining({ method: "PATCH", body: JSON.stringify({ effortOverride: "threshold" }) }));
+    expect(selector.value).toBe("threshold");
+    expect(container.textContent).toContain("7.0/10");
+    expect(onScoreChange).toHaveBeenCalledWith(run.id, updated);
+    await act(async () => [...container.querySelectorAll<HTMLButtonElement>('[role="tab"]')].find((button) => button.textContent === "Route & splits")!.click());
+    expect(container.textContent).toContain("Pace / power goals · Threshold");
+  });
+
+  it("keeps shared-run effort read-only", async () => {
+    await act(async () => root.render(<GarminActivityMapCard activities={[activity("read-only", 180)]} detailUrlPrefix="/api/run/token/activities" />));
+    await act(async () => [...container.querySelectorAll<HTMLButtonElement>('[role="tab"]')].find((button) => button.textContent === "Score")!.click());
+    expect(container.querySelector('select[aria-label="Target effort"]')).toBeNull();
+    expect(container.textContent).toContain("Pace / power goals · Easy");
   });
 
   it.each(["Week 1", "Base phase"])("opens and closes the %s score breakdown from the icon", async (label) => {

@@ -14,7 +14,8 @@ import GarminActivityLeafletMap from "@/app/components/plan/GarminActivityLeafle
 import { useUnits } from "@/app/components/units/UnitsProvider";
 import { buildSharedRunUrl } from "@/lib/plan-url";
 import { toBlob } from "html-to-image";
-import RunScoreDetails, { RunScoreBadge } from "./RunScoreDetails";
+import RunScoreDetails, { RunScoreBadge, RunEffortTargets } from "./RunScoreDetails";
+import type { RunEffort, RunScore } from "@/lib/analytics/run-score";
 import {
   elevationMetersForDisplay,
   elevationUnitAbbr,
@@ -35,6 +36,7 @@ export interface GarminActivityMapCardProps {
   shareBaseUrl?: string | null;
   onCreateShareLink?: () => Promise<string | null>;
   showControls?: boolean;
+  onScoreChange?: (activityId: string, score: RunScore) => void;
 }
 
 // Module-level cache so an activity trace is fetched at most
@@ -108,6 +110,7 @@ export default function GarminActivityMapCard({
   shareBaseUrl = null,
   onCreateShareLink,
   showControls = true,
+  onScoreChange,
 }: GarminActivityMapCardProps): React.ReactNode {
   const cardRef = useRef<HTMLDivElement | null>(null);
   const { units } = useUnits();
@@ -123,9 +126,26 @@ export default function GarminActivityMapCard({
   const [imageStatus, setImageStatus] = useState<"idle" | "copying" | "copied" | "downloaded" | "error">("idle");
   const [imageError, setImageError] = useState<string | null>(null);
   const [shareStatus, setShareStatus] = useState<"idle" | "copying" | "copied" | "error">("idle");
+  const [editedScores, setEditedScores] = useState<Record<string, RunScore>>({});
 
   const selectedActivity = eligible.find((activity) => activity.id === selectedActivityId) ?? null;
   const detail = useActivityDetail(selectedActivityId, detailUrlPrefix);
+  const runScore = selectedActivityId ? editedScores[selectedActivityId] ?? detail?.runScore ?? selectedActivity?.runScore : null;
+  const saveEffort = async (effortOverride: RunEffort | null): Promise<void> => {
+    if (!selectedActivityId) return;
+    const id = selectedActivityId;
+    const response = await fetch(`/api/activities/${id}`, {
+      method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ effortOverride }),
+    });
+    const body = await response.json() as { error?: string; runScore?: RunScore };
+    if (!response.ok || !body.runScore) throw new Error(body.error ?? "Could not save effort");
+    const score = body.runScore;
+    setEditedScores((previous) => ({ ...previous, [id]: score }));
+    const cacheKey = `${detailUrlPrefix}/${id}`;
+    const cached = activityDetailCache.get(cacheKey);
+    if (cached) activityDetailCache.set(cacheKey, { ...cached, runScore: score });
+    onScoreChange?.(id, score);
+  };
   const samples = detail?.samples ?? null;
   const splits = detail?.splits ?? [];
 
@@ -303,7 +323,7 @@ export default function GarminActivityMapCard({
         </button>)}
       </div>
       {activeTab === "score" && <div role="tabpanel" id="run-card-score-panel" aria-labelledby="run-card-score-tab">
-        <RunScoreDetails score={selectedActivity?.runScore ?? detail?.runScore} />
+        <RunScoreDetails key={selectedActivityId} score={runScore} onEffortChange={detailUrlPrefix === "/api/activities" ? saveEffort : undefined} />
       </div>}
       {activeTab === "run" && <div role="tabpanel" id="run-card-run-panel" aria-labelledby="run-card-run-tab" className={imageStatus === "copying" ? "space-y-5 p-5" : "grid gap-5 p-5 lg:grid-cols-5"}>
         {/* Route map + summary */}
@@ -315,7 +335,7 @@ export default function GarminActivityMapCard({
                   <strong className="text-sm text-gray-900">{selectedActivity.activityName}</strong>
                   <span>{selectedActivity.localDate}</span>
                   <span>{selectedActivity.distanceMiles.toFixed(2)} mi</span>
-                  <RunScoreBadge score={selectedActivity.runScore ?? detail?.runScore} />
+                  <RunScoreBadge score={runScore} />
                   {selectedActivity.durationSeconds > 0 && <span>{formatElapsed(selectedActivity.durationSeconds)}</span>}
                 </>
               )}
@@ -331,6 +351,7 @@ export default function GarminActivityMapCard({
             </div>
           </div>
 
+          <div className="mt-3"><RunEffortTargets score={runScore} /></div>
           <div className="mt-3 overflow-hidden rounded-lg border border-gray-200 bg-gray-50">
             {hasMap ? (
               <GarminActivityLeafletMap

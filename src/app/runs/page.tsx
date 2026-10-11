@@ -120,7 +120,11 @@ function RunHistory(): React.ReactNode {
           </section>
           {selected && <section aria-label="Selected run details" className="order-1 space-y-3">
             <div className="flex flex-wrap items-center justify-between gap-3"><h2 className="text-xl font-semibold">Run details</h2><label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={!selected.excludedFromAnalytics} disabled={saving} onChange={() => void toggleAnalytics()} />Include in analytics</label></div>
-            <GarminActivityMapCard activities={[selected, ...history.activities.filter((run) => run.id !== selected.id)]} activityId={selected.id} onActivityChange={(id) => navigate({ run: id })} onCreateShareLink={createShareLink} />
+            <GarminActivityMapCard activities={[selected, ...history.activities.filter((run) => run.id !== selected.id)]} activityId={selected.id} onActivityChange={(id) => navigate({ run: id })} onCreateShareLink={createShareLink}
+              onScoreChange={(id, runScore) => setHistory((previous) => previous ? { ...previous,
+                activities: previous.activities.map((run) => run.id === id ? { ...run, runScore } : run),
+                selectedActivity: previous.selectedActivity?.id === id ? { ...previous.selectedActivity, runScore } : previous.selectedActivity,
+              } : previous)} />
           </section>}
         </div>}
       </div>

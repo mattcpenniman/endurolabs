@@ -150,7 +150,7 @@ function segmentDistanceLabel(segment: Workout["segments"][number]): string {
 }
 
 function renderWorkoutSegments(workout: Workout, units: UnitSystem) {
-  if (workout.segments.length <= 1) return null;
+  if (workout.segments.length === 0) return null;
 
   return (
     <div className="mt-3 space-y-1 rounded-lg bg-gray-50 p-3">
@@ -164,8 +164,9 @@ function renderWorkoutSegments(workout: Workout, units: UnitSystem) {
                 {segment.description}
               </span>
               {segment.pace && (
-                <span className="ml-2 text-gray-400">@ {formatPaceForSystem(segment.pace, units)}{paceUnitSuffix(units)}</span>
+                <span className="ml-2 text-gray-400">Pace goal {formatPaceForSystem(segment.pace, units)}{paceUnitSuffix(units)}</span>
               )}
+              {segment.power && <span className="ml-2 text-gray-400">Power goal {segment.power} W</span>}
             </div>
             {distanceLabel && <span className="font-semibold text-gray-700">{distanceLabel}</span>}
           </div>

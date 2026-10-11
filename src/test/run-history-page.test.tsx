@@ -67,7 +67,7 @@ describe("Run history page", () => {
     const scoreTab = [...container.querySelectorAll<HTMLButtonElement>('[role="tab"]')].find((button) => button.textContent === "Score")!;
     await act(async () => scoreTab.click());
     expect(container.querySelector('[role="tabpanel"]')!.textContent).toContain("10.0/10 · partial");
-    expect(container.querySelector('[role="tabpanel"]')!.textContent).toContain("No matched workout with usable targets");
+    expect(container.querySelector('[role="tabpanel"]')!.textContent).toContain("Easy selected; no configured pace/power zones available");
     const share = [...container.querySelectorAll("button")].find((button) => button.textContent === "Share")!;
     await act(async () => share.click());
     expect(fetchMock).toHaveBeenCalledWith("/api/activities/unassigned/share", { method: "POST" });

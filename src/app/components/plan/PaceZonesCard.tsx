@@ -15,6 +15,7 @@ import { formatPaceForSystem, paceUnitAbbr } from "@/lib/units/format";
 interface PaceZonesCardProps {
   paceZones: PaceZones;
   powerZones?: PowerZones;
+  powerAnchored?: boolean;
 }
 
 const zoneColor: Record<string, string> = {
@@ -25,7 +26,7 @@ const zoneColor: Record<string, string> = {
   vo2: "bg-red-100 text-red-800",
 };
 
-export default function PaceZonesCard({ paceZones, powerZones }: PaceZonesCardProps) {
+export default function PaceZonesCard({ paceZones, powerZones, powerAnchored = false }: PaceZonesCardProps) {
   const { units } = useUnits();
   const formatPercentRange = (range: HeartRateZone["hrrPercent"]): string =>
     `${Math.round(range.min * 100)}-${Math.round(range.max * 100)}%`;
@@ -79,7 +80,7 @@ export default function PaceZonesCard({ paceZones, powerZones }: PaceZonesCardPr
     <div className="rounded-xl border border-gray-200 bg-white p-6 shadow-sm">
       <div className="mb-4 flex items-start justify-between gap-4">
         <div>
-          <h3 className="text-lg font-semibold text-gray-900">Pace Zones</h3>
+          <h3 className="text-lg font-semibold text-gray-900">Pace / Power Goals</h3>
           <p className="text-xs text-gray-500">Paces are keyed to the anticipated marathon time.</p>
         </div>
         {paceZones.vo2MaxEstimate && (
@@ -94,15 +95,16 @@ export default function PaceZonesCard({ paceZones, powerZones }: PaceZonesCardPr
           <div key={zone.name} className={`rounded-lg p-3 ${zone.color}`}>
             <div className="flex items-center justify-between">
               <span className="text-sm font-semibold">{zone.name}</span>
-              <span className="text-lg font-bold">{zone.pace}<span className="text-xs font-normal"> /{paceUnitAbbr(units)}</span></span>
+              <span className="text-lg font-bold"><span className="text-xs font-normal">Pace goal </span>{zone.pace}<span className="text-xs font-normal"> /{paceUnitAbbr(units)}</span></span>
             </div>
             {powerZones && (
               <p className="text-xs opacity-75">
-                {zone.name === "Easy"
+                Power goal {zone.name === "Easy"
                   ? `${powerZones.easy.min}–${powerZones.easy.max} W`
                   : `${zone.name === "Recovery" ? powerZones.easy.min : zone.name === "Marathon" ? powerZones.marathon : zone.name === "Threshold" ? powerZones.threshold : powerZones.vo2} W`}
               </p>
             )}
+            {!powerZones && <p className="text-xs opacity-75">Power goal not configured</p>}
             <p className="text-xs opacity-75">HR {formatHeartRateLine(zone.heartRate)}</p>
             {zone.heartRate.note && (
               <p className="text-xs opacity-75">{zone.heartRate.note}</p>
@@ -111,6 +113,8 @@ export default function PaceZonesCard({ paceZones, powerZones }: PaceZonesCardPr
           </div>
         ))}
       </div>
+      <p className="mt-3 text-xs text-gray-500">Cadence goal: 180 spm. Credit decreases linearly to zero at 170 spm.</p>
+      {powerZones && <p className="mt-2 text-xs text-gray-500">{powerAnchored ? "Runner-anchored power goals; measured sensor watts can be effort-scored." : "Estimated power goals; run effort is scored by grade-adjusted pace until runner power anchors are configured."}</p>}
     </div>
   );
 }

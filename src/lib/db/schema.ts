@@ -151,6 +151,8 @@ export const runActivities = pgTable("run_activities", {
   predictionExcluded: boolean("prediction_excluded").default(false).notNull(),
   raceClassification: varchar("race_classification", { length: 32 }),
   raceNotes: text("race_notes"),
+  // Score-tab effort override; null uses the matched workout, or Easy when unmatched.
+  effortOverride: varchar("effort_override", { length: 32 }),
   sampleCount: integer("sample_count").default(0).notNull(),
   samplesFetchedAt: timestamp("samples_fetched_at"),
   detailFetchStatus: varchar("detail_fetch_status", { length: 32 }),
