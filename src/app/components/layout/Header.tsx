@@ -69,6 +69,9 @@ export default function Header() {
           <Link href="/plan?view=list" className="hover:text-enduro-600">
             My Plans
           </Link>
+          <Link href="/runs" className="hover:text-enduro-600">
+            Runs
+          </Link>
           <Link href="/stats" className="hover:text-enduro-600">
             Stats
           </Link>
