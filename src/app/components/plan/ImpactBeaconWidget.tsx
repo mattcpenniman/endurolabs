@@ -33,30 +33,35 @@ interface ImpactBeaconWidgetProps {
 }
 
 const levelButtonClass: Record<ImpactBeaconLevel, string> = {
+  neutral: "bg-gray-100 text-gray-600 hover:bg-gray-200",
   red: "bg-red-600 text-white hover:bg-red-500",
   amber: "bg-amber-500 text-amber-950 hover:bg-amber-400",
   green: "bg-green-600 text-white hover:bg-green-500",
 };
 
 const levelDotClass: Record<ImpactBeaconLevel, string> = {
+  neutral: "bg-gray-400",
   red: "bg-red-200",
   amber: "bg-amber-100",
   green: "bg-green-200",
 };
 
 const levelPanelClass: Record<ImpactBeaconLevel, string> = {
+  neutral: "border-gray-200",
   red: "border-red-200",
   amber: "border-amber-200",
   green: "border-green-200",
 };
 
 const levelBadgeClass: Record<ImpactBeaconLevel, string> = {
+  neutral: "bg-gray-100 text-gray-600",
   red: "bg-red-50 text-red-700",
   amber: "bg-amber-50 text-amber-700",
   green: "bg-green-50 text-green-700",
 };
 
 const levelLabel: Record<ImpactBeaconLevel, string> = {
+  neutral: "Not started",
   red: "Behind plan",
   amber: "Watch items",
   green: "On track",
@@ -174,8 +179,8 @@ export default function ImpactBeaconWidget({
                         </span>
                       )}
                     </span>
-                    <span className={`shrink-0 rounded px-2 py-0.5 text-xs font-semibold ${directionClass[metric.direction]}`}>
-                      {directionLabel[metric.direction]}
+                    <span className={`shrink-0 rounded px-2 py-0.5 text-xs font-semibold ${!report.planStarted ? "bg-gray-100 text-gray-600" : directionClass[metric.direction]}`}>
+                      {!report.planStarted && metric.direction === "behind" ? "Below opening block" : directionLabel[metric.direction]}
                     </span>
                   </div>
                   <p className="mt-1 text-xs text-gray-500">

@@ -134,13 +134,13 @@ export default function ImpactBeaconCard({ planId, refreshToken = 0 }: ImpactBea
         </p>
       </div>
 
-      <div className={`mx-5 mt-5 rounded-lg p-4 ${report.beacon ? "bg-amber-50" : "bg-green-50"}`}>
+      <div className={`mx-5 mt-5 rounded-lg p-4 ${!report.planStarted ? "bg-gray-50" : report.beacon ? "bg-amber-50" : "bg-green-50"}`}>
         <div className="flex items-center gap-2">
-          <span className={`rounded px-2 py-0.5 text-xs font-bold uppercase tracking-wide ${report.beacon ? "bg-amber-100 text-amber-800" : "bg-green-100 text-green-800"}`}>
-            {report.beacon ? "Largest gap" : isOpeningBlock ? "Ready" : "On track"}
+          <span className={`rounded px-2 py-0.5 text-xs font-bold uppercase tracking-wide ${!report.planStarted ? "bg-gray-100 text-gray-600" : report.beacon ? "bg-amber-100 text-amber-800" : "bg-green-100 text-green-800"}`}>
+            {!report.planStarted ? "Not started" : report.beacon ? "Largest gap" : "On track"}
           </span>
         </div>
-        <p className={`mt-2 text-sm font-medium ${report.beacon ? "text-amber-900" : "text-green-900"}`}>
+        <p className={`mt-2 text-sm font-medium ${!report.planStarted ? "text-gray-700" : report.beacon ? "text-amber-900" : "text-green-900"}`}>
           {report.summary}
         </p>
         {report.beacon && (
@@ -212,8 +212,8 @@ export default function ImpactBeaconCard({ planId, refreshToken = 0 }: ImpactBea
             <p className="text-gray-700">{formatValue(metric.planned, metric.unit)}</p>
             <p className="text-gray-700">{formatValue(metric.actual, metric.unit)}</p>
             <div>
-              <span className={`rounded px-2 py-1 text-xs font-semibold ${directionClass[metric.direction]}`}>
-                {directionLabel[metric.direction]}
+              <span className={`rounded px-2 py-1 text-xs font-semibold ${!report.planStarted ? "bg-gray-100 text-gray-600" : directionClass[metric.direction]}`}>
+                {!report.planStarted && metric.direction === "behind" ? "Below opening block" : directionLabel[metric.direction]}
               </span>
               <p className="mt-2 text-xs text-gray-500">{formatPercent(metric.completionRatio)} of plan</p>
             </div>
