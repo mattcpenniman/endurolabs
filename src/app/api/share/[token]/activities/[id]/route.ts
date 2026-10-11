@@ -8,6 +8,7 @@ import { db } from "@/lib/db/client";
 import { activitySamples, plans, runActivities } from "@/lib/db/schema";
 import { downsampleActivitySamples, normalizeActivityCadence } from "@/lib/activities/activity-chart";
 import { buildActivityMileSplits } from "@/lib/activities/activity-splits";
+import { loadRunScores } from "@/lib/analytics/run-score-persistence";
 
 export async function GET(
   _request: Request,
@@ -20,12 +21,7 @@ export async function GET(
     .limit(1);
   if (!sharedPlan) return NextResponse.json({ error: "Shared plan not found" }, { status: 404 });
 
-  const [activity] = await db.select({
-    id: runActivities.id,
-    distanceMeters: runActivities.distanceMeters,
-    durationSeconds: runActivities.durationSeconds,
-    powerSource: runActivities.powerSource,
-  }).from(runActivities)
+  const [activity] = await db.select().from(runActivities)
     .where(and(eq(runActivities.id, id), eq(runActivities.planId, sharedPlan.id)))
     .limit(1);
   if (!activity) return NextResponse.json({ error: "Activity not found" }, { status: 404 });
@@ -55,5 +51,6 @@ export async function GET(
     cadence: normalizeActivityCadence(sample.cadence),
   }));
 
-  return NextResponse.json({ samples: downsampleActivitySamples(displaySamples), splits });
+  const runScore = (await loadRunScores([activity])).get(id) ?? null;
+  return NextResponse.json({ samples: downsampleActivitySamples(displaySamples), splits, runScore });
 }

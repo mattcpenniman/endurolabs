@@ -16,6 +16,7 @@ import {
   StoredGarminAuth,
 } from "@/lib/garmin/client";
 import { serializeRunActivity } from "@/lib/activities/serialize";
+import { loadRunScores } from "@/lib/analytics/run-score-persistence";
 
 export const runtime = "nodejs";
 
@@ -53,6 +54,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
       .orderBy(desc(runActivities.startTimeGmt))
       .limit(1000);
 
+    const scores = await loadRunScores(activities);
     return NextResponse.json({
       connected: connection?.status === "connected",
       mfaRequired: connection?.status === "mfa_required",
@@ -63,7 +65,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
       rememberMe: connection?.rememberMe ?? false,
       lastSyncAt: connection?.lastSyncAt?.toISOString() ?? null,
       lastError: connection?.lastError ?? null,
-      activities: activities.map(serializeRunActivity),
+      activities: activities.map((row) => ({ ...serializeRunActivity(row), runScore: scores.get(row.id) ?? null })),
     });
   } catch (error) {
     console.error("Failed to load Garmin integration:", error);

@@ -8,18 +8,14 @@ import { db } from "@/lib/db/client";
 import { activitySamples, runActivities } from "@/lib/db/schema";
 import { downsampleActivitySamples, normalizeActivityCadence } from "@/lib/activities/activity-chart";
 import { buildActivityMileSplits } from "@/lib/activities/activity-splits";
+import { loadRunScores } from "@/lib/analytics/run-score-persistence";
 
 export async function GET(
   _request: Request,
   context: { params: Promise<{ token: string; id: string }> },
 ): Promise<NextResponse> {
   const { token, id } = await context.params;
-  const [activity] = await db.select({
-    id: runActivities.id,
-    distanceMeters: runActivities.distanceMeters,
-    durationSeconds: runActivities.durationSeconds,
-    powerSource: runActivities.powerSource,
-  }).from(runActivities).where(and(
+  const [activity] = await db.select().from(runActivities).where(and(
     eq(runActivities.id, id),
     eq(runActivities.shareToken, token),
     eq(runActivities.eventType, "race"),
@@ -51,5 +47,6 @@ export async function GET(
     cadence: normalizeActivityCadence(sample.cadence),
   }));
 
-  return NextResponse.json({ samples: downsampleActivitySamples(displaySamples), splits });
+  const runScore = (await loadRunScores([activity])).get(id) ?? null;
+  return NextResponse.json({ samples: downsampleActivitySamples(displaySamples), splits, runScore });
 }

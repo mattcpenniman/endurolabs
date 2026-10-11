@@ -13,6 +13,7 @@ import { emptyDetailRetryAt } from "@/lib/garmin/detail-retry";
 import { computeActivityQualityScore } from "@/lib/analytics/activity-quality";
 import { recomputeActivityAnalytics, recomputeRaceExecution } from "@/lib/analytics/activity-summary-persistence";
 import { fetchActivityDetail } from "@/lib/garmin/client";
+import { recomputeRunScore } from "@/lib/analytics/run-score-persistence";
 import type { GarminConnectClient } from "garmin-connect-client";
 
 const INSERT_BATCH_SIZE = 500;
@@ -69,6 +70,7 @@ export async function upsertActivitySamples(activityId: string, samples: GarminA
   }).where(eq(runActivities.id, activityId));
   await recomputeActivityAnalytics(activityId);
   await recomputeRaceExecution(activityId);
+  await recomputeRunScore(activityId);
   return sampleCount;
 }
 

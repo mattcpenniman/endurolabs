@@ -3,6 +3,7 @@
 // ============================================================
 
 import type { TimeAtEffortSummary } from "@/lib/analytics/time-at-effort";
+import type { RunScore } from "@/lib/analytics/run-score";
 
 export interface RunActivity {
   id: string;
@@ -35,6 +36,7 @@ export interface RunActivity {
   plannedWorkoutId: string | null;
   matchConfidence: "high" | "medium" | "low" | null;
   qualityScore?: number | null;
+  runScore?: RunScore | null;
   excludedFromAnalytics?: boolean;
   predictionExcluded?: boolean;
   raceClassification?: string | null;
@@ -125,4 +127,5 @@ export interface ActivityDetailResponse {
   samples: ActivityChartSample[];
   splits: ActivitySplit[];
   timeAtEffort?: TimeAtEffortSummary | null;
+  runScore?: RunScore | null;
 }

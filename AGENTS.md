@@ -85,6 +85,15 @@ src/
 - The summary recompute script only needs `DATABASE_URL`; unlike Garmin history/detail scripts, it does not decrypt or update Garmin sessions.
 - Garmin sync owns `run_activities.average_power`; calculated summary power is stored independently in `calculated_power`. After each summary sync, the athlete-specific speed model refreshes `calculated_power` for every valid Garmin activity. API serializers prefer Garmin power and fall back to calculated power.
 
+## Run Execution Scores
+
+- `run-score-v1` (`src/lib/analytics/run-score.ts`) is an explainable execution coaching heuristic, not a validated readiness/fitness metric. Fixed weights: cadence 30%, prescribed effort 50%, planned distance 20%. Missing components are omitted and weights renormalized; badge/summary partial counts must stay visible.
+- Cadence normalizes Garmin single-leg values, targets 180 ±5 spm, and falls linearly to zero at 35 spm deviation. It uses time-weighted trace values when coverage passes, otherwise provider summary cadence.
+- Effort grades measured sensor watts only against explicitly runner-anchored plan power (never modeled watts). Otherwise it uses Minetti grade-adjusted pace, deriving slope from a >=30-second elevation/speed window. No per-sample distance/grade columns are required. Effort needs >=2 minutes and >=50% coverage; intervals >30 seconds and stationary intervals are omitted.
+- Work/recovery targets follow prescribed segment times, including repeated-interval recoveries; the UI labels this approximation. Full effort credit is inside the prescribed band; zero at 25% outside it. Distance earns full credit within 5% of the matched workout, zero at 50% deviation. Unmatched runs have no effort/distance target.
+- Scores persist in `activity_analytics`, unique by activity/version. `loadRunScores` fingerprints summary/detail metadata plus the matched workout and zones so plan edits and re-matching refresh the cache. Detail ingestion recomputes scores. Week and phase summaries are equal-run means, omitting missing scores and `excludedFromAnalytics` runs; they display scored/total and partial counts.
+- DB-only historical backfill: `npm run scores:backfill -- [--email runner@example.com] [--apply] [--json]`. Default is preview of all stored runs; `--apply` upserts without contacting Garmin. The plan run rows and Run card Score tab expose the result; summary-only runs can open the card.
+
 ## Modeled Missing Power
 
 - Newport Marathon 2026 has 21 measured-power activities from April 1-19, 2026 and 206 earlier null-power activities from November 17, 2025 through April 1, 2026.
