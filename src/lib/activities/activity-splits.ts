@@ -1,5 +1,5 @@
 // ============================================================
-// EnduroLab - Recorded Activity Mile Splits
+// EnduroLab - Recorded Activity Distance Splits
 // ============================================================
 // Reconstructs cumulative distance from speed because real Garmin
 // detail commonly omits per-sample distance. The reconstructed trace
@@ -9,6 +9,14 @@ import type { ActivityChartSample, ActivitySplit } from "@/lib/activities/models
 import { normalizeActivityCadence } from "@/lib/activities/activity-chart";
 
 const METERS_PER_MILE = 1609.344;
+export const ACTIVITY_SPLIT_LENGTHS = {
+  mile: { label: "1 mile", meters: METERS_PER_MILE },
+  kilometer: { label: "1 km", meters: 1000 },
+  half_mile: { label: "0.5 mile", meters: METERS_PER_MILE / 2 },
+  quarter_mile: { label: "0.25 mile", meters: METERS_PER_MILE / 4 },
+} as const;
+export type ActivitySplitLength = keyof typeof ACTIVITY_SPLIT_LENGTHS;
+export type ActivitySplitOptions = Record<ActivitySplitLength, ActivitySplit[]>;
 const MAX_RUNNING_SPEED_METERS_PER_SECOND = 12;
 const MAX_ELEVATION_STEP_METERS = 35;
 const MAX_PLAUSIBLE_GRADE = 0.25;
@@ -18,6 +26,7 @@ export interface ActivitySplitInput {
   durationSeconds: number;
   hasMeasuredPower: boolean;
   samples: ActivityChartSample[];
+  splitLength?: ActivitySplitLength;
 }
 
 interface TracePoint {
@@ -67,8 +76,8 @@ function elapsedAtDistance(trace: TracePoint[], targetMeters: number): number {
   return trace.at(-1)?.sample.elapsedSeconds ?? 0;
 }
 
-/** Builds one-mile splits plus a final partial split from recorded activity detail. */
-export function buildActivityMileSplits(input: ActivitySplitInput): ActivitySplit[] {
+/** Builds distance splits plus a final partial split from recorded activity detail. */
+export function buildActivitySplits(input: ActivitySplitInput): ActivitySplit[] {
   if (!Number.isFinite(input.summaryDistanceMeters) || input.summaryDistanceMeters <= 0) return [];
 
   const samples = [...input.samples]
@@ -95,7 +104,8 @@ export function buildActivityMileSplits(input: ActivitySplitInput): ActivitySpli
   for (const point of trace) point.distanceMeters *= distanceScale;
 
   const boundaries: number[] = [];
-  for (let meters = METERS_PER_MILE; meters < input.summaryDistanceMeters; meters += METERS_PER_MILE) {
+  const splitMeters = ACTIVITY_SPLIT_LENGTHS[input.splitLength ?? "mile"].meters;
+  for (let meters = splitMeters; meters < input.summaryDistanceMeters; meters += splitMeters) {
     boundaries.push(meters);
   }
   boundaries.push(input.summaryDistanceMeters);
@@ -178,4 +188,19 @@ export function buildActivityMileSplits(input: ActivitySplitInput): ActivitySpli
     startElapsed = endElapsed;
     return split;
   });
+}
+
+/** Retains the one-mile default for existing callers. */
+export function buildActivityMileSplits(input: ActivitySplitInput): ActivitySplit[] {
+  return buildActivitySplits({ ...input, splitLength: "mile" });
+}
+
+/** Calculate before downsampling so every display length uses the full trace. */
+export function buildActivitySplitOptions(input: ActivitySplitInput): ActivitySplitOptions {
+  return {
+    mile: buildActivitySplits({ ...input, splitLength: "mile" }),
+    kilometer: buildActivitySplits({ ...input, splitLength: "kilometer" }),
+    half_mile: buildActivitySplits({ ...input, splitLength: "half_mile" }),
+    quarter_mile: buildActivitySplits({ ...input, splitLength: "quarter_mile" }),
+  };
 }

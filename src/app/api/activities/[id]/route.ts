@@ -8,7 +8,7 @@ import { getCurrentUser } from "@/lib/auth";
 import { db } from "@/lib/db/client";
 import { activitySamples, plans, runActivities } from "@/lib/db/schema";
 import { downsampleActivitySamples, normalizeActivityCadence } from "@/lib/activities/activity-chart";
-import { buildActivityMileSplits } from "@/lib/activities/activity-splits";
+import { buildActivitySplitOptions } from "@/lib/activities/activity-splits";
 import { summarizeTimeAtEffort } from "@/lib/analytics/time-at-effort";
 import type { MarathonPlan } from "@/lib/training/models";
 import { loadRunScores } from "@/lib/analytics/run-score-persistence";
@@ -57,7 +57,7 @@ export async function GET(
 
   const hasMeasuredPower = !activity.powerSource.startsWith("estimated_");
 
-  const splits = buildActivityMileSplits({
+  const splitOptions = buildActivitySplitOptions({
     summaryDistanceMeters: activity.distanceMeters,
     durationSeconds: activity.durationSeconds,
     hasMeasuredPower,
@@ -86,7 +86,7 @@ export async function GET(
   }));
 
   const runScore = (await loadRunScores([activity])).get(id) ?? null;
-  return NextResponse.json({ samples: downsampleActivitySamples(displaySamples), splits, timeAtEffort, runScore });
+  return NextResponse.json({ samples: downsampleActivitySamples(displaySamples), splits: splitOptions.mile, splitOptions, timeAtEffort, runScore });
 }
 
 export async function PATCH(

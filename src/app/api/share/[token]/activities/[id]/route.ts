@@ -7,7 +7,7 @@ import { and, asc, eq } from "drizzle-orm";
 import { db } from "@/lib/db/client";
 import { activitySamples, plans, runActivities } from "@/lib/db/schema";
 import { downsampleActivitySamples, normalizeActivityCadence } from "@/lib/activities/activity-chart";
-import { buildActivityMileSplits } from "@/lib/activities/activity-splits";
+import { buildActivitySplitOptions } from "@/lib/activities/activity-splits";
 import { loadRunScores } from "@/lib/analytics/run-score-persistence";
 
 export async function GET(
@@ -40,7 +40,7 @@ export async function GET(
     .where(eq(activitySamples.activityId, id))
     .orderBy(asc(activitySamples.elapsedSeconds));
 
-  const splits = buildActivityMileSplits({
+  const splitOptions = buildActivitySplitOptions({
     summaryDistanceMeters: activity.distanceMeters,
     durationSeconds: activity.durationSeconds,
     hasMeasuredPower: !activity.powerSource.startsWith("estimated_"),
@@ -52,5 +52,5 @@ export async function GET(
   }));
 
   const runScore = (await loadRunScores([activity])).get(id) ?? null;
-  return NextResponse.json({ samples: downsampleActivitySamples(displaySamples), splits, runScore });
+  return NextResponse.json({ samples: downsampleActivitySamples(displaySamples), splits: splitOptions.mile, splitOptions, runScore });
 }
