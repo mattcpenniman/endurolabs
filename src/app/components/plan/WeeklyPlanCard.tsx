@@ -1033,7 +1033,6 @@ export default function WeeklyPlanCard({
               </span>
             )}
             <span>Long {formatMiles(week.longRunDistance)} mi</span>
-            {weekActivities.length > 0 && <RunScoreSummaryBadge summary={summarizeRunScores(weekActivities)} />}
             <span className="rounded bg-green-50 px-2 py-1 text-green-700">
               Easy {formatMiles(week.intensityDistribution.easy)} mi
             </span>
@@ -1063,6 +1062,10 @@ export default function WeeklyPlanCard({
         )}
         <span className={`text-gray-400 transition-transform ${isExpanded ? "rotate-180" : ""}`}>▼</span>
       </button>
+
+      <div className="px-4 pb-3">
+        <RunScoreSummaryBadge label={`Week ${week.weekNumber}`} summary={summarizeRunScores(weekActivities)} />
+      </div>
 
       {/* Expanded content */}
       {isExpanded && (

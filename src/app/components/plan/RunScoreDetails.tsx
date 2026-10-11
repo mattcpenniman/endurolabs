@@ -12,12 +12,37 @@ export function RunScoreBadge({ score }: { score?: RunScore | null }): React.Rea
   </span>;
 }
 
-export function RunScoreSummaryBadge({ summary }: { summary: RunScoreSummary }): React.ReactNode {
-  return <span className="rounded-lg bg-white px-3 py-2 text-xs text-enduro-800 shadow-sm"
-    title="Equal-run average; missing scores and analytics-excluded runs are omitted.">
-    Run score {summary.score === null ? "—" : `${summary.score.toFixed(1)}/10`} · {summary.scored}/{summary.total} runs
-    {summary.partial > 0 && ` · ${summary.partial} partial`}
-  </span>;
+export function RunScoreSummaryBadge({ summary, label }: { summary: RunScoreSummary; label: string }): React.ReactNode {
+  const [isOpen, setIsOpen] = React.useState(false);
+  const panelId = React.useId();
+  return <div className="text-left">
+    <button type="button" onClick={() => setIsOpen((open) => !open)} aria-expanded={isOpen} aria-controls={panelId}
+      aria-label={`${label} average run score: ${summary.score === null ? "unavailable" : `${summary.score.toFixed(1)} out of 10`}. ${isOpen ? "Hide" : "Show"} breakdown`}
+      className="inline-flex flex-wrap items-center gap-1.5 rounded-lg bg-white px-3 py-2 text-xs text-enduro-800 shadow-sm hover:bg-enduro-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-enduro-600">
+      <svg aria-hidden="true" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.5" className="h-4 w-4">
+        <path d="M4 16V9m6 7V4m6 12v-6M2 17h16" />
+      </svg>
+      <span>Avg run score {summary.score === null ? "—" : `${summary.score.toFixed(1)}/10`} · {summary.scored}/{summary.total} runs
+        {summary.partial > 0 && ` · ${summary.partial} partial`}</span>
+      <span aria-hidden="true">{isOpen ? "▴" : "▾"}</span>
+    </button>
+    {isOpen && <section id={panelId} aria-label={`${label} run score breakdown`} className="mt-2 space-y-3 rounded-xl border border-enduro-100 bg-white p-4">
+      <h4 className="text-sm font-semibold text-gray-900">{label} · Average run score breakdown</h4>
+      <div className="grid gap-3 sm:grid-cols-3">
+        {summary.components.map((component) => <div key={component.key} className="rounded-lg bg-gray-50 p-3">
+          <p className="text-xs font-semibold text-gray-700">{component.label} · {component.weight}%</p>
+          <p className="mt-1 text-lg font-bold text-enduro-800">{component.score === null ? "—" : `${component.score.toFixed(1)}/10`}</p>
+          <p className="text-xs text-gray-500">{component.scored}/{summary.total} runs with this component</p>
+        </div>)}
+      </div>
+      <p className="text-xs leading-relaxed text-gray-600">
+        Equal-run average of {summary.scored} scored runs; {summary.total - summary.scored} unscored and {summary.partial} partial.
+        Missing scores and analytics-excluded runs are omitted. Component averages use only available values.
+        Each run renormalizes its available weights, so component averages may not combine to the overall average.
+      </p>
+      <p className="text-xs text-gray-500">Execution coaching heuristic, not a validated fitness or race-readiness metric.</p>
+    </section>}
+  </div>;
 }
 
 export default function RunScoreDetails({ score }: { score?: RunScore | null }): React.ReactNode {
