@@ -11,6 +11,7 @@ import { downsampleActivitySamples, normalizeActivityCadence } from "@/lib/activ
 import { buildActivityMileSplits } from "@/lib/activities/activity-splits";
 import { summarizeTimeAtEffort } from "@/lib/analytics/time-at-effort";
 import type { MarathonPlan } from "@/lib/training/models";
+import { loadRunScores } from "@/lib/analytics/run-score-persistence";
 
 /** Legacy plans may store plan_data as a JSON string; normalize before use. */
 function normalizePlanData(value: unknown): MarathonPlan | null {
@@ -33,13 +34,7 @@ export async function GET(
   if (!user) return NextResponse.json({ error: "Authentication required" }, { status: 401 });
 
   const { id } = await context.params;
-  const [activity] = await db.select({
-    id: runActivities.id,
-    distanceMeters: runActivities.distanceMeters,
-    durationSeconds: runActivities.durationSeconds,
-    powerSource: runActivities.powerSource,
-    planId: runActivities.planId,
-  })
+  const [activity] = await db.select()
     .from(runActivities)
     .where(and(eq(runActivities.id, id), eq(runActivities.userId, user.id)))
     .limit(1);
@@ -89,7 +84,8 @@ export async function GET(
     cadence: normalizeActivityCadence(sample.cadence),
   }));
 
-  return NextResponse.json({ samples: downsampleActivitySamples(displaySamples), splits, timeAtEffort });
+  const runScore = (await loadRunScores([activity])).get(id) ?? null;
+  return NextResponse.json({ samples: downsampleActivitySamples(displaySamples), splits, timeAtEffort, runScore });
 }
 
 export async function PATCH(

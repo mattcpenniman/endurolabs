@@ -27,6 +27,8 @@ import LongRunProgressionChart from "@/app/components/charts/LongRunProgressionC
 import IntensityDistributionChart from "@/app/components/charts/IntensityDistributionChart";
 import RunTrendChart from "@/app/components/charts/RunTrendChart";
 import GarminActivityMapCard from "@/app/components/plan/GarminActivityMapCard";
+import { RunScoreSummaryBadge } from "@/app/components/plan/RunScoreDetails";
+import { summarizeRunScores } from "@/lib/analytics/run-score";
 import { GarminConnectionStatus } from "@/lib/activities/models";
 import { generateRaceDayPlan } from "@/lib/training/race-day-plan";
 import { calculatePaceZones, calculatePowerZones } from "@/lib/training/zone-calculator";
@@ -1682,7 +1684,7 @@ function PlanPageContent(): React.ReactNode {
     : 0;
   const planActivities = garminConnection.activities.filter((activity) => activity.planId === plan.id);
   const runMapActivity = planActivities.find(
-    (activity) => activity.id === requestedRunMapActivityId && (activity.sampleCount ?? 0) > 0
+    (activity) => activity.id === requestedRunMapActivityId
   ) ?? null;
   const configuredAppUrl = process.env.NEXT_PUBLIC_APP_URL?.replace(/\/$/, "");
   const shareUrl = shareLinkUrl ?? (shareToken
@@ -1919,6 +1921,7 @@ function PlanPageContent(): React.ReactNode {
                               <p className="mt-1 max-w-3xl text-sm text-gray-700">{phase.description}</p>
                             </div>
                             <div className="grid gap-2 text-xs text-gray-700 sm:grid-cols-2 md:min-w-72 md:grid-cols-1">
+                              <RunScoreSummaryBadge summary={summarizeRunScores(planActivities.filter((activity) => activity.weekNumber !== null && activity.weekNumber >= phase.weekRange[0] && activity.weekNumber <= phase.weekRange[1]))} />
                               {phase.targetMileage && (
                                 <span className="rounded-lg bg-white px-3 py-2 shadow-sm">Mileage: {phase.targetMileage}</span>
                               )}

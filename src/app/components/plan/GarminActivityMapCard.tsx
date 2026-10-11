@@ -14,6 +14,7 @@ import GarminActivityLeafletMap from "@/app/components/plan/GarminActivityLeafle
 import { useUnits } from "@/app/components/units/UnitsProvider";
 import { buildSharedRunUrl } from "@/lib/plan-url";
 import { toBlob } from "html-to-image";
+import RunScoreDetails, { RunScoreBadge } from "./RunScoreDetails";
 import {
   elevationMetersForDisplay,
   elevationUnitAbbr,
@@ -110,8 +111,7 @@ export default function GarminActivityMapCard({
 }: GarminActivityMapCardProps): React.ReactNode {
   const cardRef = useRef<HTMLDivElement | null>(null);
   const { units } = useUnits();
-  const eligible = activities
-    .filter((activity) => (activity.sampleCount ?? 0) > 0)
+  const eligible = [...activities]
     .sort((a, b) => b.startTimeGmt.localeCompare(a.startTimeGmt));
 
   const [localActivityId, setLocalActivityId] = useState<string | null>(
@@ -119,6 +119,7 @@ export default function GarminActivityMapCard({
   );
   const selectedActivityId = activityId === undefined ? localActivityId : activityId;
   const [selectedIndex, setSelectedIndex] = useState<number | null>(null);
+  const [activeTab, setActiveTab] = useState<"run" | "score">("run");
   const [imageStatus, setImageStatus] = useState<"idle" | "copying" | "copied" | "downloaded" | "error">("idle");
   const [imageError, setImageError] = useState<string | null>(null);
   const [shareStatus, setShareStatus] = useState<"idle" | "copying" | "copied" | "error">("idle");
@@ -239,7 +240,7 @@ export default function GarminActivityMapCard({
         <CardHeader />
         <div className="p-5">
           <p className="rounded-lg border border-dashed border-gray-300 bg-gray-50 px-4 py-3 text-sm text-gray-600">
-            No runs with stored sample detail yet. Import activity detail from{" "}
+            No stored runs yet. Import activities from{" "}
             <a
               href="/profile#garmin-detail-sync"
               className="font-medium text-enduro-700 underline"
@@ -294,7 +295,17 @@ export default function GarminActivityMapCard({
         </div>}
       </div>
 
-      <div className={imageStatus === "copying" ? "space-y-5 p-5" : "grid gap-5 p-5 lg:grid-cols-5"}>
+      <div className="flex gap-2 border-b border-gray-100 px-5 py-2" role="tablist" aria-label="Run details">
+        {(["run", "score"] as const).map((tab) => <button key={tab} type="button" role="tab"
+          aria-selected={activeTab === tab} aria-controls={`run-card-${tab}-panel`} id={`run-card-${tab}-tab`}
+          onClick={() => setActiveTab(tab)} className={`rounded-lg px-4 py-2 text-sm font-semibold ${activeTab === tab ? "bg-enduro-100 text-enduro-800" : "text-gray-500 hover:bg-gray-50"}`}>
+          {tab === "run" ? "Route & splits" : "Score"}
+        </button>)}
+      </div>
+      {activeTab === "score" && <div role="tabpanel" id="run-card-score-panel" aria-labelledby="run-card-score-tab">
+        <RunScoreDetails score={selectedActivity?.runScore ?? detail?.runScore} />
+      </div>}
+      {activeTab === "run" && <div role="tabpanel" id="run-card-run-panel" aria-labelledby="run-card-run-tab" className={imageStatus === "copying" ? "space-y-5 p-5" : "grid gap-5 p-5 lg:grid-cols-5"}>
         {/* Route map + summary */}
         <div className={imageStatus === "copying" ? undefined : "lg:col-span-3"}>
           <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1 text-xs text-gray-500">
@@ -304,6 +315,7 @@ export default function GarminActivityMapCard({
                   <strong className="text-sm text-gray-900">{selectedActivity.activityName}</strong>
                   <span>{selectedActivity.localDate}</span>
                   <span>{selectedActivity.distanceMiles.toFixed(2)} mi</span>
+                  <RunScoreBadge score={selectedActivity.runScore ?? detail?.runScore} />
                   {selectedActivity.durationSeconds > 0 && <span>{formatElapsed(selectedActivity.durationSeconds)}</span>}
                 </>
               )}
@@ -418,7 +430,7 @@ export default function GarminActivityMapCard({
             />
           </div>
         )}
-      </div>
+      </div>}
       {imageError && (
         <p data-export-ignore="true" role="alert" className="border-t border-red-100 bg-red-50 px-5 py-2 text-xs text-red-700">
           Image export failed: {imageError}
@@ -509,7 +521,7 @@ function CardHeader(): React.ReactNode {
     <div className="flex items-center gap-2">
       <span className="flex h-8 w-8 items-center justify-center rounded-full bg-sky-950 text-xs font-black text-white">G</span>
       <div>
-        <h3 className="text-sm font-semibold text-gray-900">Garmin Run Map</h3>
+        <h3 className="text-sm font-semibold text-gray-900">Run</h3>
         <p className="text-xs text-gray-500">Route and per-minute sample data for your runs.</p>
       </div>
     </div>

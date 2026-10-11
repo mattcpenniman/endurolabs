@@ -14,6 +14,8 @@ import { DailyLog, WeeklyPlan, DailyPlan, Workout, WorkoutType, RunnerProfile } 
 import { isWeekFullyLogged } from "@/lib/training/progress-tracker";
 import { formatPlanDate } from "@/lib/training/date-utils";
 import { RunActivity } from "@/lib/activities/models";
+import { summarizeRunScores } from "@/lib/analytics/run-score";
+import { RunScoreBadge, RunScoreSummaryBadge } from "./RunScoreDetails";
 import { useUnits } from "@/app/components/units/UnitsProvider";
 import {
   formatElevationGain,
@@ -1031,6 +1033,7 @@ export default function WeeklyPlanCard({
               </span>
             )}
             <span>Long {formatMiles(week.longRunDistance)} mi</span>
+            {weekActivities.length > 0 && <RunScoreSummaryBadge summary={summarizeRunScores(weekActivities)} />}
             <span className="rounded bg-green-50 px-2 py-1 text-green-700">
               Easy {formatMiles(week.intensityDistribution.easy)} mi
             </span>
@@ -1250,6 +1253,7 @@ export default function WeeklyPlanCard({
                         <span className="rounded bg-slate-100 px-2 py-1">
                           Actual {formatMiles(dayActualMileage)} mi
                         </span>
+                        {dayActivities.map((activity) => <RunScoreBadge key={activity.id} score={activity.runScore} />)}
                         {collapsedWeekToDateSummary && (
                           <>
                             <span className="rounded bg-blue-50 px-2 py-1 text-blue-700">
@@ -1284,9 +1288,9 @@ export default function WeeklyPlanCard({
                               && activity.dayOfWeek === day.dayOfWeek
                               && activity.plannedWorkoutId === entry.plannedWorkoutId
                             )
-                          : undefined;
+                          : entry.log?.mergedActivityId ? activities.find((activity) => activity.id === entry.log?.mergedActivityId) : undefined;
                         const canViewRunMap = Boolean(
-                          onActivityClick && syncedActivity && (syncedActivity.sampleCount ?? 0) > 0
+                          onActivityClick && syncedActivity
                         );
                         const defaultActualMileage = syncedActivity?.distanceMiles ?? entry.plannedMileage;
                         const draft = runDrafts[entry.runId] ?? createDefaultRunDraft(defaultActualMileage);
@@ -1389,6 +1393,7 @@ export default function WeeklyPlanCard({
                                 <div className="flex flex-wrap items-center gap-2">
                                   <span className="rounded-full bg-sky-950 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-white">Garmin synced</span>
                                   <span className="text-xs font-semibold text-sky-950">{syncedActivity.activityName}</span>
+                                  <RunScoreBadge score={syncedActivity.runScore} />
                                   <span className="text-[10px] uppercase tracking-wide text-sky-700">{syncedActivity.matchConfidence} match</span>
                                 </div>
                                 <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs text-sky-900">
@@ -1401,7 +1406,7 @@ export default function WeeklyPlanCard({
                                 </div>
                                 {canViewRunMap && (
                                   <p className="mt-2 text-[11px] font-medium text-sky-800">
-                                    View run map →
+                                    View run details →
                                   </p>
                                 )}
                               </div>
@@ -1562,6 +1567,16 @@ export default function WeeklyPlanCard({
                         );
                       })
                       )}
+                      {dayActivities.filter((activity) => !runEntries.some((entry) =>
+                        (activity.plannedWorkoutId !== null && entry.plannedWorkoutId === activity.plannedWorkoutId)
+                        || entry.log?.mergedActivityId === activity.id
+                      )).map((activity) => (
+                        <button key={activity.id} type="button" onClick={() => onActivityClick?.(activity.id)}
+                          className="flex w-full flex-wrap items-center gap-3 rounded-lg border border-sky-100 bg-sky-50 p-3 text-left text-xs text-sky-900">
+                          <span className="font-semibold">{activity.activityName}</span><span>{formatMiles(activity.distanceMiles)} mi</span>
+                          <RunScoreBadge score={activity.runScore} /><span className="ml-auto">View run details →</span>
+                        </button>
+                      ))}
                       {!weekIsFullyLogged && !runEntries.some((entry) => entry.isAdditionalRun && !entry.log) && !runEntries.some((entry) => entry.log) && (
                         <button
                           type="button"
