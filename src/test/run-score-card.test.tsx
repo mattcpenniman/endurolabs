@@ -5,6 +5,7 @@ import GarminActivityMapCard from "@/app/components/plan/GarminActivityMapCard";
 import type { RunActivity } from "@/lib/activities/models";
 import { buildRunScore, summarizeRunScores } from "@/lib/analytics/run-score";
 import { RunScoreSummaryBadge } from "@/app/components/plan/RunScoreDetails";
+import { buildActivitySplitOptions } from "@/lib/activities/activity-splits";
 
 vi.mock("@/app/components/plan/GarminActivityLeafletMap", () => ({ default: () => <div>Map</div> }));
 function activity(id: string, cadence: number | null): RunActivity {
@@ -76,6 +77,36 @@ describe("Run card score tab", () => {
     await act(async () => [...container.querySelectorAll<HTMLButtonElement>('[role="tab"]')].find((button) => button.textContent === "Score")!.click());
     expect(container.querySelector('select[aria-label="Target effort"]')).toBeNull();
     expect(container.textContent).toContain("Pace / power goals · Easy");
+  });
+
+  it.each(["/api/activities", "/api/run/split-token/activities"])("changes split analytics locally for %s", async (prefix) => {
+    const splitOptions = buildActivitySplitOptions({
+      summaryDistanceMeters: 1609.344 * 2,
+      durationSeconds: 960,
+      hasMeasuredPower: true,
+      samples: [0, 480, 960].map((elapsedSeconds) => ({
+        elapsedSeconds, speedMetersPerSecond: 3.5, heartRate: 140,
+        power: 300, cadence: 90, elevationMeters: 100,
+      })),
+    });
+    const fetcher = vi.fn(async () => ({ ok: true, json: async () => ({
+      samples: [], splits: splitOptions.mile, splitOptions,
+    }) }));
+    vi.stubGlobal("fetch", fetcher);
+    await act(async () => root.render(<GarminActivityMapCard activities={[activity(`splits-${prefix}`, 180)]} detailUrlPrefix={prefix} />));
+    const selector = container.querySelector<HTMLSelectElement>('select[aria-label="Split length"]')!;
+    expect(selector.value).toBe("mile");
+    expect([...selector.options].map((option) => option.text)).toEqual(["1 mile", "1 km", "0.5 mile", "0.25 mile"]);
+    expect(container.querySelectorAll("tbody tr")).toHaveLength(2);
+    for (const [length, count] of [["kilometer", 4], ["half_mile", 4], ["quarter_mile", 8]] as const) {
+      await act(async () => { selector.value = length; selector.dispatchEvent(new Event("change", { bubbles: true })); });
+      expect(container.querySelectorAll("tbody tr")).toHaveLength(count);
+      expect(container.querySelector("tbody")!.textContent).toContain("300 W");
+    }
+    expect(container.querySelector("tbody")!.textContent).not.toContain("(0.25 mi)");
+    await act(async () => { selector.value = "mile"; selector.dispatchEvent(new Event("change", { bubbles: true })); });
+    expect(container.querySelectorAll("tbody tr")).toHaveLength(2);
+    expect(fetcher).toHaveBeenCalledTimes(1);
   });
 
   it.each(["Week 1", "Base phase"])("opens and closes the %s score breakdown from the icon", async (label) => {

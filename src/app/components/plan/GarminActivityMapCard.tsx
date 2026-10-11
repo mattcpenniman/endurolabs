@@ -10,6 +10,7 @@
 
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import type { ActivityDetailResponse, ActivitySplit, RunActivity } from "@/lib/activities/models";
+import { ACTIVITY_SPLIT_LENGTHS, type ActivitySplitLength } from "@/lib/activities/activity-splits";
 import GarminActivityLeafletMap from "@/app/components/plan/GarminActivityLeafletMap";
 import { useUnits } from "@/app/components/units/UnitsProvider";
 import { buildSharedRunUrl } from "@/lib/plan-url";
@@ -123,6 +124,7 @@ export default function GarminActivityMapCard({
   const selectedActivityId = activityId === undefined ? localActivityId : activityId;
   const [selectedIndex, setSelectedIndex] = useState<number | null>(null);
   const [activeTab, setActiveTab] = useState<"run" | "score">("run");
+  const [splitLength, setSplitLength] = useState<ActivitySplitLength>("mile");
   const [imageStatus, setImageStatus] = useState<"idle" | "copying" | "copied" | "downloaded" | "error">("idle");
   const [imageError, setImageError] = useState<string | null>(null);
   const [shareStatus, setShareStatus] = useState<"idle" | "copying" | "copied" | "error">("idle");
@@ -147,7 +149,7 @@ export default function GarminActivityMapCard({
     onScoreChange?.(id, score);
   };
   const samples = detail?.samples ?? null;
-  const splits = detail?.splits ?? [];
+  const splits = detail?.splitOptions?.[splitLength] ?? (splitLength === "mile" ? detail?.splits ?? [] : []);
 
   const elevationDomain = useMemo(() => {
     if (!samples) return null;
@@ -443,8 +445,10 @@ export default function GarminActivityMapCard({
 
         {selectedActivity && detail && (
           <div className={imageStatus === "copying" ? undefined : "lg:col-span-5"}>
-            <MileSplits
+            <DistanceSplits
               splits={splits}
+              splitLength={splitLength}
+              onSplitLengthChange={setSplitLength}
               hasMeasuredPower={!selectedActivity.powerSource?.startsWith("estimated_")}
               exporting={imageStatus === "copying"}
               units={units}
@@ -461,13 +465,17 @@ export default function GarminActivityMapCard({
   );
 }
 
-function MileSplits({
+function DistanceSplits({
   splits,
+  splitLength,
+  onSplitLengthChange,
   hasMeasuredPower,
   exporting,
   units,
 }: {
   splits: ActivitySplit[];
+  splitLength: ActivitySplitLength;
+  onSplitLengthChange: (length: ActivitySplitLength) => void;
   hasMeasuredPower: boolean;
   exporting: boolean;
   units: UnitSystem;
@@ -476,10 +484,21 @@ function MileSplits({
     <section className="overflow-hidden rounded-lg border border-gray-200">
       <div className="flex items-baseline justify-between gap-3 border-b border-gray-200 bg-slate-50 px-4 py-3">
         <div>
-          <h4 className="text-xs font-semibold uppercase tracking-wide text-gray-700">Mile splits</h4>
+          <h4 className="text-xs font-semibold uppercase tracking-wide text-gray-700">Splits · {ACTIVITY_SPLIT_LENGTHS[splitLength].label}</h4>
           <p className="mt-0.5 text-[11px] text-gray-500">Calculated from the full recorded trace.</p>
         </div>
-        <span className="text-[10px] text-gray-400">Elevation: gain / loss</span>
+        <div className="flex flex-wrap items-center gap-3">
+          {!exporting && <label className="text-xs text-gray-600">
+            Split length
+            <select aria-label="Split length" value={splitLength} onChange={(event) => onSplitLengthChange(event.target.value as ActivitySplitLength)}
+              className="ml-2 rounded-lg border border-gray-300 bg-white px-2 py-1.5 text-xs text-gray-900">
+              {(Object.keys(ACTIVITY_SPLIT_LENGTHS) as ActivitySplitLength[]).map((length) => (
+                <option key={length} value={length}>{ACTIVITY_SPLIT_LENGTHS[length].label}</option>
+              ))}
+            </select>
+          </label>}
+          <span className="text-[10px] text-gray-400">Elevation: gain / loss</span>
+        </div>
       </div>
       {splits.length === 0 ? (
         <p className="px-4 py-5 text-sm text-gray-500">
@@ -490,7 +509,7 @@ function MileSplits({
           <table className="w-full min-w-[690px] text-left text-xs">
             <thead className="bg-gray-50 text-[10px] uppercase tracking-wide text-gray-500">
               <tr>
-                <th className="px-3 py-2 font-medium">Mile</th>
+                <th className="px-3 py-2 font-medium">{splitLength === "mile" ? "Mile" : splitLength === "kilometer" ? "Km" : "Segment"}</th>
                 <th className="px-3 py-2 font-medium">Split</th>
                 <th className="px-3 py-2 font-medium">Pace</th>
                 <th className="px-3 py-2 font-medium">Avg HR</th>
@@ -505,8 +524,10 @@ function MileSplits({
                 <tr key={split.number} className="tabular-nums text-gray-700">
                   <td className="px-3 py-2.5 font-semibold text-gray-900">
                     {split.number}
-                    {split.distanceMiles < 0.995 && (
-                      <span className="ml-1 font-normal text-gray-400">({split.distanceMiles.toFixed(2)} mi)</span>
+                    {split.distanceMiles * METERS_PER_MILE < ACTIVITY_SPLIT_LENGTHS[splitLength].meters * 0.995 && (
+                      <span className="ml-1 font-normal text-gray-400">({splitLength === "kilometer"
+                        ? `${(split.distanceMiles * METERS_PER_MILE / 1000).toFixed(2)} km`
+                        : `${split.distanceMiles.toFixed(2)} mi`})</span>
                     )}
                   </td>
                   <td className="px-3 py-2.5">

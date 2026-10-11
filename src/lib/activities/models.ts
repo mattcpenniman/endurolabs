@@ -4,6 +4,7 @@
 
 import type { TimeAtEffortSummary } from "@/lib/analytics/time-at-effort";
 import type { RunScore } from "@/lib/analytics/run-score";
+import type { ActivitySplitOptions } from "@/lib/activities/activity-splits";
 
 export interface RunActivity {
   id: string;
@@ -126,6 +127,7 @@ export interface ActivitySplit {
 export interface ActivityDetailResponse {
   samples: ActivityChartSample[];
   splits: ActivitySplit[];
+  splitOptions?: ActivitySplitOptions;
   timeAtEffort?: TimeAtEffortSummary | null;
   runScore?: RunScore | null;
 }

@@ -4,7 +4,7 @@ import { and, asc, eq } from "drizzle-orm";
 import { db } from "@/lib/db/client";
 import { activitySamples, runActivities } from "@/lib/db/schema";
 import { downsampleActivitySamples, normalizeActivityCadence } from "@/lib/activities/activity-chart";
-import { buildActivityMileSplits } from "@/lib/activities/activity-splits";
+import { buildActivitySplitOptions } from "@/lib/activities/activity-splits";
 import { loadRunScores } from "@/lib/analytics/run-score-persistence";
 
 export async function GET(
@@ -28,7 +28,7 @@ export async function GET(
     temperatureCelsius: activitySamples.temperatureCelsius,
   }).from(activitySamples).where(eq(activitySamples.activityId, id))
     .orderBy(asc(activitySamples.elapsedSeconds));
-  const splits = buildActivityMileSplits({
+  const splitOptions = buildActivitySplitOptions({
     summaryDistanceMeters: activity.distanceMeters,
     durationSeconds: activity.durationSeconds,
     hasMeasuredPower: !activity.powerSource.startsWith("estimated_"),
@@ -39,6 +39,6 @@ export async function GET(
     samples: downsampleActivitySamples(samples.map((sample) => ({
       ...sample, cadence: normalizeActivityCadence(sample.cadence),
     }))),
-    splits, runScore,
+    splits: splitOptions.mile, splitOptions, runScore,
   });
 }
