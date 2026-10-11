@@ -1,12 +1,19 @@
 /**
- * Explainable run-score-v1 coaching heuristic. Pure; this is execution feedback,
+ * Explainable run-score-v2 coaching heuristic. Pure; this is execution feedback,
  * not a validated fitness/readiness metric. Missing components are not zeroes.
  */
 import { normalizeActivityCadence } from "@/lib/activities/activity-chart";
 import type { ActivityChartSample } from "@/lib/activities/models";
 import type { MarathonPlan, Workout, WorkoutSegment } from "@/lib/training/models";
 
-export const RUN_SCORE_VERSION = "run-score-v1";
+export const RUN_SCORE_VERSION = "run-score-v2";
+export const RUN_EFFORT_OPTIONS = {
+  recovery: "Recovery", easy: "Easy", marathon_pace: "Marathon", threshold: "Threshold", vo2: "VO2",
+} as const;
+export type RunEffort = keyof typeof RUN_EFFORT_OPTIONS;
+export function isRunEffort(value: unknown): value is RunEffort {
+  return typeof value === "string" && Object.prototype.hasOwnProperty.call(RUN_EFFORT_OPTIONS, value);
+}
 export interface RunScoreComponent {
   key: "cadence" | "effort" | "distance";
   label: string;
@@ -23,6 +30,9 @@ export interface RunScore {
   availableWeight: number;
   components: RunScoreComponent[];
   effortTargets: RunScoreTarget[];
+  effort?: RunEffort | "planned";
+  effortOverride?: RunEffort | null;
+  targetSource?: "matched_plan" | "current_plan" | "none";
 }
 export interface RunScoreInput {
   distanceMeters: number;
@@ -33,6 +43,8 @@ export interface RunScoreInput {
   samples: ActivityChartSample[];
   workout: Workout | null;
   plan: MarathonPlan | null;
+  effortOverride?: RunEffort | null;
+  targetSource?: RunScore["targetSource"];
 }
 const round = (n: number): number => Math.round(n * 10) / 10;
 const valid = (n: number | null | undefined): n is number => typeof n === "number" && Number.isFinite(n) && n > 0;
@@ -49,7 +61,7 @@ export function gradeAdjustedSpeed(speed: number, slope: number): number | null 
 }
 
 export interface RunScoreTarget { label: string; pace: [number, number]; power: [number, number] | null; seconds: number }
-function targetFor(segment: WorkoutSegment, plan: MarathonPlan): RunScoreTarget | null {
+export function runEffortTarget(segment: WorkoutSegment, plan: MarathonPlan): RunScoreTarget | null {
   const z = plan.paceZones;
   const easy = segment.type === "easy" || segment.type === "long";
   const recovery = segment.type === "recovery";
@@ -64,7 +76,7 @@ function targetFor(segment: WorkoutSegment, plan: MarathonPlan): RunScoreTarget 
     : segment.type === "threshold" ? p.threshold : segment.type === "vo2" ? p.vo2 : p.marathon) : null;
   return {
     label: segment.description,
-    pace: easy && !segment.pace ? [z.easy.min, z.easy.max] : [pace * 0.95, pace * 1.05],
+    pace: easy && !segment.pace ? [Math.min(z.easy.min, z.easy.max), Math.max(z.easy.min, z.easy.max)] : [pace * 0.95, pace * 1.05],
     power: valid(watts) ? easy && p && !segment.power ? [p.easy.min, p.easy.max] : [watts * 0.95, watts * 1.05] : null,
     seconds: valid(segment.duration) ? segment.duration * 60 : valid(segment.distance) ? segment.distance * pace * 60 : 0,
   };
@@ -74,12 +86,12 @@ function targetsFor(workout: Workout | null, plan: MarathonPlan | null): RunScor
   const segments = workout.segments.length ? workout.segments : [{ type: workout.type, description: workout.title, duration: workout.estimatedDuration }];
   const targets: RunScoreTarget[] = [];
   for (const segment of segments) {
-    const target = targetFor(segment, plan);
+    const target = runEffortTarget(segment, plan);
     if (!target || !valid(target.seconds)) return []; // Do not silently omit ambiguous segments.
     for (let rep = 0; rep < (segment.repetitions ?? 1); rep++) {
       targets.push(target);
       if (rep < (segment.repetitions ?? 1) - 1 && valid(segment.restBetween)) {
-        const rest = targetFor({ type: "recovery", description: "Recovery", duration: segment.restBetween / 60 }, plan);
+        const rest = runEffortTarget({ type: "recovery", description: "Recovery", duration: segment.restBetween / 60 }, plan);
         if (rest) targets.push(rest);
       }
     }
@@ -92,11 +104,19 @@ function rangeScore(value: number, range: [number, number]): number {
   return deviationScore(deviation, 0, 0.25);
 }
 
+/** Full credit at/above 180 spm; linear decline to zero at/below 170. */
+function cadenceCredit(cadence: number): number {
+  return Math.max(0, Math.min(10, cadence - 170));
+}
+
 /** Grades each available component and renormalizes its fixed weight. */
 export function buildRunScore(input: RunScoreInput): RunScore {
   const duration = input.movingDurationSeconds ?? input.durationSeconds;
   const samples = [...input.samples].sort((a, b) => a.elapsedSeconds - b.elapsedSeconds);
-  const targets = targetsFor(input.workout, input.plan);
+  const selectedEffort = input.effortOverride ?? (input.workout ? "planned" : "easy");
+  const fallbackTarget = selectedEffort !== "planned" && input.plan
+    ? runEffortTarget({ type: selectedEffort, description: RUN_EFFORT_OPTIONS[selectedEffort], duration: duration / 60 }, input.plan) : null;
+  const targets = selectedEffort === "planned" ? targetsFor(input.workout, input.plan) : fallbackTarget ? [fallbackTarget] : [];
   let cadenceSeconds = 0, cadenceTotal = 0, cadenceValue = 0;
   let effortSeconds = 0, effortTotal = 0, powerSeconds = 0, gradeSeconds = 0;
   let movingElapsed = 0, targetIndex = 0, targetEnd = targets[0]?.seconds ?? 0;
@@ -118,7 +138,7 @@ export function buildRunScore(input: RunScoreInput): RunScore {
     const cadence = normalizeActivityCadence(sample.cadence);
     if (cadence !== null) {
       cadenceSeconds += dt; cadenceValue += cadence * dt;
-      cadenceTotal += deviationScore(Math.abs(cadence - 180), 5, 35) * dt;
+      cadenceTotal += cadenceCredit(cadence) * dt;
     }
     while (targetIndex < targets.length - 1 && movingElapsed >= targetEnd) {
       targetIndex++; targetEnd += targets[targetIndex].seconds;
@@ -146,7 +166,7 @@ export function buildRunScore(input: RunScoreInput): RunScore {
   const enough = (seconds: number): boolean => valid(duration) && seconds >= 120 && seconds / duration >= 0.5;
   const cadenceSummary = normalizeActivityCadence(input.averageCadence);
   const cadenceScore = enough(cadenceSeconds) ? round(cadenceTotal / cadenceSeconds)
-    : cadenceSummary !== null ? round(deviationScore(Math.abs(cadenceSummary - 180), 5, 35)) : null;
+    : cadenceSummary !== null ? round(cadenceCredit(cadenceSummary)) : null;
   const effortScore = enough(effortSeconds) ? round(effortTotal / effortSeconds) : null;
   const distanceTarget = input.workout?.totalDistance;
   const distanceScore = valid(distanceTarget) && valid(input.distanceMeters)
@@ -154,11 +174,11 @@ export function buildRunScore(input: RunScoreInput): RunScore {
   const components: RunScoreComponent[] = [
     { key: "cadence", label: "Cadence", weight: 30, score: cadenceScore,
       basis: enough(cadenceSeconds) ? "Recorded cadence" : "Summary cadence",
-      detail: cadenceScore === null ? "No valid cadence recorded." : `${round(enough(cadenceSeconds) ? cadenceValue / cadenceSeconds : cadenceSummary!)} spm; goal 180 ±5. Score falls linearly to 0 at 35 spm deviation.`,
+      detail: cadenceScore === null ? "No valid cadence recorded." : `${round(enough(cadenceSeconds) ? cadenceValue / cadenceSeconds : cadenceSummary!)} spm; goal 180. Full credit at 180 spm or above; score falls linearly to 0 at 170 spm.`,
       coverage: enough(cadenceSeconds) ? Math.min(1, cadenceSeconds / duration) : null },
     { key: "effort", label: "Target effort", weight: 50, score: effortScore,
       basis: powerSeconds > 0 ? gradeSeconds > 0 ? "Measured power + grade-adjusted pace" : "Measured power" : "Grade-adjusted pace",
-      detail: targets.length === 0 ? "No matched workout with usable targets."
+      detail: targets.length === 0 ? `${selectedEffort === "planned" ? "Planned effort" : RUN_EFFORT_OPTIONS[selectedEffort]} selected; no configured pace/power zones available for scoring.`
         : effortScore === null ? "Need ≥2 min and ≥50% trace coverage with measured anchored power or valid elevation/speed."
         : "Time-weighted target adherence; full credit inside the target range, 0 at 25% outside. Work/recovery targets follow planned segment times (an approximation, not detected laps). Grade uses the Minetti energy-cost model.",
       coverage: valid(duration) ? Math.min(1, effortSeconds / duration) : null },
@@ -168,7 +188,9 @@ export function buildRunScore(input: RunScoreInput): RunScore {
   const available = components.filter((component) => component.score !== null);
   const weight = available.reduce((sum, c) => sum + c.weight, 0);
   return { version: RUN_SCORE_VERSION, score: weight ? round(available.reduce((sum, c) => sum + c.score! * c.weight, 0) / weight) : null,
-    partial: weight < 100, availableWeight: weight, components, effortTargets: targets };
+    partial: weight < 100, availableWeight: weight, components, effortTargets: targets,
+    effort: selectedEffort, effortOverride: input.effortOverride ?? null,
+    targetSource: input.targetSource ?? (input.plan ? "matched_plan" : "none") };
 }
 
 export interface RunScoreComponentSummary {

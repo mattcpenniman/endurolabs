@@ -1834,7 +1834,7 @@ function PlanPageContent(): React.ReactNode {
                 <PlanOverviewCard plan={plan} />
               </div>
               <div id="pace-zones" className="scroll-mt-24">
-                <PaceZonesCard paceZones={currentPaceZones} powerZones={currentPowerZones} />
+                <PaceZonesCard paceZones={currentPaceZones} powerZones={currentPowerZones} powerAnchored={Boolean(plan.runnerProfile.appleWatchPowerData?.marathonPower)} />
               </div>
             </div>
 
@@ -2084,6 +2084,7 @@ function PlanPageContent(): React.ReactNode {
               </p>
             </div>
             <ImpactBeaconCard planId={plan.id} refreshToken={dailyLogRefresh} />
+            <div className="mb-6"><PaceZonesCard paceZones={currentPaceZones} powerZones={currentPowerZones} powerAnchored={Boolean(plan.runnerProfile.appleWatchPowerData?.marathonPower)} /></div>
             <GoalScorecard plan={plan} dailyLogs={dailyLogs} />
           </div>
         ) : (
@@ -2463,6 +2464,9 @@ function PlanPageContent(): React.ReactNode {
               <GarminActivityMapCard
                 activities={planActivities}
                 activityId={runMapActivity.id}
+                onScoreChange={(id, runScore) => setGarminConnection((connection) => ({ ...connection,
+                  activities: connection.activities.map((activity) => activity.id === id ? { ...activity, runScore } : activity),
+                }))}
                 onActivityChange={(activityId) => updatePlanRoute({ runmap: activityId })}
                 shareBaseUrl={shareUrl}
                 onCreateShareLink={() => handleUpdateShareAccess(true)}

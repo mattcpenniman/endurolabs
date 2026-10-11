@@ -153,7 +153,7 @@ export default async function SharedPlanPage({
           <div className="lg:col-span-2">
             <PlanOverviewCard plan={plan} />
           </div>
-          <PaceZonesCard paceZones={plan.paceZones} powerZones={plan.powerZones} />
+          <PaceZonesCard paceZones={plan.paceZones} powerZones={plan.powerZones} powerAnchored={Boolean(plan.runnerProfile.appleWatchPowerData?.marathonPower)} />
         </div>
 
         <section className="mb-8">

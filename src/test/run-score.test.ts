@@ -32,11 +32,33 @@ describe("run execution score", () => {
     expect(effort(score({ samples: trace({ speedMetersPerSecond: 5 }) }))).toBe(0);
     expect(score({ distanceMeters: 3218.688 * 1.5 }).components[2].score).toBe(0);
   });
-  it("does not invent a target for unmatched runs; omits missing components", () => {
+  it("defaults unmatched runs to Easy without inventing numeric zones", () => {
     const result = score({ workout: null, plan: null, samples: [], averageCadence: 170 });
-    expect(result).toMatchObject({ score: 8.3, partial: true, availableWeight: 30 });
+    expect(result).toMatchObject({ score: 0, partial: true, availableWeight: 30, effort: "easy", effortTargets: [] });
     expect(result.components.slice(1).every((c) => c.score === null)).toBe(true);
     expect(score({ workout: null, samples: [] }).score).toBeNull();
+  });
+  it.each([[170, 0], [172, 2], [175, 5], [178, 8], [180, 10], [190, 10], [85, 0], [87.5, 5], [90, 10]])("grades cadence %s linearly (summary and trace)", (cadence, expected) => {
+    expect(score({ samples: [], averageCadence: cadence }).components[0].score).toBe(expected);
+    expect(score({ samples: trace({ cadence }) }).components[0].score).toBe(expected);
+  });
+  it("uses ordered Easy zone bounds for an unplanned run and honors an effort override", () => {
+    const easyPace = (plan.paceZones.easy.min + plan.paceZones.easy.max) / 2;
+    const samples = trace({ speedMetersPerSecond: 1609.344 / (easyPace * 60) });
+    const result = score({ workout: null, samples, targetSource: "current_plan" });
+    expect(result).toMatchObject({ effort: "easy", targetSource: "current_plan", partial: true, availableWeight: 80 });
+    expect(effort(result)).toBe(10);
+    expect(result.effortTargets[0].pace).toEqual([plan.paceZones.easy.max, plan.paceZones.easy.min]);
+    const threshold = score({ workout: null, effortOverride: "threshold", samples: trace({ speedMetersPerSecond: 1609.344 / (plan.paceZones.threshold * 60) }) });
+    expect(threshold).toMatchObject({ effort: "threshold", effortOverride: "threshold" });
+    expect(effort(threshold)).toBe(10);
+    expect(threshold.components[2].score).toBeNull();
+  });
+  it("overrides planned segment effort without discarding the planned distance", () => {
+    const result = score({ effortOverride: "threshold", samples: trace({ speedMetersPerSecond: 1609.344 / (plan.paceZones.threshold * 60) }) });
+    expect(result.effortTargets).toHaveLength(1);
+    expect(effort(result)).toBe(10);
+    expect(result.components[2].score).toBe(10);
   });
   it("adjusts uphill speed to an equivalent flat effort without per-sample distance/grade", () => {
     expect(gradeAdjustedSpeed(3, 0)).toBe(3);
@@ -63,7 +85,7 @@ describe("run execution score", () => {
   });
   it("time-weights cadence rather than counting irregular samples", () => {
     const samples = trace().map((sample) => ({ ...sample, cadence: sample.elapsedSeconds <= 600 ? 90 : 75 }));
-    expect(score({ samples }).components[0].score).toBe(5.8);
+    expect(score({ samples }).components[0].score).toBe(5);
   });
   it("follows work and recovery segment targets rather than averaging interval pace", () => {
     const intervals: Workout = { ...workout, segments: [{ type: "threshold", description: "Intervals", pace: 6, duration: 5, repetitions: 2, restBetween: 300 },
@@ -73,7 +95,7 @@ describe("run execution score", () => {
     expect(effort(score({ workout: intervals, samples }))).toBeGreaterThan(9);
   });
   it("aggregates equal-run means, includes partial counts, and omits excluded/missing scores", () => {
-    const summary = summarizeRunScores([{ runScore: score() }, { runScore: score({ workout: null }) },
+    const summary = summarizeRunScores([{ runScore: score() }, { runScore: score({ workout: null, plan: null }) },
       { runScore: null }, { runScore: score({ distanceMeters: 100 }), excludedFromAnalytics: true }]);
     expect(summary).toMatchObject({ score: 10, scored: 2, total: 3, partial: 1 });
     expect(summary.components).toEqual([

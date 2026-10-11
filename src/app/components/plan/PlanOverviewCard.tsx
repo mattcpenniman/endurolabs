@@ -1,3 +1,4 @@
+"use client";
 import React from "react";
 // ============================================================
 // EnduroLab — Plan Overview Card
@@ -7,6 +8,8 @@ import React from "react";
 // ============================================================
 
 import { MarathonPlan, formatTime, minutesToTime } from "@/lib/training/models";
+import { useUnits } from "@/app/components/units/UnitsProvider";
+import { formatPaceForSystem, paceUnitSuffix } from "@/lib/units/format";
 
 interface PlanOverviewCardProps {
   plan: MarathonPlan;
@@ -21,6 +24,7 @@ const feasibilityEmoji: Record<string, string> = {
 
 export default function PlanOverviewCard({ plan }: PlanOverviewCardProps) {
   const goalTime = formatTime(minutesToTime(plan.runnerProfile.goalMarathonTime));
+  const { units } = useUnits();
 
   return (
     <div className="rounded-xl border border-gray-200 bg-white p-6 shadow-sm">
@@ -48,6 +52,13 @@ export default function PlanOverviewCard({ plan }: PlanOverviewCardProps) {
             {plan.goalAssessment.feasibility.replace("_", " ")}
           </p>
         </div>
+      </div>
+
+      <div className="mt-4 grid gap-3 rounded-lg bg-enduro-50 p-4 sm:grid-cols-2">
+        <div><p className="text-xs font-semibold text-enduro-800">Marathon pace goal</p>
+          <p className="mt-1 text-sm font-bold text-gray-900">{formatPaceForSystem(plan.paceZones.marathon, units)}{paceUnitSuffix(units)}</p></div>
+        <div><p className="text-xs font-semibold text-enduro-800">Marathon power goal</p>
+          <p className="mt-1 text-sm font-bold text-gray-900">{plan.powerZones ? `${plan.powerZones.marathon} W${plan.runnerProfile.appleWatchPowerData?.marathonPower ? " · runner-anchored" : " · estimated"}` : "Not configured"}</p></div>
       </div>
 
       {/* Phase breakdown */}

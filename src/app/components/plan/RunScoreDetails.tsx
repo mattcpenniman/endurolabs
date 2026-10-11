@@ -1,7 +1,7 @@
 /** Run score badges and explainable component breakdown. */
 "use client";
 import React from "react";
-import type { RunScore, RunScoreSummary } from "@/lib/analytics/run-score";
+import { RUN_EFFORT_OPTIONS, RUN_SCORE_VERSION, type RunEffort, type RunScore, type RunScoreSummary } from "@/lib/analytics/run-score";
 import { useUnits } from "@/app/components/units/UnitsProvider";
 import { formatPaceForSystem, paceUnitSuffix } from "@/lib/units/format";
 
@@ -45,15 +45,52 @@ export function RunScoreSummaryBadge({ summary, label }: { summary: RunScoreSumm
   </div>;
 }
 
-export default function RunScoreDetails({ score }: { score?: RunScore | null }): React.ReactNode {
+export function RunEffortTargets({ score }: { score?: RunScore | null }): React.ReactNode {
   const { units } = useUnits();
+  if (!score) return null;
+  return <div className="rounded-xl border border-gray-200 p-4">
+    <h5 className="text-sm font-semibold text-gray-800">Pace / power goals · {score.effort === "planned" ? "Planned workout" : RUN_EFFORT_OPTIONS[score.effort ?? "easy"]}</h5>
+    <p className="mt-1 text-xs text-gray-500">{score.effortOverride ? "Runner-selected effort. " : score.effort === "easy" ? "Unplanned runs default to Easy. " : ""}
+      {score.targetSource === "current_plan" ? "Targets from your current plan." : score.targetSource === "matched_plan" ? "Targets from the linked plan." : "No configured zones available."}</p>
+    {score.effortTargets?.length > 0 && <ol className="mt-2 space-y-2 text-xs text-gray-600">
+      {score.effortTargets.map((target, index) => <li key={index} className="flex flex-wrap justify-between gap-2">
+        <span>{index + 1}. {target.label} · {(target.seconds / 60).toFixed(1)} min</span>
+        <span>Pace goal {formatPaceForSystem(target.pace[0], units)}–{formatPaceForSystem(target.pace[1], units)}{paceUnitSuffix(units)}
+          {target.power ? ` · Power goal ${Math.round(target.power[0])}–${Math.round(target.power[1])} W` : " · Power goal not anchored; scored by grade-adjusted pace"}</span>
+      </li>)}
+    </ol>}
+  </div>;
+}
+
+export default function RunScoreDetails({ score, onEffortChange }: {
+  score?: RunScore | null;
+  onEffortChange?: (effort: RunEffort | null) => Promise<void>;
+}): React.ReactNode {
+  const [saving, setSaving] = React.useState(false);
+  const [error, setError] = React.useState<string | null>(null);
   return <section className="space-y-4 p-5">
     <div className="flex flex-wrap items-center justify-between gap-3">
       <div><h4 className="font-semibold text-gray-900">Run score</h4>
-        <p className="mt-1 text-xs text-gray-500">Execution coaching heuristic · {score?.version ?? "run-score-v1"}</p></div>
+        <p className="mt-1 text-xs text-gray-500">Execution coaching heuristic · {score?.version ?? RUN_SCORE_VERSION}</p></div>
       <RunScoreBadge score={score} />
     </div>
     {!score ? <p className="text-sm text-gray-500">Score details are unavailable for this run.</p> : <>
+      {onEffortChange && <label className="block text-sm font-medium text-gray-700">Target effort
+        <select aria-label="Target effort" value={score.effortOverride ?? ""} disabled={saving}
+          onChange={async (event) => {
+            const value = event.target.value as RunEffort | "";
+            setSaving(true); setError(null);
+            try { await onEffortChange(value || null); }
+            catch (cause) { setError(cause instanceof Error ? cause.message : "Could not save effort"); }
+            finally { setSaving(false); }
+          }} className="ml-3 rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm">
+          <option value="">Automatic (planned workout or Easy)</option>
+          {Object.entries(RUN_EFFORT_OPTIONS).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+        </select>
+        {saving && <span className="ml-2 text-xs text-gray-500">Saving…</span>}
+      </label>}
+      {error && <p role="alert" className="text-sm text-red-700">{error}</p>}
+      <RunEffortTargets score={score} />
       <div className="grid gap-3 md:grid-cols-3">
         {score.components.map((component) => <div key={component.key} className="rounded-xl border border-gray-200 bg-gray-50 p-4">
           <div className="flex items-center justify-between gap-2"><h5 className="text-sm font-semibold text-gray-800">{component.label}</h5>
@@ -64,16 +101,6 @@ export default function RunScoreDetails({ score }: { score?: RunScore | null }):
           <p className="mt-2 text-xs leading-relaxed text-gray-600">{component.detail}</p>
         </div>)}
       </div>
-      {score.effortTargets?.length > 0 && <div className="rounded-xl border border-gray-200 p-4">
-        <h5 className="text-sm font-semibold text-gray-800">Prescribed effort targets</h5>
-        <ol className="mt-2 space-y-2 text-xs text-gray-600">
-          {score.effortTargets.map((target, index) => <li key={index} className="flex flex-wrap justify-between gap-2">
-            <span>{index + 1}. {target.label} · {(target.seconds / 60).toFixed(1)} min</span>
-            <span>{formatPaceForSystem(target.pace[0], units)}–{formatPaceForSystem(target.pace[1], units)}{paceUnitSuffix(units)}
-              {target.power && ` · ${Math.round(target.power[0])}–${Math.round(target.power[1])} W`}</span>
-          </li>)}
-        </ol>
-      </div>}
       <p className="text-xs leading-relaxed text-gray-500">
         {score.partial ? `Partial score: ${score.availableWeight}% of the component weight is available. Missing components are omitted and the remaining weights are renormalized. ` : "Weighted average: cadence 30%, effort 50%, distance 20%. "}
         Cadence uses your 180 spm goal, not a universal ideal. Faster or higher-power running earns no extra credit beyond the prescribed target.

@@ -12,6 +12,7 @@ import { buildActivityMileSplits } from "@/lib/activities/activity-splits";
 import { summarizeTimeAtEffort } from "@/lib/analytics/time-at-effort";
 import type { MarathonPlan } from "@/lib/training/models";
 import { loadRunScores } from "@/lib/analytics/run-score-persistence";
+import { isRunEffort } from "@/lib/analytics/run-score";
 
 /** Legacy plans may store plan_data as a JSON string; normalize before use. */
 function normalizePlanData(value: unknown): MarathonPlan | null {
@@ -100,13 +101,18 @@ export async function PATCH(
     predictionExcluded?: unknown;
     raceClassification?: unknown;
     raceNotes?: unknown;
+    effortOverride?: unknown;
   };
   const classifications = new Set(["official", "training_race", "pacing_duty", "bad_gps"]);
+  const hasEffortSetting = Object.prototype.hasOwnProperty.call(body, "effortOverride");
+  if (hasEffortSetting && body.effortOverride !== null && !isRunEffort(body.effortOverride)) {
+    return NextResponse.json({ error: "effortOverride must be recovery, easy, marathon_pace, threshold, vo2, or null" }, { status: 400 });
+  }
   const hasAnalyticsSetting = typeof body.excludedFromAnalytics === "boolean";
   const hasPredictionSetting = typeof body.predictionExcluded === "boolean";
   const hasRaceClassification = typeof body.raceClassification === "string"
     && classifications.has(body.raceClassification);
-  if (!hasAnalyticsSetting && !hasPredictionSetting && !hasRaceClassification) {
+  if (!hasAnalyticsSetting && !hasPredictionSetting && !hasRaceClassification && !hasEffortSetting) {
     return NextResponse.json({ error: "A valid analytics setting or raceClassification is required" }, { status: 400 });
   }
 
@@ -121,13 +127,15 @@ export async function PATCH(
   const [updated] = await db.update(runActivities).set({
     excludedFromAnalytics,
     predictionExcluded,
+    ...(hasEffortSetting ? { effortOverride: isRunEffort(body.effortOverride) ? body.effortOverride : null } : {}),
     ...(raceClassification ? {
       raceClassification,
       raceNotes: typeof body.raceNotes === "string" ? body.raceNotes.trim().slice(0, 2000) || null : null,
     } : {}),
     updatedAt: new Date(),
   }).where(and(eq(runActivities.id, id), eq(runActivities.userId, user.id)))
-    .returning({ id: runActivities.id });
+    .returning();
   if (!updated) return NextResponse.json({ error: "Activity not found" }, { status: 404 });
-  return NextResponse.json({ success: true, excludedFromAnalytics, predictionExcluded, raceClassification });
+  const runScore = hasEffortSetting ? (await loadRunScores([updated])).get(id) ?? null : undefined;
+  return NextResponse.json({ success: true, excludedFromAnalytics, predictionExcluded, raceClassification, runScore });
 }
