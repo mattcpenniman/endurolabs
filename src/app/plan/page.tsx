@@ -1921,7 +1921,6 @@ function PlanPageContent(): React.ReactNode {
                               <p className="mt-1 max-w-3xl text-sm text-gray-700">{phase.description}</p>
                             </div>
                             <div className="grid gap-2 text-xs text-gray-700 sm:grid-cols-2 md:min-w-72 md:grid-cols-1">
-                              <RunScoreSummaryBadge summary={summarizeRunScores(planActivities.filter((activity) => activity.weekNumber !== null && activity.weekNumber >= phase.weekRange[0] && activity.weekNumber <= phase.weekRange[1]))} />
                               {phase.targetMileage && (
                                 <span className="rounded-lg bg-white px-3 py-2 shadow-sm">Mileage: {phase.targetMileage}</span>
                               )}
@@ -1935,6 +1934,7 @@ function PlanPageContent(): React.ReactNode {
                           </span>
                         </div>
                       </button>
+                      <RunScoreSummaryBadge label={phase.name} summary={summarizeRunScores(planActivities.filter((activity) => activity.weekNumber !== null && activity.weekNumber >= phase.weekRange[0] && activity.weekNumber <= phase.weekRange[1]))} />
                       {isPhaseExpanded && (
                         <div id={phaseWeeksId} className="space-y-3">
                           {weeks.map((week) => (

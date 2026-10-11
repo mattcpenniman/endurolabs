@@ -171,11 +171,36 @@ export function buildRunScore(input: RunScoreInput): RunScore {
     partial: weight < 100, availableWeight: weight, components, effortTargets: targets };
 }
 
-export interface RunScoreSummary { score: number | null; scored: number; total: number; partial: number }
+export interface RunScoreComponentSummary {
+  key: RunScoreComponent["key"];
+  label: string;
+  weight: number;
+  score: number | null;
+  scored: number;
+}
+export interface RunScoreSummary {
+  score: number | null;
+  scored: number;
+  total: number;
+  partial: number;
+  components: RunScoreComponentSummary[];
+}
 /** Equal-run mean; missing and explicitly excluded runs do not depress the mean. */
 export function summarizeRunScores(runs: { runScore?: RunScore | null; excludedFromAnalytics?: boolean }[]): RunScoreSummary {
   const included = runs.filter((run) => !run.excludedFromAnalytics);
   const scored = included.flatMap((run) => run.runScore?.score != null ? [run.runScore] : []);
+  const components = ([
+    { key: "cadence", label: "Cadence", weight: 30 },
+    { key: "effort", label: "Target effort", weight: 50 },
+    { key: "distance", label: "Planned distance", weight: 20 },
+  ] as const).map((component) => {
+    const values = scored.flatMap((run) => {
+      const value = run.components.find((item) => item.key === component.key)?.score;
+      return value != null ? [value] : [];
+    });
+    return { ...component, score: values.length ? round(values.reduce((sum, value) => sum + value, 0) / values.length) : null,
+      scored: values.length };
+  });
   return { score: scored.length ? round(scored.reduce((sum, score) => sum + score.score!, 0) / scored.length) : null,
-    scored: scored.length, total: included.length, partial: scored.filter((score) => score.partial).length };
+    scored: scored.length, total: included.length, partial: scored.filter((score) => score.partial).length, components };
 }

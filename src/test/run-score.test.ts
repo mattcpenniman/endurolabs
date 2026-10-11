@@ -75,7 +75,19 @@ describe("run execution score", () => {
   it("aggregates equal-run means, includes partial counts, and omits excluded/missing scores", () => {
     const summary = summarizeRunScores([{ runScore: score() }, { runScore: score({ workout: null }) },
       { runScore: null }, { runScore: score({ distanceMeters: 100 }), excludedFromAnalytics: true }]);
-    expect(summary).toEqual({ score: 10, scored: 2, total: 3, partial: 1 });
+    expect(summary).toMatchObject({ score: 10, scored: 2, total: 3, partial: 1 });
+    expect(summary.components).toEqual([
+      { key: "cadence", label: "Cadence", weight: 30, score: 10, scored: 2 },
+      { key: "effort", label: "Target effort", weight: 50, score: 10, scored: 1 },
+      { key: "distance", label: "Planned distance", weight: 20, score: 10, scored: 1 },
+    ]);
     expect(summarizeRunScores([]).score).toBeNull();
+  });
+  it("averages runs equally rather than recombining component means with missing values", () => {
+    const summary = summarizeRunScores([{ runScore: score() },
+      { runScore: score({ workout: null, plan: null, samples: [], averageCadence: 145 }) }]);
+    expect(summary.score).toBe(5);
+    expect(summary.components.map((component) => component.score)).toEqual([5, 10, 10]);
+    expect(summarizeRunScores([{ runScore: null }]).components.every((component) => component.score === null)).toBe(true);
   });
 });
