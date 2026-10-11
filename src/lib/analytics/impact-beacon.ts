@@ -215,12 +215,12 @@ export interface ImpactBeaconGap {
 }
 
 /**
- * Traffic-light status for the floating beacon: `red` when an
- * impact-eligible metric is behind plan, `amber` when eligible metrics are
- * on/ahead but a context-only metric is behind or its sample detail is
- * missing, `green` when all eligible metrics are on/ahead.
+ * Traffic-light status for the floating beacon: `neutral` before the plan
+ * starts, `red` when an impact-eligible metric is behind plan, `amber` when
+ * only a context-only metric is behind, and `green` otherwise. Missing data
+ * alone is not a behind-plan signal.
  */
-export type ImpactBeaconLevel = "red" | "amber" | "green";
+export type ImpactBeaconLevel = "red" | "amber" | "green" | "neutral";
 
 export interface ImpactBeaconReport {
   version: typeof IMPACT_BEACON_VERSION;
@@ -1232,22 +1232,8 @@ export function buildImpactBeacon(input: ImpactBeaconInput): ImpactBeaconReport 
       effortMetric("hr_effort", planned, actual, eligible, labels, powerZonesConfigured, powerZonesDerived),
       effortMetric("power_effort", planned, actual, eligible, labels, powerZonesConfigured, powerZonesDerived),
     ];
-    const gaps = collectGaps(metrics);
-    const beacon = gaps[0] ?? null;
-    const eligibleWithData = metrics.filter((metric) => metric.impactEligible && metric.direction !== "no_data");
-    const suffix = baselineWeeks === 1 ? "week" : "weeks";
-    let summary: string;
-    if (beacon) {
-      summary = `Plan starts ${planStart}. Largest gap: ${beacon.label} — `
-        + `${formatValue(beacon.actual, beacon.unit)} now vs ${formatValue(beacon.planned, beacon.unit)} `
-        + `in the plan's first ${baselineWeeks} ${suffix} (${formatRatio(beacon.completionRatio)}).`;
-    } else if (eligibleWithData.length > 0) {
-      summary = `Plan starts ${planStart}. On track: ${eligibleWithData.map((metric) => metric.label).join(", ")} `
-        + `at or ahead of the plan's first ${baselineWeeks} ${suffix}.`;
-    } else {
-      summary = `Plan starts ${planStart}; not enough recent logged training to beacon a validated `
-        + "readiness metric yet.";
-    }
+    const summary = `Plan starts ${planStart}. You are not behind; alerts begin when the plan starts. `
+      + "The opening-block comparison below is context only.";
 
     return {
       version: IMPACT_BEACON_VERSION,
@@ -1266,8 +1252,8 @@ export function buildImpactBeacon(input: ImpactBeaconInput): ImpactBeaconReport 
       race,
       targets,
       metrics,
-      gaps,
-      beacon,
+      gaps: [],
+      beacon: null,
       summary,
     };
   }
@@ -1329,12 +1315,14 @@ export function metersToMiles(meters: number): number {
 
 /**
  * Traffic-light status for the floating beacon. Rejected metrics never turn
- * the beacon red; at most they make it amber as unresolved context.
+ * the beacon red; at most they make it amber when behind. Pre-start comparisons
+ * and missing data alone never trigger an alert.
  */
 export function impactBeaconLevel(report: ImpactBeaconReport): ImpactBeaconLevel {
+  if (!report.planStarted) return "neutral";
   if (report.gaps.length > 0) return "red";
   const contextConcern = report.metrics.some(
-    (metric) => !metric.impactEligible && (metric.direction === "behind" || metric.dataMissing),
+    (metric) => !metric.impactEligible && metric.direction === "behind",
   );
   return contextConcern ? "amber" : "green";
 }

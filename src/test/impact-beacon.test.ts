@@ -408,10 +408,12 @@ describe("buildImpactBeacon", () => {
     expect(volume?.planned).toBe(190);
     expect(volume?.actual).toBe(40);
     expect(volume?.evidence).toContain("trailing 4 weeks");
-    expect(report.gaps.map((gap) => gap.key)).toEqual(["volume", "long_run"]);
-    expect(report.beacon?.key).toBe("volume");
+    expect(volume?.direction).toBe("behind");
+    expect(report.gaps).toEqual([]);
+    expect(report.beacon).toBeNull();
+    expect(impactBeaconLevel(report)).toBe("neutral");
     expect(report.summary).toContain("Plan starts 2026-09-07");
-    expect(report.summary).toContain("Largest gap: Weekly volume");
+    expect(report.summary).toContain("alerts begin when the plan starts");
   });
 
   it("does not beacon before the plan starts when current training meets the opening block", () => {
@@ -431,7 +433,7 @@ describe("buildImpactBeacon", () => {
     expect(report.mode).toBe("opening_block");
     expect(report.beacon).toBeNull();
     expect(report.summary).toContain("Plan starts 2026-09-07");
-    expect(report.summary).toContain("On track");
+    expect(report.summary).toContain("You are not behind");
   });
 
   it("caps the opening block at the plan length", () => {
@@ -770,7 +772,7 @@ describe("impactBeaconLevel", () => {
     expect(impactBeaconLevel(report)).toBe("red");
   });
 
-  it("is amber when only context metrics are behind or missing data", () => {
+  it("is amber when only context metrics are behind", () => {
     const frontLoaded = Array.from({ length: 8 }, (_, index) => (
       run(addDays("2026-09-07", index), 20)
     ));
@@ -782,7 +784,7 @@ describe("impactBeaconLevel", () => {
     expect(impactBeaconLevel(report)).toBe("amber");
   });
 
-  it("is amber before the plan starts when eligible metrics are on/ahead but power has no zones", () => {
+  it("is neutral before the plan starts even when power has no zones", () => {
     const runs: ImpactBeaconRun[] = [
       run("2026-08-06", 20),
       run("2026-08-09", 20),
@@ -797,7 +799,28 @@ describe("impactBeaconLevel", () => {
     const report = buildImpactBeacon({ plan: makePlan(), runs, asOf: "2026-09-01" });
 
     expect(report.beacon).toBeNull();
-    expect(impactBeaconLevel(report)).toBe("amber");
+    expect(impactBeaconLevel(report)).toBe("neutral");
+  });
+
+  it("does not alert on missing detail alone when training is on track", () => {
+    const runs = Array.from({ length: 22 }, (_, index) => run(addDays("2026-09-07", index), 20));
+    const report = buildImpactBeacon({ plan: makePlan(), runs, asOf: "2026-09-28" });
+
+    expect(report.gaps).toEqual([]);
+    expect(report.metrics.some((metric) => metric.direction === "behind")).toBe(false);
+    expect(report.metrics.some((metric) => metric.dataMissing)).toBe(true);
+    expect(impactBeaconLevel(report)).toBe("green");
+  });
+
+  it("activates behind-plan alerts on the plan start date", () => {
+    const before = buildImpactBeacon({ plan: makePlan(), runs: [], asOf: "2026-09-06" });
+    const started = buildImpactBeacon({ plan: makePlan(), runs: [], asOf: "2026-09-07" });
+
+    expect(impactBeaconLevel(before)).toBe("neutral");
+    expect(before.beacon).toBeNull();
+    expect(started.planStarted).toBe(true);
+    expect(started.gaps.length).toBeGreaterThan(0);
+    expect(impactBeaconLevel(started)).toBe("red");
   });
 
   it("is green when eligible and context metrics are all on/ahead", () => {
