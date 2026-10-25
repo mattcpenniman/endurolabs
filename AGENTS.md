@@ -152,6 +152,8 @@ src/
 
 ## Goal-Directed Planner CLI
 
+- Add `--history` to `planner:recommend` for goal-directed historical marathon analysis: all prior race cycles, matched final-112-day scheduled/actual mileage and long-run counts, race-execution labels and result provenance, same-race alternative drafts, and evidence-linked coaching recommendations. The pure builder is `src/lib/planner/plan-history.ts`; JSON includes the versioned `history` report. It is read-only and cannot be combined with `--create`.
+- `planner:recommend --email` selects `users.current_plan_id`, falling back to the newest created plan; use `--plan-id` to analyze a draft. It uses `loadRaceAnalysisDataset` for canonical-result deduplication and prediction exclusions. Activities on/after `--as-of` are excluded; historical schedules are current mutable snapshots, not leakage-safe forecast features. Actual cycle volume is activity-only (manual-only runs may be missing). The displayed 28-day weekly average is the total divided by four.
 - `npm run planner:recommend -- --email runner@example.com` (or `--plan-id UUID`) is the Phase 1 read-only analysis: forecast, goal gap, training state, limiting factors, recommendations, and safety gates. `--as-of YYYY-MM-DD` sets a leakage-safe cutoff and `--json` emits the versioned `planner-v1-alpha` payload.
 - `--create` generates a fresh plan for a target race from the athlete's most recent stored plan (or the `--plan-id` plan):
   `npm run planner:recommend -- --email runner@example.com --create --race-date 2027-04-17 --goal 2:59:59 --name "Newport Marathon 2027" --weeks 28`

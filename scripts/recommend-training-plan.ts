@@ -31,7 +31,8 @@ import {
 import { generatePlan } from '@/lib/training/plan-generator';
 import { mergePowerZoneDefaults, parsePowerZoneDefaults } from '@/lib/training/power-anchors';
 import type { MarathonPlan, RunnerProfile } from '@/lib/training/models';
-import type { RaceAnalysisActivity } from '@/lib/analytics/race-performance-analysis';
+import { buildPlanHistory, type PlanHistoryReport } from '@/lib/planner/plan-history';
+import { formatPace } from '@/lib/training/models';
 
 // ─── Arg helpers ──────────────────────────────────────────────
 
@@ -50,6 +51,34 @@ const distance = argument('distance') ?? 'marathon';
 const goalTimeStr = argument('goal');
 const asOfStr = argument('as-of') ?? new Date().toISOString().slice(0, 10);
 const jsonOnly = argv.includes('--json');
+const historyMode = argv.includes('--history');
+
+if (argv.includes('--help')) {
+  console.log(`Usage: npm run planner:recommend -- --email EMAIL | --plan-id ID
+  [--goal H:MM:SS] [--as-of YYYY-MM-DD] [--json] [--history]
+
+--email selects the designated current plan, falling back to the newest plan.
+--history compares all historical marathon cycles, actual final-16-week training,
+race execution, and same-race drafts. Recommendations are read-only.
+--plan-id selects a specific stored plan, including an alternative draft.
+--as-of excludes activities on/after that day; schedules reflect current stored data.
+
+Create preview: --create --race-date YYYY-MM-DD --goal H:MM:SS
+  [--name NAME] [--weeks 14-28] [--max-weekly-mileage N] [--max-long-run N]
+  [--days Mon,Wed,...] [--long-run-day Saturday] [--no-doubles]
+  [--reset-weekly-overrides] [--apply] [--set-current]`);
+  process.exit(0);
+}
+
+if (!/^\d{4}-\d{2}-\d{2}$/.test(asOfStr) || !Number.isFinite(Date.parse(asOfStr))
+  || new Date(asOfStr).toISOString().slice(0, 10) !== asOfStr) {
+  console.error('Error: --as-of must be a valid YYYY-MM-DD date');
+  process.exit(1);
+}
+if (historyMode && argv.includes('--create')) {
+  console.error('Error: --history is a read-only analysis; use it separately from --create');
+  process.exit(1);
+}
 
 const createMode = argv.includes('--create');
 const applyMode = argv.includes('--apply');
@@ -129,7 +158,7 @@ if (createMode) {
 // ─── DB helpers ──────────────────────────────────────────────
 
 function secondsToHMS(secs: number): string {
-  const totalSecs = Math.max(0, Math.round(secs));
+  const totalSecs = Math.round(Math.abs(secs));
   const sign = secs < 0 ? '-' : '';
   const h = Math.floor(totalSecs / 3600);
   const m = Math.floor((totalSecs % 3600) / 60);
@@ -143,11 +172,31 @@ interface UserRow { id: string; email: string; powerZoneDefaults: unknown }
 interface PlanRow {
   id: string; raceName: string | null; runnerProfile: RunnerProfile; planData: MarathonPlan; createdAt: Date; updatedAt: Date;
 }
-interface ActivityRaw {
-  id: string; localDate: string; distanceMeters: number; durationSeconds: number;
-  movingDurationSeconds: number | null; eventType: string | null; averageHeartRate: number | null;
-  averagePower: number | null; calculatedPower: number | null; elevationGainMeters: number | null;
-  excludedFromAnalytics: boolean;
+
+function printHistory(report: PlanHistoryReport): void {
+  console.log('\n=== Historical Marathon Cycles ===');
+  console.log(`Goal pace: ${formatPace(report.goalPaceMinutesPerMile)}/mi; half equivalent ${secondsToHMS(report.halfMarathonEquivalentSeconds)} (speed benchmark only).`);
+  console.log(`Days to race: ${report.daysToRace}. Volume and long-run counts below use matched final 16 weeks, excluding the target race.`);
+  console.table([...report.cycles, report.current, ...report.alternatives].map(row => ({
+    plan: row.raceName, id: row.planId.slice(0, 8),
+    role: row.planId === report.current.planId ? 'SELECTED' : report.alternatives.includes(row) ? 'draft' : 'past',
+    result: row.result ? secondsToHMS(row.result.seconds) : '—',
+    source: row.result?.source ?? '—', execution: row.result?.execution ?? '—',
+    scheduledMiPerWeek: row.plannedFinal16Weeks.averageWeeklyMiles,
+    actualMiPerWeek: row.raceDate < report.asOf ? row.actualFinal16Weeks.averageWeeklyMiles : 'incomplete',
+    scheduled18: row.plannedFinal16Weeks.runsAtLeast18Miles,
+    actual18: row.raceDate < report.asOf ? row.actualFinal16Weeks.runsAtLeast18Miles : 'incomplete',
+    scheduled20: row.plannedFinal16Weeks.runsAtLeast20Miles,
+    actual20: row.raceDate < report.asOf ? row.actualFinal16Weeks.runsAtLeast20Miles : 'incomplete',
+  })));
+  console.log('\nHistory-based recommendations:');
+  for (const rec of report.recommendations) {
+    console.log(`  [${rec.priority.toUpperCase()}] ${rec.action}`);
+    for (const evidence of rec.evidence) console.log(`    ${evidence}`);
+    if (rec.candidateWeeks?.length) console.log(`    Candidate build weeks to review: ${rec.candidateWeeks.join(', ')} (not an applied prescription).`);
+  }
+  console.log('\nInterpretation:');
+  for (const caveat of report.caveats) console.log(`  - ${caveat}`);
 }
 
 // ─── Create mode ─────────────────────────────────────────────
@@ -277,6 +326,10 @@ async function runCreatePlan(context: CreatePlanContext): Promise<void> {
 async function main() {
   const databaseUrl = process.env.DATABASE_URL ?? 'postgresql://enduro:endurodev@localhost:5432/endurolab';
   const sql = postgres(databaseUrl, { prepare: false });
+  // Dynamic imports ensure .env is loaded before the shared DB client initializes.
+  const { loadRaceAnalysisDataset, normalizePlanData } = await import('@/lib/analytics/race-analysis-loader');
+  const { endDb } = await import('@/lib/db/client');
+  try {
 
   // Resolve user
   const [user] = await sql<UserRow[]>`
@@ -295,32 +348,18 @@ async function main() {
     : await sql<PlanRow[]>`
         select id, race_name as "raceName", runner_profile as "runnerProfile",
           plan_data as "planData", created_at as "createdAt", updated_at as "updatedAt"
-        from plans where user_id = ${user.id} order by updated_at desc limit 1
+        from plans where user_id = ${user.id}
+        order by (id = (select current_plan_id from users where id = ${user.id})) desc nulls last,
+          created_at desc limit 1
       `;
 
   if (!dbPlan) throw new Error('No plan found');
 
-  // Activities before cutoff — include canonical race results as activity rows
-  const activityRows = await sql<ActivityRaw[]>`
-    select id, local_date as "localDate", distance_meters as "distanceMeters",
-      duration_seconds as "durationSeconds", moving_duration_seconds as "movingDurationSeconds",
-      event_type as "eventType", average_heart_rate as "averageHeartRate",
-      average_power as "averagePower", calculated_power as "calculatedPower",
-      elevation_gain_meters as "elevationGainMeters", excluded_from_analytics as "excludedFromAnalytics"
-    from run_activities where user_id = ${user.id} and local_date <= ${asOfStr}
-  `;
-
-  const activities: RaceAnalysisActivity[] = activityRows.map(a => ({
-    id: a.id, localDate: String(a.localDate), distanceMeters: Number(a.distanceMeters) || 0,
-    durationSeconds: Number(a.durationSeconds) || 0, movingDurationSeconds: a.movingDurationSeconds != null ? Number(a.movingDurationSeconds) : null,
-    eventType: a.eventType ?? null, averageHeartRate: a.averageHeartRate != null ? Number(a.averageHeartRate) : null,
-    averagePower: a.averagePower != null ? Number(a.averagePower) : null,
-    calculatedPower: a.calculatedPower != null ? Number(a.calculatedPower) : null,
-    elevationGainMeters: a.elevationGainMeters != null ? Number(a.elevationGainMeters) : null,
-    excludedFromAnalytics: Boolean(a.excludedFromAnalytics),
-  }));
-
-  const planP = dbPlan.planData;
+  const dataset = await loadRaceAnalysisDataset({ userId: user.id, asOf: asOfStr });
+  const activities = dataset.activities.filter(activity => activity.localDate < asOfStr);
+  const planP = normalizePlanData(dbPlan.planData);
+  if (!planP?.runnerProfile || !Array.isArray(planP.weeks)) throw new Error('Selected plan has no usable marathon schedule');
+  dbPlan.planData = planP;
 
   // Build snapshot / gap / limiters / recommendations / safety gates
   const planData: PlannerPlanData = {
@@ -336,7 +375,6 @@ async function main() {
       options: createOptions, goal: parsedGoal,
       apply: applyMode, setCurrent, jsonOnly, today: todayStr,
     });
-    await sql.end();
     return;
   }
 
@@ -375,7 +413,23 @@ async function main() {
   );
 
   const recs = buildRecommendations(snapshot, planP as MarathonPlan, goalMinutes);
-  const safety = runSafetyGates(planP as any, snapshot, {});
+  const safety = runSafetyGates(planP, snapshot, {});
+  let history: PlanHistoryReport | undefined;
+  if (historyMode) {
+    if (finalGoal.distanceMeters !== 42195) throw new Error('--history currently supports marathon goals only');
+    const rows = await sql<PlanRow[]>`
+      select id, race_name as "raceName", plan_data as "planData"
+      from plans where user_id = ${user.id} order by created_at desc, id
+    `;
+    history = buildPlanHistory({
+      current: { id: dbPlan.id, raceName: dbPlan.raceName, plan: planP },
+      plans: rows.flatMap(row => {
+        const plan = normalizePlanData(row.planData);
+        return plan?.runnerProfile ? [{ id: row.id, raceName: row.raceName, plan }] : [];
+      }),
+      activities, asOf: asOfStr, goalMinutes,
+    });
+  }
 
   // ─── Output ──────────────────────────────────────────────
 
@@ -398,8 +452,9 @@ async function main() {
       },
       goalGap,
       limiters,
-      recommendations: recs,
+      recommendations: history?.recommendations ?? recs,
       safetyGates: safety,
+      ...(history ? { history } : {}),
     }, null, 2));
   } else {
     const gapMin = Math.abs(goalGap.gapSeconds / 60);
@@ -415,18 +470,19 @@ async function main() {
     console.log(`Gap: ${secondsToHMS(goalGap.gapSeconds)} ${dirText} goal [${goalGap.classification}]`);
 
     if (goalGap.rangeLow != null && goalGap.rangeHigh != null) {
-      console.log(`90% historical range: ${secondsToHMS(goalGap.rangeLow)} – ${secondsToHMS(goalGap.rangeHigh)}`);
+      console.log(`90% historical range: ${secondsToHMS(goalGap.rangeLow)} – ${secondsToHMS(goalGap.rangeHigh)} (historical errors, not a calibrated prediction interval)`);
     }
     console.log(`Evidence: ${goalGap.evidenceCount} race(s) (${goalGap.dataConfidence} confidence)`);
 
     const tf = snapshot.trainingFeatures;
     console.log('\nTraining State:');
-    console.log(`  28-day avg mileage: ${tf.milesLast28Days.toFixed(1)} mi`);
+    console.log(`  28-day total: ${tf.milesLast28Days.toFixed(1)} mi | Weekly average: ${(tf.milesLast28Days / 4).toFixed(1)} mi/week`);
     console.log(`  Consistency: ${(snapshot.consistencyRate * 100).toFixed(0)}%`);
     console.log(`  Peak weekly: ${snapshot.peakWeeklyMiles.toFixed(1)} mi | Longest run: ${tf.longestRunMiles.toFixed(1)} mi`);
     console.log(`  Fitness trend: ${snapshot.fitnessTrend}`);
 
-    console.log('\n' + formatReport(recs, limiters));
+    if (history) printHistory(history);
+    else console.log('\n' + formatReport(recs, limiters));
 
     const refusals = safety.filter(s => s.result === 'refuse');
     const warnings = safety.filter(s => s.result === 'warn');
@@ -443,7 +499,9 @@ async function main() {
     console.log('\nThis forecast is evidence-based, not calibrated. Changes are intended adaptations.');
   }
 
-  await sql.end();
+  } finally {
+    await Promise.all([sql.end(), endDb()]);
+  }
 }
 
 main().catch(err => { console.error('FATAL:', err); process.exit(1); });

@@ -58,7 +58,7 @@ export function identifyLimiters(
   targetDistanceMeters: number,
 ): Limiter[] {
   const limiters: Limiter[] = [];
-  const t28 = snapshot.trainingFeatures.milesLast28Days;
+  const t28 = snapshot.trainingFeatures.milesLast28Days / 4;
 
   const marathonGoalTime = goalMinutes;
   const recommendedPeak = marathonGoalTime < 180 ? 90 : marathonGoalTime < 210 ? 75 : marathonGoalTime < 240 ? 60 : marathonGoalTime < 270 ? 50 : 40;
@@ -68,8 +68,8 @@ export function identifyLimiters(
       id: 'insufficient_aerobic_volume',
       label: 'Insufficient aerobic volume',
       severity: t28 < recommendedPeak * 0.4 ? 'high' : 'medium',
-      description: `Current 28-day average (${t28.toFixed(1)} mi) is below ${recommendedPeak * 0.6} mi needed for the goal.`,
-      evidence: [`28-day mileage: ${t28.toFixed(1)} mi`, `Recommended peak: ${recommendedPeak} mi`],
+      description: `Current weekly average over 28 days (${t28.toFixed(1)} mi/week) is below the heuristic reference of ${recommendedPeak * 0.6} mi/week for the goal.`,
+      evidence: [`28-day weekly average: ${t28.toFixed(1)} mi/week`, `Heuristic peak reference: ${recommendedPeak} mi/week`],
     });
   }
 
