@@ -3,7 +3,9 @@ import { describe, expect, it } from "vitest";
 import { mapGarminWorkout, selectPlannedRun, workoutCalendarDate } from "../lib/garmin/workout-export";
 import { publishGarminWorkout, verifyRemoteWorkout } from "../lib/garmin/workout-publisher";
 import type { ExportCheckpoint, ExportJournal, WorkoutTransport } from "../lib/garmin/workout-publisher";
-import type { Workout, DailyPlan } from "../lib/training/models";
+import type { Workout, DailyPlan, PaceZones } from "../lib/training/models";
+import { WorkoutLibrary } from "../lib/training/workout-library";
+import { resizeWorkout } from "../lib/training/workout-edit";
 
 const workout: Workout = {
   id: "mp-16", title: "8 mi M + 2 mi T Alternation", type: "marathon_pace",
@@ -19,8 +21,78 @@ const workout: Workout = {
   ],
 };
 const options = { name: "EL test", marker: "EnduroLab export test" };
+const hrZone = { hrrPercent: { min: 0.6, max: 0.7 }, hrMaxPercent: { min: 0.6, max: 0.7 }, targetBpm: null };
+const zones: PaceZones = {
+  easy: { min: 8, max: 9 }, marathon: 7, threshold: 6.5, vo2: 6, recovery: 10,
+  easyEffort: "Easy", marathonEffort: "Steady", thresholdEffort: "Controlled", vo2Effort: "Hard",
+  heartRateZones: { recovery: hrZone, easy: hrZone, marathon: hrZone, threshold: hrZone, vo2: hrZone },
+};
 
 describe("Garmin workout mapping", () => {
+  it.each([8, 10, 14])("exports interval builders at recovery pace %s, including single-rep sessions", (recoveryPace) => {
+    const paceZones = { ...zones, recovery: recoveryPace };
+    for (const count of [1, 2, 3]) {
+      const runs = [
+        WorkoutLibrary.createThresholdIntervals(1, 0, 6, count, 0.5, 45, paceZones),
+        WorkoutLibrary.createVO2Intervals(1, 0, count, 0.5, 120, paceZones),
+      ];
+      for (const run of runs) {
+        const original = structuredClone(run);
+        const steps = mapGarminWorkout(run, options).workoutSegments[0].workoutSteps;
+        const recoveries = steps.filter((item) => item.stepType.stepTypeKey === "recovery");
+        expect(recoveries).toHaveLength(count - 1);
+        expect(recoveries.every((item) => item.endConditionValue === (run.type === "threshold" ? 45 : 120))).toBe(true);
+        expect(steps).toHaveLength(2 * count + 1); // bookends + work + between-rep recovery
+        expect(run).toEqual(original);
+      }
+    }
+  });
+  it.each([8, 10, 14])("exports ladder floats and both mixed-interval recovery groups at pace %s", (recoveryPace) => {
+    const paceZones = { ...zones, recovery: recoveryPace };
+    const ladder = WorkoutLibrary.createThresholdLadder(1, 0, 10, 4, paceZones);
+    const original = structuredClone(ladder);
+    const steps = mapGarminWorkout(ladder, options).workoutSegments[0].workoutSteps;
+    expect(steps.filter((item) => item.stepType.stepTypeKey === "recovery")
+      .map((item) => [item.endCondition.conditionTypeKey, item.endConditionValue])).toEqual([["time", 120], ["time", 120]]);
+    expect(ladder).toEqual(original);
+    const mixed = WorkoutLibrary.createMixedVO2SpeedWorkout(1, 0, 4, paceZones);
+    const mixedSteps = mapGarminWorkout(mixed, options).workoutSegments[0].workoutSteps;
+    const repeated = mixed.segments.filter((segment) => (segment.repetitions ?? 1) > 1);
+    expect(mixedSteps.filter((item) => item.stepType.stepTypeKey === "recovery").map((item) => item.endConditionValue))
+      .toEqual(repeated.flatMap((segment) => Array.from({ length: segment.repetitions! - 1 }, () => segment.restBetween)));
+  });
+  it("does not treat nonzero single-rep recovery or contradictory float distance as bookkeeping", () => {
+    const single = WorkoutLibrary.createThresholdIntervals(1, 0, 6, 1, 0.5, 60, zones);
+    single.segments[2].duration = 1;
+    expect(() => mapGarminWorkout(single, options)).toThrow("Ambiguous aggregate recovery");
+    const ladder = WorkoutLibrary.createThresholdLadder(1, 0, 10, 4, zones);
+    ladder.segments[2].distance = 1;
+    expect(() => mapGarminWorkout(ladder, options)).toThrow("both distance and duration");
+  });
+  it("preserves power targets on timed ladder floats and omits legacy zero aggregate rows", () => {
+    const steps = mapGarminWorkout({ ...workout, segments: [
+      { type: "threshold", distance: 1, power: 330, description: "Threshold rep" },
+      { type: "recovery", distance: 0.25, duration: 2, pace: 10, power: 250,
+        description: "Float recovery — 2 min easy jog" },
+      { type: "threshold", distance: 1, power: 330, description: "Threshold rep" },
+    ] }, { ...options, target: "power" }).workoutSegments[0].workoutSteps;
+    expect(steps[1]).toMatchObject({ endConditionValue: 120, targetValueOne: 250,
+      endCondition: { conditionTypeKey: "time" }, targetType: { workoutTargetTypeKey: "power.zone" } });
+    const single = WorkoutLibrary.createThresholdIntervals(1, 0, 6, 1, 0.5, 60, zones);
+    delete single.segments[2].duration;
+    expect(mapGarminWorkout(single, options).workoutSegments[0].workoutSteps).toHaveLength(3);
+  });
+  it("exports ladder floats after distance or duration edits", () => {
+    const ladder = WorkoutLibrary.createThresholdLadder(1, 0, 10, 4, zones);
+    const distanceEdit = resizeWorkout(ladder, ladder.totalDistance * 1.2, ladder.estimatedDuration);
+    const timeEdit = resizeWorkout(ladder, ladder.totalDistance, ladder.estimatedDuration * 1.2);
+    for (const run of [distanceEdit, timeEdit]) {
+      const steps = mapGarminWorkout(run, options).workoutSegments[0].workoutSteps;
+      const floats = run.segments.filter((segment) => segment.type === "recovery");
+      expect(steps.filter((item) => item.stepType.stepTypeKey === "recovery").map((item) => item.endConditionValue))
+        .toEqual(floats.map((segment) => segment.duration! * 60));
+    }
+  });
   const strideRun: Workout = {
     ...workout, type: "easy", title: "5 mi Easy + Strides", totalDistance: 5,
     estimatedDuration: 40, weeklyMileageContribution: 5, intensityCategory: "easy",
