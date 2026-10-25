@@ -57,6 +57,15 @@ the product does not silently delete previous Garmin calendar entries.
 
 ## Deployment
 
+### Diagnosing unavailable sync
+
+The generic unavailable message is not proof that a migration is missing. Check
+the deployed server's database and original encryption-key configuration. The
+route logs only a fixed failure stage and sanitized SQLSTATE, without raw errors,
+queries or credentials. SQLSTATE `42P01` identifies a missing relation and returns
+the workout migration path; credential-decryption failures identify the existing
+encryption key separately. Never generate a replacement key for stored sessions.
+
 Apply `scripts/add-garmin-workout-sync.sql` (or `npm run db:push`) before deploying
 the application. It creates `garmin_workout_exports`, keyed by athlete, plan, and
 source workout ID, with durable JSONB write-ahead state. Existing encrypted

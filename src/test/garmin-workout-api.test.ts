@@ -126,4 +126,19 @@ describe("Planned Garmin workout API", () => {
     const internal = await POST(request(), context);
     expect(JSON.stringify(await internal.json())).not.toContain("database secret");
   });
+  it("distinguishes a missing migration without exposing the database error", async () => {
+    database();
+    mocks.sync.mockRejectedValue(Object.assign(new Error("secret query"), { code: "42P01" }));
+    const response = await POST(request(), context);
+    expect((await response.json()).error).toContain("scripts/add-garmin-workout-sync.sql");
+  });
+  it("reports credential configuration separately from database migration", async () => {
+    database();
+    mocks.decrypt.mockImplementation(() => { throw new Error("secret key material"); });
+    const response = await POST(request(), context);
+    const result = await response.json();
+    expect(result.error).toContain("existing encryption key");
+    expect(JSON.stringify(result)).not.toContain("secret key material");
+    expect(mocks.restore).not.toHaveBeenCalled();
+  });
 });
