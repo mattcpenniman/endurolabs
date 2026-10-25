@@ -7,6 +7,7 @@
 import React, { useEffect, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import GarminActivityMapCard from "@/app/components/plan/GarminActivityMapCard";
+import RaceResourcesCard from "@/app/components/races/RaceResourcesCard";
 import { useUnits } from "@/app/components/units/UnitsProvider";
 import type { RaceListResponse, RaceResultRecord, RunActivity } from "@/lib/activities/models";
 import {
@@ -322,6 +323,8 @@ function RacesPageContent(): React.ReactNode {
                 <RaceMetric label="Elevation" value={formatElevationGain(selectedRace.elevationGainMeters, units)} />
               </div>
             </section>
+
+            <RaceResourcesCard key={selectedRace.id} activityId={selectedRace.id} />
 
             <section className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm sm:p-6">
               <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">

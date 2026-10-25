@@ -110,6 +110,8 @@ src/
 
 ## Race Performance Analysis
 
+- Private race certificates/photos and online-results links live on `/races` in `RaceResourcesCard`. Apply `scripts/add-race-resources.sql` before deployment; `race_resources` and `race_attachments` store links and bounded base64 files in PostgreSQL. Resources are owner-only and separate from canonical prediction evidence/public shares. See `docs/race-resources.md` for API routes, limits, and backups.
+
 - The next race-prediction workflow starts with the read-only CLI: `npm run race:analyze -- --email runner@example.com` or `npm run race:analyze -- --plan-id UUID`.
 - The authenticated product UI is `/race-predictor`; its API is `GET /api/race-predictor`. The endpoint returns 5K, 10K, 10-mile, half-marathon, and marathon forecasts, or a custom forecast with `?distanceMiles=N` (0.5-100 miles).
 - UI/API response construction lives in `src/lib/analytics/race-predictor.ts` and must reuse the same pure forecast functions as the CLI so displayed predictions and backtests cannot drift.

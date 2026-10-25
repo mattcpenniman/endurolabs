@@ -33,6 +33,22 @@ export const users = pgTable("users", {
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 });
 
+/** Private race keepsakes; independent of canonical prediction evidence. */
+export const raceResources = pgTable("race_resources", {
+  activityId: uuid("activity_id").primaryKey().references(() => runActivities.id, { onDelete: "cascade" }),
+  resultsUrl: text("results_url"),
+});
+
+export const raceAttachments = pgTable("race_attachments", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  activityId: uuid("activity_id").notNull().references(() => runActivities.id, { onDelete: "cascade" }),
+  filename: varchar("filename", { length: 180 }).notNull(),
+  contentType: varchar("content_type", { length: 32 }).notNull(),
+  sizeBytes: integer("size_bytes").notNull(),
+  contentBase64: text("content_base64").notNull(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (table) => [index("race_attachments_activity_idx").on(table.activityId)]);
+
 export const sessions = pgTable("sessions", {
   id: uuid("id").primaryKey().defaultRandom(),
   userId: uuid("user_id")
