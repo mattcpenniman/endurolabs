@@ -71,7 +71,13 @@ Missing descriptors stay unavailable, never inferred from cadence or summaries.
 
 Before success, the tool requires an explicit full-detail row array, descriptors,
 an integer `totalMetricsCount` matching returned rows, no 20,000-row cap hit,
-unique elapsed keys and timestamp/elapsed alignment. Summary-only or ambiguous
+timestamp/elapsed alignment and unique canonical elapsed keys. Garmin can repeat
+the exact same timestamp with different unrelated sensor fields. Such rows may
+collapse to the shared mapper's existing last-row-wins sample only when all five
+mapped dynamics values agree (including nulls). Different timestamps rounding to
+one elapsed key, conflicting/missing dynamics, and dropped invalid rows fail
+closed. Coverage and checkpoint counts refer to canonical stored samples, not
+repeated provider rows. Summary-only or ambiguous
 empty/malformed/truncated results fail. An explicit zero-row detail response can
 be terminal unavailable only if no stored samples contradict it. If samples
 already exist, their count, keys and timestamps must match exactly; a changed
@@ -90,6 +96,14 @@ samples. Every returned nonnull value is read back and compared, and stored row
 count/time alignment is verified before the success checkpoint commits atomically.
 Checkpoint `coverage` describes the fetched trace; aggregate before/after counts
 describe storage, including previously measured values preserved through nulls.
+
+Deterministic detail/alignment/readback failures are not immediately retried;
+their failed checkpoints and normal cooldown remain for explicit operator
+reconciliation. Network/rate-limit failures retain bounded retries. The duplicate
+row compatibility fix leaves the canonical mapper output and successful
+`dynamics-detail-v1` checkpoint meaning unchanged: do not invalidate completed
+activities or reset attempt history. After a reviewed fix and separate rollout,
+exhausted failures still require the explicit `--retry-failed` operator decision.
 
 Any valid trace with dynamics is `succeeded`; zero valid dynamics is `unavailable`.
 Per-metric zero counts (e.g. race balance) remain explicitly unavailable; they do

@@ -95,8 +95,8 @@ function rowValue(row, indexes, aliases) {
   return undefined;
 }
 
-/** Maps Garmin's descriptor-indexed detail response into stable database samples. */
-export function mapGarminActivityDetail(payload, activityStart) {
+/** Maps each provider row before the legacy last-row-wins elapsed-key reduction. */
+export function mapGarminActivityDetailRows(payload, activityStart) {
   if (!payload || typeof payload !== "object") return [];
   const detail = payload;
   const indexes = descriptorIndexes(detail);
@@ -138,6 +138,12 @@ export function mapGarminActivityDetail(payload, activityStart) {
     }];
   });
 
+  return samples;
+}
+
+/** Maps Garmin's descriptor-indexed detail response into stable database samples. */
+export function mapGarminActivityDetail(payload, activityStart) {
+  const samples = mapGarminActivityDetailRows(payload, activityStart);
   const byElapsed = new Map();
   for (const sample of samples) byElapsed.set(sample.elapsedSeconds, sample);
   return [...byElapsed.values()].sort((left, right) => left.elapsedSeconds - right.elapsedSeconds);

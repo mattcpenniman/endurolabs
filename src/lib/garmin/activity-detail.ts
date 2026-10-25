@@ -16,4 +16,4 @@ export interface GarminActivitySample extends Partial<RunningDynamics> {
   temperatureCelsius: number | null;
 }
 
-export { mapGarminActivityDetail } from "./activity-detail.mjs";
+export { mapGarminActivityDetail, mapGarminActivityDetailRows } from "./activity-detail.mjs";

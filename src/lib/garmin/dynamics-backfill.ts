@@ -1,12 +1,12 @@
 /** Versioned dynamics-only detail validation, coverage and bounded retry policy. */
-import { mapGarminActivityDetail } from "./activity-detail";
+import { mapGarminActivityDetailRows } from "./activity-detail";
 
 export const DYNAMICS_BACKFILL_VERSION = "dynamics-detail-v1";
 export const DYNAMICS_COLUMNS = ["vertical_oscillation_cm", "vertical_ratio_percent", "ground_contact_time_ms",
   "ground_contact_balance_left_percent", "stride_length_cm"] as const;
 export const DYNAMICS_PROPERTIES = ["verticalOscillationCm", "verticalRatioPercent", "groundContactTimeMs",
   "groundContactBalanceLeftPercent", "strideLengthCm"] as const;
-export type DetailSample = ReturnType<typeof mapGarminActivityDetail>[number];
+export type DetailSample = ReturnType<typeof mapGarminActivityDetailRows>[number];
 export type DynamicsCoverage = Record<typeof DYNAMICS_COLUMNS[number], number>;
 
 export function sampleCoverage(samples: DetailSample[]): DynamicsCoverage {
@@ -14,7 +14,7 @@ export function sampleCoverage(samples: DetailSample[]): DynamicsCoverage {
     samples.filter((sample) => sample[DYNAMICS_PROPERTIES[index]] !== null).length])) as DynamicsCoverage;
 }
 
-/** Require Garmin's total, unique rows and aligned timestamps: never certify decimated detail. */
+/** Require complete, aligned rows; repeated keys must agree on the dynamics-only patch. */
 export function validateDynamicsDetail(payload: unknown, start: Date): DetailSample[] {
   const detail = payload as { metricDescriptors?: unknown[]; activityDetailMetrics?: unknown[]; totalMetricsCount?: number } | null;
   if (!detail || !Array.isArray(detail.metricDescriptors) || !Array.isArray(detail.activityDetailMetrics)
@@ -22,12 +22,24 @@ export function validateDynamicsDetail(payload: unknown, start: Date): DetailSam
     || detail.totalMetricsCount !== detail.activityDetailMetrics.length || detail.activityDetailMetrics.length >= 20000) {
     throw new Error("incomplete_detail");
   }
-  const samples = mapGarminActivityDetail(payload, start);
+  const samples = mapGarminActivityDetailRows(payload, start);
   if (samples.length !== detail.activityDetailMetrics.length || samples.some((sample) =>
     Math.abs((sample.timestamp.getTime() - start.getTime()) / 1000 - sample.elapsedSeconds) > 1)) {
     throw new Error("invalid_alignment");
   }
-  return samples;
+  const byElapsed = new Map<number, DetailSample>();
+  for (const sample of samples) {
+    const previous = byElapsed.get(sample.elapsedSeconds);
+    // Garmin can repeat a timestamp with different unrelated sensor values. Match
+    // the existing mapper's last-row-wins key, but never choose between conflicting
+    // dynamics or silently merge distinct subsecond timestamps into one sample.
+    if (previous && (previous.timestamp.getTime() !== sample.timestamp.getTime()
+      || DYNAMICS_PROPERTIES.some((key) => previous[key] !== sample[key]))) {
+      throw new Error("invalid_alignment");
+    }
+    byElapsed.set(sample.elapsedSeconds, sample);
+  }
+  return [...byElapsed.values()].sort((left, right) => left.elapsedSeconds - right.elapsedSeconds);
 }
 
 export function backfillErrorCode(error: unknown): string {
@@ -45,7 +57,8 @@ export function backfillErrorCode(error: unknown): string {
 /** Retry-After is honored up to five minutes; longer waits defer to the next invocation. */
 export function retryDelay(error: unknown, attempt: number): number | null {
   const code = backfillErrorCode(error);
-  if (["auth_required", "mfa_required", "ownership_lost"].includes(code) || attempt >= 3) return null;
+  if (["auth_required", "mfa_required", "ownership_lost", "invalid_alignment", "stored_alignment_changed",
+    "incomplete_detail", "coverage_mismatch"].includes(code) || attempt >= 3) return null;
   const value = (error as { response?: { headers?: Record<string, unknown> } })?.response?.headers?.["retry-after"];
   const seconds = Number(value);
   const delay = value === undefined ? 0 : Number.isFinite(seconds) ? seconds * 1000 : Date.parse(String(value)) - Date.now();
