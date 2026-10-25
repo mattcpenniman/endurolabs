@@ -1,7 +1,7 @@
 /** Prescription fidelity and uncertain-write behavior for single-run Garmin export. */
 import { describe, expect, it } from "vitest";
 import { mapGarminWorkout, selectPlannedRun, workoutCalendarDate } from "../lib/garmin/workout-export";
-import { publishGarminWorkout } from "../lib/garmin/workout-publisher";
+import { publishGarminWorkout, verifyRemoteWorkout } from "../lib/garmin/workout-publisher";
 import type { ExportCheckpoint, ExportJournal, WorkoutTransport } from "../lib/garmin/workout-publisher";
 import type { Workout, DailyPlan } from "../lib/training/models";
 
@@ -21,6 +21,37 @@ const workout: Workout = {
 const options = { name: "EL test", marker: "EnduroLab export test" };
 
 describe("Garmin workout mapping", () => {
+  it.each(["pace", "power"] as const)("adds secondary cadence without changing %s targets or repeat recoveries", (target) => {
+    const run = { ...workout, segments: [
+      { type: "threshold" as const, duration: 5, pace: 6.5, power: 330, repetitions: 3, restBetween: 60, description: "Cruise intervals" },
+      { type: "recovery" as const, duration: 2, pace: 8, power: 250, description: "Recoveries" },
+    ] };
+    const original = mapGarminWorkout(run, { ...options, target });
+    const mapped = mapGarminWorkout(run, { ...options, target, cadence: true });
+    expect(mapped.workoutSegments[0].workoutSteps).toHaveLength(5);
+    mapped.workoutSegments[0].workoutSteps.forEach((item, index) => {
+      const { secondaryTargetType, secondaryTargetValueOne, secondaryTargetValueTwo, ...primary } = item;
+      expect(primary).toEqual(original.workoutSegments[0].workoutSteps[index]);
+      expect(secondaryTargetType).toEqual({ workoutTargetTypeId: 3, workoutTargetTypeKey: "cadence" });
+      expect([secondaryTargetValueOne, secondaryTargetValueTwo]).toEqual([180, 190]);
+    });
+  });
+  it("requires cadence type and both numeric bounds in Garmin readback", () => {
+    const payload = mapGarminWorkout(workout, { ...options, cadence: true });
+    const remote = { ...payload, workoutId: 42 };
+    expect(() => verifyRemoteWorkout(remote, payload)).not.toThrow();
+    for (const mutation of [
+      { secondaryTargetType: undefined },
+      { secondaryTargetValueOne: undefined },
+      { secondaryTargetValueTwo: 200 },
+      { secondaryTargetValueOne: NaN },
+    ]) {
+      const changed = structuredClone(remote);
+      Object.assign(changed.workoutSegments[0].workoutSteps[0], mutation);
+      expect(() => verifyRemoteWorkout(changed, payload)).toThrow("prescription mismatch");
+    }
+    expect(() => verifyRemoteWorkout(remote, mapGarminWorkout(workout, options))).toThrow("prescription mismatch");
+  });
   it("keeps all six Feb 16 steps, 14 miles and exact prescribed pace anchors", () => {
     const mapped = mapGarminWorkout(workout, options);
     const steps = mapped.workoutSegments[0].workoutSteps;

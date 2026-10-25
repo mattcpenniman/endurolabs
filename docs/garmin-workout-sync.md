@@ -5,6 +5,14 @@ workout. Primary and secondary runs have separate controls. Choose pace targets
 (default) or explicit prescribed power targets. Missing power anchors stop the
 request rather than substituting another target. Connect Garmin in Profile first.
 
+Both single-run and full-plan sync include a **180–190 steps/minute cadence goal**
+as Garmin's secondary target on every executable running step, including warm-up,
+cool-down and between-rep recovery. The primary pace/power target is preserved.
+This is total running steps/minute, not single-leg cadence. Readback must confirm
+both cadence bounds before sync is successful. Previously confirmed exports show
+as changed and update in place on explicit resync. Unresolved older exports first
+reconcile their exact original prescription; the following sync adds cadence.
+
 This uses the existing **unofficial Garmin Connect** connection, not the official
 Training API. The run-level button sends one saved workout per click. Success means executable
 steps and the calendar date were read back from Garmin Connect; sync your watch
@@ -131,3 +139,13 @@ existing entry and new `calendarDate`. Automated tests cover in-place updates,
 moves, positive timeout reconciliation, blocked uncertain writes, and external
 edit conflicts. Live update/reschedule and watch acceptance require separate
 authorized acceptance; the earlier CLI create/schedule test does not prove them.
+
+The public typed [workout model](https://github.com/cyberjunky/python-garminconnect/blob/master/garminconnect/workout.py)
+defines cadence target ID 3 (`cadence`) in steps/minute and supports
+`secondaryTargetType`/`secondaryTargetValueOne`/`secondaryTargetValueTwo`.
+On October 25, 2026, VEC-1112 updated the existing standalone five-pair test
+workout **1740219430** in place. Garmin Connect readback confirmed 180–190 spm
+on all 11 steps, unchanged pace targets/distances and the same calendar date.
+Watch delivery was not observed. This live update preserved the historical CLI
+description/hash as provenance; its original create-only journal is historical
+and must not be used to replay the pre-cadence prescription.

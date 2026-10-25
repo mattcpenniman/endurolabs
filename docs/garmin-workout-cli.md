@@ -41,6 +41,13 @@ in a trusted administrative environment containing the original encryption key.
 
 ## Mapping and scope
 
+`--cadence` adds a secondary 180–190 spm goal to every running step alongside
+pace or power. Omit it to preserve older CLI previews/journals; changing this
+option changes the prescription and the create-only CLI will stop on an existing
+export. Use the product sync for saved-plan in-place updates. The product always
+includes this cadence goal. The October 25 standalone test was separately updated
+in place under VEC-1112; do not rerun its original pre-cadence create-only journal.
+
 ### Standalone 100 m test
 
 Use `--test-intervals N` (1–24) to build a standalone workout instead of selecting

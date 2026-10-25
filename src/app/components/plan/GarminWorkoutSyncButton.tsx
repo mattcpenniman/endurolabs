@@ -42,7 +42,7 @@ export function GarminWorkoutSyncButton({ planId, date, workout, disabled = fals
         </button>
         {current?.url && <a href={current.url} target="_blank" rel="noreferrer" className="text-xs text-enduro-700 underline">View synced workout ↗</a>}
       </div>
-      <p className="text-[11px] text-gray-500">Syncs this saved run and updates previous exports. Sync your watch in Garmin Connect afterward.</p>
+      <p className="text-[11px] text-gray-500">Includes a secondary cadence goal of 180–190 spm on every running step. Syncs this saved run and updates previous exports. Sync your watch in Garmin Connect afterward.</p>
       <div role="status" aria-live="polite" className={`text-xs ${current?.error ? "text-red-600" : "text-enduro-700"}`}>
         {current?.error ?? (current?.url ? "Workout and date verified in Garmin Connect." : "")}
       </div>

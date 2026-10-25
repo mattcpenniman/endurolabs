@@ -14,6 +14,9 @@ export interface GarminWorkoutStep {
   targetType: { workoutTargetTypeId: number; workoutTargetTypeKey: string };
   targetValueOne?: number;
   targetValueTwo?: number;
+  secondaryTargetType?: { workoutTargetTypeId: number; workoutTargetTypeKey: string };
+  secondaryTargetValueOne?: number;
+  secondaryTargetValueTwo?: number;
   description: string;
 }
 
@@ -93,7 +96,7 @@ function step(segment: WorkoutSegment, order: number, target: "pace" | "power"):
 /** Expand repeats with between-rep recovery only, consuming known aggregate recovery rows. */
 export function mapGarminWorkout(
   workout: Workout,
-  options: { name: string; marker: string; target?: "pace" | "power" },
+  options: { name: string; marker: string; target?: "pace" | "power"; cadence?: boolean },
 ): GarminWorkoutPayload {
   if (NON_RUNNING.has(workout.type) || !workout.segments.length) throw new Error("Not a running workout");
   const target = options.target ?? "pace";
@@ -136,6 +139,11 @@ export function mapGarminWorkout(
     }
   }
   if (steps.length > 50) throw new Error("Export exceeds the initial 50-step limit");
+  if (options.cadence) for (const item of steps) {
+    item.secondaryTargetType = { workoutTargetTypeId: 3, workoutTargetTypeKey: "cadence" };
+    item.secondaryTargetValueOne = 180;
+    item.secondaryTargetValueTwo = 190;
+  }
   return {
     workoutName: options.name,
     description: `${options.marker}\n${workout.description}`,
