@@ -60,3 +60,75 @@ Review the ordered sessions against the reference's M/T, T/E/T and steady-E Q1
 rotation with complementary Q2 sessions; literal elite distances should be
 scaled to the runner. It does not automatically judge the entire rotation,
 athlete readiness, fueling, or whether current training paces are achievable.
+
+## Newport 2027 generator follow-up (VEC-1099, 2026-10-25)
+
+Compared saved plan `d953d707-5428-4cd8-9fa9-3b30627eb36a` using the CLI above
+with `auditQualityWorkouts(generatePlan(saved.runnerProfile))` in memory. The
+stored profile is a 24-week Saturday-race plan (2027-04-17), 48 current/80 peak
+mpw, six training days, eight runs, Wednesday rest, Saturday long run, and
+Monday/Tuesday doubles, with a 2:59:59 goal and no current race/pace anchors.
+No saved plan or referenced workout IDs were changed.
+
+### Findings already fixed before this follow-up
+
+| Area | Saved prescriptions | Fresh generation |
+| --- | --- | --- |
+| Base | Sustained M/T in weeks 4–6 | Six E weeks, relaxed strides after week 3 |
+| Q1/Q2 | Midweek M/T, no T/E/T long family | Long-slot M/T → T/E/T → steady E; complementary T/I Q2 |
+| Recovery | Weeks 9/12/15/18: 38–45 min M finishes, no T Q2 | Steady-E Q1 plus 3 × 1 mi T (3 × 1.25 mi in week 15) |
+| Taper | No quality weeks 22/23; 16 days to sharpener | Reduced M/T Q1 + T Q2 in week 22, T/E/T Q1 + T Q2 in week 23; two days from final Q1 to sharpener |
+| Intervals | Weeks 11/14/17/20: 2 × 0.75 mi, 9.14 min I, 8.1-min E bookends | Weeks 8/11/14/17/20: 4 × 0.75 mi, 18.27 min I, 10.13-min E bookends; week 21: 3 × 0.75 mi |
+| Oversized days/doubles | Midweek 17.5–18.75 mi quality days; 7.25–8.25 mi secondary runs | M/T moved into Q1; ordinary-day redistribution and easy doubles ≤6 mi |
+| Race week | Appropriate five-day T sharpener, but 1.75 mi closing E | Monday 2027-04-12: 4 × 0.75 mi T, 2-min jogs, 2 mi E on each side |
+
+The interval plateau is now a deliberate consequence of volume-based dosing and
+whole repetitions: 64–72 mpw at a 5% I request gives the same four 0.75-mile
+reps after rounding down, with three reps at 56 mpw. It is not forced to grow
+each cycle. A smaller 1.5-mile I request can still produce two reps; the audit's
+under-ten-minute prompt is not a minimum to enforce.
+
+### Remaining defects corrected here
+
+- Floor the ordinary-day ceiling to quarter miles rather than rounding up.
+  The previous fresh generator could schedule 11.25 mi against an 11.2-mi limit
+  (56 mpw), or 14.5 mi against 14.4 (72 mpw), including easy days omitted from
+  the quality-only report. Redistribution still preserves Newport's weekly
+  volume; constrained schedules rebuild at feasible volume.
+- Give recovery-week policy priority over an I slot in the race-relative
+  rotation. In compressed/extended plans the mileage recovery cycle can land
+  on an interval week; Q2 now remains scaled T.
+- Preserve closing E when an M-family long run has no requested T inserts.
+  This branch now places M between easy bookends instead of using an MP finish.
+  The old progression-run template is no longer selected by the generator;
+  it is not reintroduced to address the saved progression finishes.
+
+After these fixes the fresh audit has **40 quality-containing runs**: 30 M/T/I
+sessions and 10 prose-stride runs. No week-level findings remain; the only
+session prompts are `prose-strides`. Strides remain text-prescribed, with no
+invented isolated time/distance. Both standalone T/I bookends meet the 10–30
+minute guidance for this profile. The pace zones remain unchanged and
+goal-derived estimates (E midpoint 8:06/mi, M 6:52, T 6:28, I 6:05); no
+historical PR is injected.
+
+### Documented adaptations and regression coverage
+
+The elite distances are scaled, continuous/ladders T are adapted to capped
+cruise work, and R work is not synthesized as I. Week 21 uses an I-only Q2
+adaptation of the mixed reference. Q1 keeps the approved **160-minute actual
+segment-time** ceiling rather than the reference's 150 minutes, with its 25%
+weekly distance limit. T shares the 10%/60-min budget across Q1/Q2, M stays
+within 16 mi/90 min, and I within 8%/10 km with reps ≤5 min and jogs no longer
+than work. Race-week 4 × 0.75 mi approximates the documented 4 × 1,200 m;
+its explicit 2-min rests and percentage-cap exception are retained.
+
+`src/test/marathon-sessions.test.ts` reproduces the fresh profile audit and
+tests shifted recovery cycles (14/18/24/28 weeks), exact daily ceilings and
+intensity budgets with constrained schedules/doubles, intentional small I
+doses, M-only bookends, base/build/taper families, Saturday race week,
+segment-duration limits, and mileage arithmetic. Run:
+
+```sh
+npm test -- src/test/marathon-sessions.test.ts src/test/plan-generator.test.ts src/test/zone-calculator.test.ts src/test/quality-workout-audit.test.ts
+npx tsc --noEmit
+```

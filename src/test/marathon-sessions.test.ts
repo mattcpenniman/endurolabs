@@ -4,6 +4,7 @@ import { generatePlan } from "@/lib/training/plan-generator";
 import { RunnerProfile, Workout } from "@/lib/training/models";
 import { buildMarathonSessions, MarathonSessionsInput } from "@/lib/training/marathon-sessions";
 import { calculatePaceZones } from "@/lib/training/zone-calculator";
+import { auditQualityWorkouts } from "../../scripts/quality-workout-audit.mjs";
 
 function profile(overrides: Partial<RunnerProfile> = {}): RunnerProfile {
   return {
@@ -24,6 +25,87 @@ function miles(workout: Workout, type: string): number {
 }
 
 describe("documented marathon prescriptions", () => {
+  it("passes the fresh Newport quality audit with only the documented prose-stride prompts", () => {
+    const input = profile({ raceName: "Newport Marathon 2027", maxHeartRate: 185,
+      restingHeartRate: 60, expectedRaceTempF: 50, racePacingStrategy: "negative" });
+    const before = JSON.stringify(input);
+    const plan = generatePlan(input);
+    const report = auditQualityWorkouts(plan);
+    expect(report.sessionCount).toBe(40);
+    expect(report.weeks.flatMap((week: { findings: unknown[] }) => week.findings)).toEqual([]);
+    expect(new Set(report.sessions.flatMap((row: { findings: { code: string }[] }) =>
+      row.findings.map((finding) => finding.code)))).toEqual(new Set(["prose-strides"]));
+    expect(report.notes.join(" ")).toContain("goal-derived training paces are estimates");
+    expect(plan.runnerProfile.currentMarathonPR).toBeNull();
+    expect(JSON.stringify(input)).toBe(before);
+  });
+
+  it.each([14, 18, 24, 28])("keeps recovery Q2 at T when the mileage cycle shifts in %i weeks", (weeks) => {
+    const plan = generatePlan(profile({ weeksOverride: weeks }));
+    const recovery = plan.weeks.filter((week) => week.isDownWeek);
+    expect(recovery.length).toBeGreaterThan(0);
+    for (const week of recovery) {
+      expect(week.intensityDistribution.vo2).toBe(0);
+      expect(week.intensityDistribution.marathon).toBe(0);
+      expect(week.intensityDistribution.threshold).toBeGreaterThan(0);
+    }
+  });
+
+  it.each([
+    {},
+    { trainingDaysPerWeek: 5, runsPerWeekOverride: 7, preferredDoubleUpDays: ["Tuesday"] },
+    { trainingDaysPerWeek: 4, runsPerWeekOverride: 4 },
+  ])("enforces exact daily ceilings across easy, quality and double days: %o", (overrides) => {
+    const plan = generatePlan(profile(overrides));
+    for (const week of plan.weeks.filter((week) => !week.isRaceWeek)) {
+      expect(week.intensityDistribution.threshold).toBeLessThanOrEqual(Math.min(week.totalMileage * 0.1, 60 / plan.paceZones.threshold));
+      expect(week.intensityDistribution.vo2).toBeLessThanOrEqual(Math.min(week.totalMileage * 0.08, 10 / 1.609344));
+      expect(week.intensityDistribution.marathon).toBeLessThanOrEqual(Math.min(16, 90 / plan.paceZones.marathon));
+      expect(week.longRunDistance).toBeLessThanOrEqual(week.totalMileage * 0.25);
+      for (const day of week.days) {
+        if (day.workout?.type !== "long") {
+          expect(day.plannedMileage).toBeLessThanOrEqual(Math.max(8, week.totalMileage * 0.2));
+        }
+        if (day.secondaryWorkout) {
+          expect(day.secondaryWorkout.type).toBe("easy");
+          expect(day.secondaryWorkout.totalDistance).toBeLessThanOrEqual(6);
+        }
+      }
+    }
+  });
+
+  it("scales interval work with volume without imposing a universal minimum dose", () => {
+    const plan = generatePlan(profile());
+    const reps = (number: number): number => plan.weeks[number - 1].days
+      .flatMap((day) => day.workout?.segments ?? []).find((segment) => segment.type === "vo2")!.repetitions!;
+    expect([8, 11, 14, 17, 20, 21].map(reps)).toEqual([4, 4, 4, 4, 4, 3]);
+    const zones = plan.paceZones;
+    const small = buildMarathonSessions({ week: 8, weeksBeforeRace: 16, weeklyMileage: 40,
+      longRunMiles: 10, secondSessionBudget: 8, isDownWeek: false, allowQuality: true,
+      targets: { easy: 34, threshold: 2.5, marathon: 2, vo2: 1.5 }, paceZones: zones });
+    expect(miles(small.keyWorkout!, "vo2")).toBe(1.5);
+    for (const workout of [small.keyWorkout!, ...plan.weeks.flatMap((week) => week.days)
+      .map((day) => day.workout).filter((workout): workout is Workout => workout?.type === "vo2")]) {
+      for (const segment of [workout.segments[0], workout.segments.at(-1)!]) {
+        const minutes = segment.distance! * segment.pace!;
+        expect(minutes).toBeGreaterThanOrEqual(10);
+        expect(minutes).toBeLessThanOrEqual(30);
+      }
+    }
+  });
+
+  it("retains easy bookends when Q1 has marathon work without threshold inserts", () => {
+    const plan = generatePlan(profile({ intensityTargetPercents: { marathon: 10, threshold: 0, vo2: 5 } }));
+    const long = plan.weeks[6].days.find((day) => day.workout?.type === "long")!.workout!;
+    expect(miles(long, "marathon_pace")).toBe(4);
+    expect(miles(long, "threshold")).toBe(0);
+    expect(long.segments[0].type).toBe("easy");
+    expect(long.segments.at(-1)!.type).toBe("easy");
+    expect(long.segments.at(-1)!.distance! * long.segments.at(-1)!.pace!).toBeGreaterThanOrEqual(10);
+    expect(long.totalDistance).toBe(16);
+    expect(long.weeklyMileageContribution).toBe(16);
+  });
+
   it("uses six aerobic weeks, then places M/T, T/E/T and steady E in the Q1 long slot", () => {
     const plan = generatePlan(profile());
     expect(plan.phases[0].weekRange).toEqual([1, 6]);

@@ -448,7 +448,8 @@ function rebalanceDailyMileage(
   longRunDay: string,
   paceZones: PaceZones
 ): void {
-  const ordinaryDayCap = roundMiles(Math.max(8, weeklyMileage * 0.2));
+  // A hard ceiling must round down: e.g. 20% of 56 is 11.2, not 11.25.
+  const ordinaryDayCap = Math.floor(Math.max(8, weeklyMileage * 0.2) * 4) / 4;
   const adjacentLongRunCap = roundMiles(Math.max(6, weeklyMileage * 0.12));
   const dayMileage = (day: DailyPlan): number => roundMiles(
     (day.workout?.weeklyMileageContribution ?? 0) +

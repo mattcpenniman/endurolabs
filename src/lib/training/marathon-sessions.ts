@@ -104,7 +104,11 @@ function buildSessionsAtDistance(input: MarathonSessionsInput): { longRun: Worko
       longRun.id = `long-w${week}-0`;
       longRun.title = `${longRunMiles} mi Long Run w/ ${marathon} mi M + ${threshold} mi T`;
     } else if (marathon >= 1) {
-      longRun = WorkoutLibrary.createLongRun(week, 0, longRunMiles, zones, power, marathon);
+      // Keep easy running on both sides even when no T inserts were requested.
+      longRun = WorkoutLibrary.createMarathonPaceRun(week, 0, marathon, longRunMiles, zones, power);
+      longRun.type = "long";
+      longRun.id = `long-w${week}-0`;
+      longRun.title = `${longRunMiles} mi Long Run w/ ${marathon} mi M`;
     }
   } else if (longKind === "threshold") {
     const threshold = floorMiles(Math.min(thresholdBudget / 2, 2 * floorMiles(15 / zones.threshold), longRunMiles - 4));
@@ -115,7 +119,9 @@ function buildSessionsAtDistance(input: MarathonSessionsInput): { longRun: Worko
 
   const remainingThreshold = thresholdBudget - distanceAt(longRun, "threshold");
   const intervalBudget = floorMiles(Math.min(targets.vo2, weeklyMileage * 0.08, 10 / 1.609344));
-  const keyWorkout = rotation[1] === "interval" && intervalBudget > 0
+  // The mileage recovery cycle can land on an I week in compressed/extended
+  // plans. Recovery policy takes precedence over the race-relative rotation.
+  const keyWorkout = !isDownWeek && rotation[1] === "interval" && intervalBudget > 0
     ? intervalSession(week, intervalBudget, secondSessionBudget, zones, power)
     : thresholdSession(week, 1, remainingThreshold, secondSessionBudget, zones, power);
   return { longRun, keyWorkout };
