@@ -6,6 +6,7 @@ import type { TimeAtEffortSummary } from "@/lib/analytics/time-at-effort";
 import type { RunScore } from "@/lib/analytics/run-score";
 import type { ActivitySplitOptions } from "@/lib/activities/activity-splits";
 import type { RunningDynamics } from "@/lib/garmin/running-dynamics.mjs";
+import type { DynamicsReport, DynamicsWindow } from "./running-dynamics";
 
 export interface RunActivity extends Partial<RunningDynamics> {
   id: string;
@@ -111,6 +112,7 @@ export interface ActivityChartPoint extends ActivityChartSample {
 }
 
 export interface ActivitySplit {
+  dynamics?: DynamicsWindow;
   number: number;
   distanceMiles: number;
   durationSeconds: number;
@@ -126,6 +128,7 @@ export interface ActivitySplit {
 }
 
 export interface ActivityDetailResponse {
+  dynamics?: DynamicsReport;
   samples: ActivityChartSample[];
   splits: ActivitySplit[];
   splitOptions?: ActivitySplitOptions;

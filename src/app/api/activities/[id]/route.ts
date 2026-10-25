@@ -9,6 +9,7 @@ import { db } from "@/lib/db/client";
 import { activitySamples, plans, runActivities } from "@/lib/db/schema";
 import { downsampleActivitySamples, normalizeActivityCadence } from "@/lib/activities/activity-chart";
 import { buildActivitySplitOptions } from "@/lib/activities/activity-splits";
+import { buildDynamicsReport } from "@/lib/activities/running-dynamics";
 import { summarizeTimeAtEffort } from "@/lib/analytics/time-at-effort";
 import type { MarathonPlan } from "@/lib/training/models";
 import { loadRunScores } from "@/lib/analytics/run-score-persistence";
@@ -91,7 +92,7 @@ export async function GET(
   }));
 
   const runScore = (await loadRunScores([activity])).get(id) ?? null;
-  return NextResponse.json({ samples: downsampleActivitySamples(displaySamples), splits: splitOptions.mile, splitOptions, timeAtEffort, runScore });
+  return NextResponse.json({ dynamics: buildDynamicsReport(samples, activity.durationSeconds), samples: downsampleActivitySamples(displaySamples), splits: splitOptions.mile, splitOptions, timeAtEffort, runScore });
 }
 
 export async function PATCH(

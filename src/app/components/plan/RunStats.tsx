@@ -3,6 +3,7 @@ import React from "react";
 import type { ActivityDetailResponse, RunActivity } from "@/lib/activities/models";
 import type { TimeAtEffortBreakdown } from "@/lib/analytics/time-at-effort";
 import { paceMinPerMileForDisplay, paceUnitSuffix, type UnitSystem } from "@/lib/units/format";
+import RunningDynamicsStats from "./RunningDynamicsStats";
 
 function duration(seconds: number | null): string {
   if (seconds === null || !Number.isFinite(seconds) || seconds < 0) return "--";
@@ -33,6 +34,7 @@ export default function RunStats({ activity, detail, units }: {
     ["Moving pace", paceSeconds === null ? "--" : `${duration(paceSeconds)}${paceUnitSuffix(units)}`],
   ];
   return <div className="space-y-6 p-5">
+    <RunningDynamicsStats key={activity.id} activity={activity} detail={detail} units={units} />
     <section aria-label="Run timing">
       <h4 className="text-sm font-semibold text-gray-900">Time & pace</h4>
       <dl className="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-4">

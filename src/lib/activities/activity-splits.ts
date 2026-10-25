@@ -7,6 +7,7 @@
 
 import type { ActivityChartSample, ActivitySplit } from "@/lib/activities/models";
 import { normalizeActivityCadence } from "@/lib/activities/activity-chart";
+import { buildDynamicsWindow } from "./running-dynamics";
 
 const METERS_PER_MILE = 1609.344;
 export const ACTIVITY_SPLIT_LENGTHS = {
@@ -172,6 +173,7 @@ export function buildActivitySplits(input: ActivitySplitInput): ActivitySplit[] 
     }
 
     const split: ActivitySplit = {
+      dynamics: buildDynamicsWindow(samples, startElapsed, endElapsed),
       number: index + 1,
       distanceMiles,
       durationSeconds,

@@ -8,6 +8,10 @@ import { RunScoreSummaryBadge } from "@/app/components/plan/RunScoreDetails";
 import { buildActivitySplitOptions } from "@/lib/activities/activity-splits";
 import RunStats from "@/app/components/plan/RunStats";
 import { summarizeTimeAtEffort } from "@/lib/analytics/time-at-effort";
+import { buildDynamicsReport } from "@/lib/activities/running-dynamics";
+import { toBlob } from "html-to-image";
+
+vi.mock("html-to-image", () => ({ toBlob: vi.fn() }));
 
 vi.mock("@/app/components/plan/GarminActivityLeafletMap", () => ({ default: () => <div>Map</div> }));
 function activity(id: string, cadence: number | null): RunActivity {
@@ -122,6 +126,78 @@ describe("Run card score tab", () => {
     await act(async () => [...container.querySelectorAll<HTMLButtonElement>('[role="tab"]')].find((button) => button.textContent === "Score")!.click());
     expect(container.querySelector('select[aria-label="Target effort"]')).toBeNull();
     expect(container.textContent).toContain("Pace / power goals · Easy");
+  });
+
+  it("shows measured dynamics, aligned pace and independent coverage in shared read-only Stats", async () => {
+    const samples = [0, 10, 20].map((elapsedSeconds) => ({ elapsedSeconds, speedMetersPerSecond: 3,
+      heartRate: 140, power: 300, cadence: 90, strideLengthCm: 109.14, verticalOscillationCm: 6.44,
+      verticalRatioPercent: 5.71, groundContactTimeMs: 272.3, groundContactBalanceLeftPercent: null }));
+    const dynamics = buildDynamicsReport(samples, 20);
+    vi.stubGlobal("fetch", vi.fn(async () => ({ ok: true, json: async () => ({ samples, splits: [], dynamics }) })));
+    await act(async () => root.render(<GarminActivityMapCard activities={[{ ...activity("dynamics-shared", 180), strideLengthCm: 109.14 }]} detailUrlPrefix="/api/run/dynamics-token/activities" />));
+    await act(async () => [...container.querySelectorAll<HTMLButtonElement>('[role="tab"]')].find((button) => button.textContent === "Stats")!.click());
+    const panel = container.querySelector('[aria-label="Running dynamics"]')!;
+    expect(panel.textContent).toContain("3.58 ft");
+    expect(panel.textContent).toContain("20.0 s valid · 100% of eligible time");
+    expect(panel.textContent).toContain("0.0 s valid · 0% of eligible time");
+    expect(panel.textContent).not.toContain("50.00% left");
+    expect(panel.textContent).toContain("Device and sensor differences");
+    expect(panel.querySelector('svg')!.getAttribute("viewBox")).toBe("0 0 700 205");
+    expect(panel.querySelector('svg')!.textContent).toContain("8:56/mi");
+    expect(container.querySelector('select[aria-label="Target effort"]')).toBeNull();
+    const metric = panel.querySelector("select")!;
+    await act(async () => { metric.value = "groundContactBalanceLeftPercent"; metric.dispatchEvent(new Event("change", { bubbles: true })); });
+    expect(panel.querySelector("svg")).toBeNull();
+    expect(panel.textContent).toContain("No complete chart intervals");
+  });
+
+  it("keeps summary-only dynamics distinct from trace and converts stride units", async () => {
+    const run = { ...activity("dynamics-summary", 180), strideLengthCm: 109.14, groundContactBalanceLeftPercent: 50.79 };
+    await act(async () => root.render(<RunStats activity={run} detail={{ samples: [], splits: [], dynamics: buildDynamicsReport([], 1800) }} units="metric" />));
+    const panel = container.querySelector('[aria-label="Running dynamics"]')!;
+    expect(panel.textContent).toContain("1.09 m");
+    expect(panel.textContent).toContain("50.79% left / 49.21% right");
+    expect(panel.textContent).toContain("Trace: Unavailable");
+    expect(panel.textContent).toContain("no eligible time");
+    expect(panel.querySelector("svg")).toBeNull();
+  });
+
+  it("never displays the previous activity's dynamics while a switched activity loads", async () => {
+    const samples = [0, 10].map((elapsedSeconds) => ({ elapsedSeconds, speedMetersPerSecond: 3,
+      heartRate: null, power: null, cadence: null, strideLengthCm: 150 }));
+    let finish: ((value: unknown) => void) | undefined;
+    vi.stubGlobal("fetch", vi.fn((url: string) => url.endsWith("dynamics-next") ? new Promise((resolve) => { finish = resolve; }) : Promise.resolve({ ok: true, json: async () => ({ samples, splits: [], dynamics: buildDynamicsReport(samples, 10) }) })));
+    await act(async () => root.render(<GarminActivityMapCard activities={[activity("dynamics-first", 180), activity("dynamics-next", 180)]} />));
+    await act(async () => [...container.querySelectorAll<HTMLButtonElement>('[role="tab"]')].find((button) => button.textContent === "Stats")!.click());
+    expect(container.textContent).toContain("Trace: 4.92 ft");
+    const picker = container.querySelector("select")!;
+    await act(async () => { picker.value = "dynamics-next"; picker.dispatchEvent(new Event("change", { bubbles: true })); });
+    expect(container.textContent).not.toContain("Trace: 4.92 ft");
+    expect(container.textContent).toContain("Loading dynamics");
+    await act(async () => finish?.({ ok: true, json: async () => ({ samples: [], splits: [], dynamics: buildDynamicsReport([], 10) }) }));
+    expect(container.textContent).toContain("No complete chart intervals");
+  });
+
+  it("exports the visible responsive dynamics SVG through the existing PNG pipeline", async () => {
+    const samples = [0, 10].map((elapsedSeconds) => ({ elapsedSeconds, speedMetersPerSecond: 3,
+      heartRate: null, power: null, cadence: null, strideLengthCm: 109.14 }));
+    vi.stubGlobal("fetch", vi.fn(async () => ({ ok: true, json: async () => ({ samples, splits: [], dynamics: buildDynamicsReport(samples, 10) }) })));
+    vi.stubGlobal("requestAnimationFrame", (callback: FrameRequestCallback) => { callback(0); return 0; });
+    const write = vi.fn(async () => undefined);
+    vi.stubGlobal("ClipboardItem", class { constructor(public data: unknown) {} });
+    Object.defineProperty(navigator, "clipboard", { configurable: true, value: { write } });
+    vi.mocked(toBlob).mockResolvedValue(new Blob(["image"], { type: "image/png" }));
+    await act(async () => root.render(<GarminActivityMapCard activities={[activity("dynamics-export", 180)]} />));
+    await act(async () => [...container.querySelectorAll<HTMLButtonElement>('[role="tab"]')].find((button) => button.textContent === "Stats")!.click());
+    await act(async () => {
+      [...container.querySelectorAll<HTMLButtonElement>("button")].find((button) => button.textContent === "Copy image")!.click();
+      await new Promise((resolve) => setTimeout(resolve, 300));
+    });
+    expect(toBlob).toHaveBeenCalledWith(expect.any(HTMLElement), expect.objectContaining({ pixelRatio: 2, style: { overflow: "visible" } }));
+    const node = vi.mocked(toBlob).mock.calls.at(-1)![0];
+    expect(node.querySelector('svg[aria-label="Stride length and pace over elapsed time"]')).not.toBeNull();
+    expect(write).toHaveBeenCalledTimes(1);
+    expect(container.textContent).toContain("Image copied");
   });
 
   it.each(["/api/activities", "/api/run/split-token/activities"])("changes split analytics locally for %s", async (prefix) => {
