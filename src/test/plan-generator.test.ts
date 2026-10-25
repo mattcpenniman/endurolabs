@@ -167,15 +167,17 @@ describe("generatePlan", () => {
     }
   });
 
-  it("caps long runs at the lesser of 25% of scheduled mileage and 150 minutes", () => {
+  it("caps long runs at 25% of scheduled mileage and 160 prescribed segment minutes", () => {
     const plan = generatePlan(makeProfile({ weeksOverride: 18, peakMileageOverride: 55 }));
 
     for (const week of plan.weeks.filter((candidate) => !candidate.isRaceWeek)) {
       const longRun = week.days.find((day) => day.workout?.type === "long")?.workout;
 
       expect(longRun).toBeDefined();
-      const easyPace = (plan.paceZones.easy.min + plan.paceZones.easy.max) / 2;
-      expect(longRun?.totalDistance).toBe(Math.floor(Math.min(week.totalMileage * 0.25, 150 / easyPace) * 4) / 4);
+      expect(longRun!.totalDistance).toBeLessThanOrEqual(week.totalMileage * 0.25);
+      const minutes = longRun!.segments.reduce((sum, segment) => sum +
+        (segment.duration ?? (segment.distance ?? 0) * (segment.pace ?? 0)) * (segment.repetitions ?? 1), 0);
+      expect(minutes).toBeLessThanOrEqual(160);
       expect(week.longRunDistance).toBe(longRun?.totalDistance);
     }
   });

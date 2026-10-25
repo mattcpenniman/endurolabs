@@ -608,12 +608,9 @@ function assignWorkoutsForWeek(
   let workoutIndex = 2;
   let assignedMileage = 0;
 
-  const adjustedLongRunMiles = longRunMiles;
-  assignedMileage += adjustedLongRunMiles;
-
   // Q1 is the long session, Q2 is the separated midweek quality session.
   let keyWorkoutDay: string | null = null;
-  let remainingMileage = Math.max(0, weeklyMileage - assignedMileage);
+  let remainingMileage = Math.max(0, weeklyMileage - longRunMiles);
   const weeksBeforeRace = totalWeeks - week;
   const keyWorkoutTargetDay = selectKeyWorkoutDay(runDays, longRunDay);
   const secondaryReserve = doubleDayCount > 0 ? secondaryRunMinimum : 0;
@@ -622,17 +619,18 @@ function assignWorkoutsForWeek(
     Math.max(0, roundMiles(Math.max(8, weeklyMileage * 0.18)) - secondaryReserve)
   );
   const { longRun, keyWorkout } = buildMarathonSessions({
-    week, weeksBeforeRace, weeklyMileage, longRunMiles: adjustedLongRunMiles,
+    week, weeksBeforeRace, weeklyMileage, longRunMiles,
     secondSessionBudget: keyWorkoutTargetDay ? secondSessionBudget : 0,
     isDownWeek, allowQuality: phase !== "base" && (comfortLevel !== "beginner" || week > 4),
     targets: intensityTargets, paceZones, powerZones,
   });
+  assignedMileage += longRun.totalDistance;
   days.push({
     date: "",
     dayOfWeek: longRunDay,
     workout: longRun,
     isRestDay: false,
-    plannedMileage: adjustedLongRunMiles,
+    plannedMileage: longRun.totalDistance,
   });
 
   // Assign key workout to a mid-week day (not the long run day)
@@ -946,8 +944,9 @@ export function generatePlan(profile: RunnerProfile): MarathonPlan {
         intensityTargetDistribution = calculateIntensityTargets(
           effectiveMileage, phase, week, totalWeeks, intensityTargetPercents, profile.weeklyIntensityOverrides
         );
-        const easyPace = (paceZones.easy.min + paceZones.easy.max) / 2;
-        const calculatedLongRunMiles = Math.floor(Math.min(effectiveMileage * 0.25, 150 / easyPace) * 4) / 4;
+        // Start at the mileage/share cap; the session builder checks the actual
+        // prescribed E/M/T segment time against the 160-minute ceiling.
+        const calculatedLongRunMiles = Math.floor(effectiveMileage * 0.25 * 4) / 4;
         longRunMiles = maxLongRunOverride
           ? Math.min(calculatedLongRunMiles, maxLongRunOverride)
           : calculatedLongRunMiles;
@@ -968,6 +967,7 @@ export function generatePlan(profile: RunnerProfile): MarathonPlan {
           profile.preferredDoubleUpDays ?? [],
           intensityTargetDistribution
         );
+        longRunMiles = days.find((day) => day.dayOfWeek === longRunDay)?.workout?.totalDistance ?? 0;
         targetMileage = roundMiles(days.reduce((sum, day) => sum +
           (day.workout?.weeklyMileageContribution ?? 0) + (day.secondaryWorkout?.weeklyMileageContribution ?? 0), 0));
         if (targetMileage >= effectiveMileage - 0.01) break;
