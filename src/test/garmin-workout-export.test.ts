@@ -130,6 +130,47 @@ describe("Garmin workout mapping", () => {
     expect(steps.map((item) => item.endCondition.conditionTypeKey)).toEqual(["distance", "time", "distance", "time", "distance"]);
     expect(steps.filter((item) => item.stepType.stepTypeKey === "recovery").map((item) => item.endConditionValue)).toEqual([120, 120]);
   });
+  it.each(["pace", "power"] as const)("exports 3×0.5 mi cruise intervals with rounded recovery estimates (%s)", (target) => {
+    // Planner rounds 2 min / 10 min/mi = 0.2 mi to 0.25 mi.
+    // Older saved plans omit duration; newer ones retain the exact 2 minutes.
+    for (const duration of [undefined, 2]) {
+      const run: Workout = { ...workout, title: "3×0.5 mi Cruise Intervals", segments: [
+        { ...workout.segments[0], power: 250 },
+        { type: "threshold", distance: 0.5, pace: 6.5, power: 330, repetitions: 3,
+          restBetween: 60, description: "3× 0.5 mi at threshold pace" },
+        { type: "recovery", distance: 0.25, duration, pace: 10, power: 250,
+          description: "Recoveries — 2× 60 sec relaxed jog (0.25 mi estimated total)" },
+        { ...workout.segments[5], power: 250 },
+      ] };
+      const original = structuredClone(run);
+      const steps = mapGarminWorkout(run, { ...options, target }).workoutSegments[0].workoutSteps;
+      expect(steps.map((item) => item.stepType.stepTypeKey)).toEqual([
+        "warmup", "interval", "recovery", "interval", "recovery", "interval", "cooldown",
+      ]);
+      expect(steps.filter((item) => item.stepType.stepTypeKey === "recovery")
+        .map((item) => item.endConditionValue)).toEqual([60, 60]);
+      expect(steps[1].endConditionValue).toBeCloseTo(0.5 * 1609.344);
+      expect(steps[2].targetValueOne).toBeCloseTo(target === "power" ? 250 : 1609.344 / 600);
+      expect(run).toEqual(original);
+    }
+  });
+  it("accepts a legacy recovery distance rounded to zero without losing timed recovery", () => {
+    const steps = mapGarminWorkout({ ...workout, segments: [
+      { type: "threshold", distance: 0.5, repetitions: 2, restBetween: 60, description: "2 reps" },
+      { type: "recovery", distance: 0, pace: 10, description: "Recoveries — 1× 60 sec relaxed jog" },
+    ] }, options).workoutSegments[0].workoutSteps;
+    expect(steps.map((item) => item.endConditionValue)).toEqual([0.5 * 1609.344, 60, 0.5 * 1609.344]);
+  });
+  it("rejects conflicting recovery duration or a distance outside the planner's rounding", () => {
+    for (const recovery of [
+      { distance: 0.25, duration: 3 }, // Correct rounded distance must not mask conflicting time.
+      { distance: 0.5 },
+      { distance: 0.25, duration: NaN },
+    ]) expect(() => mapGarminWorkout({ ...workout, segments: [
+      { type: "threshold", distance: 0.5, repetitions: 3, restBetween: 60, description: "3 reps" },
+      { type: "recovery", ...recovery, pace: 10, description: "Recoveries" },
+    ] }, options)).toThrow("Ambiguous aggregate recovery");
+  });
   it("preserves timed work and explicit power only when selected", () => {
     const mapped = mapGarminWorkout({ ...workout, segments: [
       { type: "threshold", duration: 8, power: 330, description: "8 min at 330 W" },
