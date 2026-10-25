@@ -4,7 +4,8 @@ For the plan-page sync controls and in-place updates/rescheduling, see
 [Planned-workout Garmin sync](garmin-workout-sync.md). The CLI below remains a
 single-run create/verify tool with its own journal.
 
-`npm run garmin:export-workout` previews or publishes one stored planned run
+`npm run garmin:export-workout` previews or publishes one stored planned run (or
+an explicitly selected standalone test workout)
 through the athlete's **existing Garmin Connect session**. This is an unofficial
 Garmin Connect workout-service integration, not Garmin's registered Training API.
 The official Training API remains the recommended longer-term integration path.
@@ -40,7 +41,31 @@ in a trusted administrative environment containing the original encryption key.
 
 ## Mapping and scope
 
-- Uses the saved workout, not a regenerated plan. Email selects only the
+### Standalone 100 m test
+
+Use `--test-intervals N` (1–24) to build a standalone workout instead of selecting
+a saved run. It contains 1 mile easy, then N pairs of 100 m at marathon pace and
+100 m easy, including the final recovery. Easy uses the midpoint of the selected
+owned plan's easy range; marathon uses its marathon anchor. Pace targets only;
+`--secondary` and `--target power` are rejected. The date may fall outside the
+plan calendar. No saved plan or run is changed. Preview first, then reuse the
+same private journal for apply and any reconciliation:
+
+```bash
+npm run garmin:export-workout -- --email runner@example.com --date 2026-10-25 --test-intervals 5
+# Add --apply --journal /private/directory/oct25-test.json to publish and schedule.
+```
+
+The standalone test has a separate source identity from saved workouts. Changing
+the count or pace anchors after publishing is a changed prescription and stops
+the create-only publisher; it does not silently create a replacement.
+
+VEC-1090 live acceptance on October 25, 2026 created and scheduled this five-pair
+test for that date. Garmin readback verified all 11 distance steps and pace
+targets (2,609.344 m total). The saved source plan was not edited. This verifies
+Garmin Connect, not watch delivery; sync and inspect the device separately.
+
+- By default uses the saved workout, not a regenerated plan. Email selects only the
   designated current plan; an explicit plan ID must belong to that email.
 - Primary and secondary runs have separate identities; only one is sent per
   invocation. The plan calendar date is preserved without timezone shifting.

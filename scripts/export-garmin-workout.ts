@@ -10,6 +10,7 @@ import { decryptGarminTokens } from "../src/lib/garmin/crypto";
 import type { MarathonPlan } from "../src/lib/training/models";
 import { mapGarminWorkout, selectPlannedRun, workoutCalendarDate } from "../src/lib/garmin/workout-export";
 import { publishGarminWorkout } from "../src/lib/garmin/workout-publisher";
+import { buildGarminTestWorkout } from "../src/lib/garmin/test-workout";
 import type { ExportCheckpoint, WorkoutTransport } from "../src/lib/garmin/workout-publisher";
 
 try { process.loadEnvFile(".env"); } catch (error) {
@@ -30,11 +31,15 @@ function digest(value: unknown): string {
 if (process.argv.includes("--help")) {
   console.log(`Usage: npm run garmin:export-workout -- --email EMAIL --date YYYY-MM-DD
   [--plan-id UUID] [--secondary] [--target pace|power]
+  [--test-intervals N]
   [--apply --journal /private/directory/export.json]
 
 Defaults to the athlete's current plan and primary run. Preview makes no Garmin
 requests. Apply uploads and schedules one run using the existing unofficial
 Garmin Connect session, then verifies steps/targets and the scheduled date.
+--test-intervals N instead builds 1 mile easy + N x (100 m marathon / 100 m easy),
+including the final recovery. N must be 1-24; easy uses the plan range midpoint.
+This standalone pace-only test does not edit the plan and allows dates outside it.
 Use the same private journal path on every retry. Unknown writes are not retried.
 Changed prescriptions/edits require explicit reconciliation, not automatic updates.
 No watch-delivery claim is made. Sync the device in Garmin Connect afterward.`);
@@ -48,6 +53,11 @@ const apply = process.argv.includes("--apply");
 const journalPath = argument("journal");
 const secondary = process.argv.includes("--secondary");
 const target = argument("target") ?? "pace";
+const testIntervals = argument("test-intervals");
+const standalone = process.argv.some((value) => value === "--test-intervals" || value.startsWith("--test-intervals="));
+if (standalone && (secondary || target !== "pace" || !testIntervals || !/^\d+$/.test(testIntervals))) {
+  throw new Error("--test-intervals requires an integer count, primary slot, and pace targets");
+}
 if (!email || !rawDate || !/^\d{4}-\d{2}-\d{2}$/.test(rawDate) || !["pace", "power"].includes(target)) {
   throw new Error("Provide --email, --date YYYY-MM-DD, and --target pace or power (see --help)");
 }
@@ -67,8 +77,9 @@ try {
   if (!row) throw new Error("Owned plan not found (select a current plan or pass --plan-id)");
   const plan: MarathonPlan = typeof row.plan_data === "string" ? JSON.parse(row.plan_data) : row.plan_data;
   const days = plan.weeks.flatMap((week) => week.days).filter((day) => day.date.slice(0, 10) === date);
-  if (days.length !== 1) throw new Error("Plan must contain exactly one matching calendar day");
-  const workout = selectPlannedRun(days[0], secondary);
+  if (!standalone && days.length !== 1) throw new Error("Plan must contain exactly one matching calendar day");
+  const workout = standalone ? buildGarminTestWorkout(plan.paceZones, Number(testIntervals))
+    : selectPlannedRun(days[0], secondary);
   const key = digest([row.user_id, row.id, date, secondary, workout.id]).slice(0, 16);
   const payload = mapGarminWorkout(workout, {
     name: `EL ${date} ${workout.title.slice(0, 50)} [${key}]`,
@@ -77,7 +88,7 @@ try {
   const fingerprint = digest({ payload, date });
   payload.description = `${payload.description}\nSHA256 ${fingerprint}`;
   console.log(JSON.stringify({ mode: apply ? "apply" : "preview", planId: row.id,
-    date, slot: secondary ? "secondary" : "primary", sourceWorkoutId: workout.id,
+    date, slot: standalone ? "standalone-test" : secondary ? "secondary" : "primary", sourceWorkoutId: workout.id,
     totalDistanceMiles: workout.totalDistance, target, fingerprint, payload }, null, 2));
   if (apply && journalPath) {
     const parent = path.dirname(journalPath);
