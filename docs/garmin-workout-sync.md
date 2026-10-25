@@ -7,11 +7,36 @@ request rather than substituting another target. Connect Garmin in Profile first
 
 Both single-run and full-plan sync include a **180–190 steps/minute cadence goal**
 as Garmin's secondary target on every executable running step, including warm-up,
-cool-down and between-rep recovery. The primary pace/power target is preserved.
+cool-down and between-rep running recovery (excluding the walk/jog full-recovery
+steps between strides described below). The primary pace/power target is preserved.
 This is total running steps/minute, not single-leg cadence. Readback must confirm
 both cadence bounds before sync is successful. Previously confirmed exports show
 as changed and update in place on explicit resync. Unresolved older exports first
 reconcile their exact original prescription; the following sync adds cadence.
+
+### Strides
+
+Saved text-only **Easy + Strides** and race-week shakeout prescriptions export
+executable strides after the original easy-running step. Base instructions of
+6–8 × 20–30 seconds use **6 × 20 seconds**; shakeout instructions of 4–6 × 20 seconds
+use **4 × 20 seconds** (the lower end of each range). Between strides, walk/jog
+until fully recovered and **press Lap** to start the next stride. There is no
+extra recovery step after the final stride. The original easy distance and target
+stay intact; the strides add time and distance beyond that easy-running block.
+The duration estimate includes timed strides but excludes open-ended recovery.
+
+Strides are relaxed, fast and smooth, not sprints. They have no invented pace or
+power target, including in power export mode; running strides retain the cadence
+goal, while walk/jog recovery has no cadence goal. Already structured timed
+strides use their saved segments instead. Unrecognized text-only stride
+prescriptions are rejected rather than silently exported as an ordinary easy run.
+
+Previously exported text-only workouts show **Changed since sync**. Explicitly
+sync them again (or retry the full-plan sync) to update the same Garmin workout
+IDs. Saved plans do not need regeneration. Unknown older writes first reconcile
+their original text-only payload before the next sync adds stride steps. Source
+tests cover mapping and legacy reconciliation; live Garmin/watch acceptance of
+these stride steps has not been performed.
 
 This uses the existing **unofficial Garmin Connect** connection, not the official
 Training API. The run-level button sends one saved workout per click. Success means executable

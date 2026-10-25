@@ -57,8 +57,8 @@ export function verifyRemoteWorkout(remote: RemoteWorkout, payload: GarminWorkou
     if (a.type !== e.type || a.stepOrder !== e.stepOrder ||
         a.stepType?.stepTypeKey !== e.stepType.stepTypeKey ||
         a.endCondition?.conditionTypeKey !== e.endCondition.conditionTypeKey ||
-        Math.abs(a.endConditionValue - e.endConditionValue) > 0.01 ||
-        !Number.isFinite(a.endConditionValue) ||
+        (e.endCondition.conditionTypeKey !== "lap.button" &&
+          (Math.abs(a.endConditionValue - e.endConditionValue) > 0.01 || !Number.isFinite(a.endConditionValue))) ||
         a.targetType?.workoutTargetTypeKey !== e.targetType.workoutTargetTypeKey ||
         (a.secondaryTargetType?.workoutTargetTypeKey ?? "no.target") !==
           (e.secondaryTargetType?.workoutTargetTypeKey ?? "no.target") ||

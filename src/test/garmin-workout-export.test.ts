@@ -21,6 +21,64 @@ const workout: Workout = {
 const options = { name: "EL test", marker: "EnduroLab export test" };
 
 describe("Garmin workout mapping", () => {
+  const strideRun: Workout = {
+    ...workout, type: "easy", title: "5 mi Easy + Strides", totalDistance: 5,
+    estimatedDuration: 40, weeklyMileageContribution: 5, intensityCategory: "easy",
+    description: "Easy aerobic running followed by 6–8 relaxed 20–30 second strides with full recovery.",
+    segments: [{ type: "easy", distance: 5, pace: 8, power: 250,
+      description: "Easy run — 5 miles, then 6–8 relaxed 20–30 second strides" }],
+  };
+  it.each(["pace", "power"] as const)("exports saved text-only strides after unchanged easy running (%s)", (target) => {
+    const original = structuredClone(strideRun);
+    const payload = mapGarminWorkout(strideRun, { ...options, target, cadence: true });
+    const steps = payload.workoutSegments[0].workoutSteps;
+    expect(steps).toHaveLength(12); // easy + 6 strides + 5 recoveries
+    expect(steps[0]).toEqual(mapGarminWorkout(strideRun, { ...options, target, cadence: true, strides: false }).workoutSegments[0].workoutSteps[0]);
+    expect(steps[0].endConditionValue).toBe(5 * 1609.344);
+    const strides = steps.slice(1).filter((item) => item.stepType.stepTypeKey === "interval");
+    const recoveries = steps.filter((item) => item.stepType.stepTypeKey === "recovery");
+    expect(strides).toHaveLength(6);
+    expect(strides.every((item) => item.endConditionValue === 20 && item.targetType.workoutTargetTypeKey === "no.target" &&
+      item.targetValueOne === undefined && item.secondaryTargetValueOne === 180)).toBe(true);
+    expect(recoveries).toHaveLength(5);
+    expect(recoveries.every((item) => item.endCondition.conditionTypeKey === "lap.button" &&
+      item.targetType.workoutTargetTypeKey === "no.target" && item.secondaryTargetType === undefined)).toBe(true);
+    expect(steps.map((item) => item.stepOrder)).toEqual(Array.from({ length: 12 }, (_, index) => index + 1));
+    expect(payload.estimatedDurationInSecs).toBe(2520); // excludes unknown full-recovery time
+    expect(strideRun).toEqual(original);
+    expect(() => verifyRemoteWorkout({ ...payload, workoutId: 42 }, payload)).not.toThrow();
+    const lapReadback = structuredClone(payload);
+    // Garmin may omit a numeric end value for an athlete-controlled Lap step.
+    Object.assign(lapReadback.workoutSegments[0].workoutSteps[2], { endConditionValue: null });
+    expect(() => verifyRemoteWorkout({ ...lapReadback, workoutId: 42 }, payload)).not.toThrow();
+    const changed = structuredClone(payload);
+    changed.workoutSegments[0].workoutSteps[1].endConditionValue = 30;
+    expect(() => verifyRemoteWorkout({ ...changed, workoutId: 42 }, payload)).toThrow("prescription mismatch");
+    changed.workoutSegments[0].workoutSteps[1].endConditionValue = 20;
+    changed.workoutSegments[0].workoutSteps[2].endCondition = { conditionTypeId: 2, conditionTypeKey: "time" };
+    expect(() => verifyRemoteWorkout({ ...changed, workoutId: 42 }, payload)).toThrow("prescription mismatch");
+  });
+  it("exports four race-week strides and gives overall base instructions precedence over stale shakeout text", () => {
+    const shakeout = { ...strideRun, description: "Short, relaxed race-week run finished with a few strides.",
+      segments: [{ ...strideRun.segments[0], description: "Easy shakeout — 5 miles relaxed, then 4-6 × 20s strides" }] };
+    expect(mapGarminWorkout(shakeout, options).workoutSegments[0].workoutSteps).toHaveLength(8);
+    expect(mapGarminWorkout({ ...shakeout, description: strideRun.description }, options).workoutSegments[0].workoutSteps).toHaveLength(12);
+  });
+  it("also adds strides to an easy block resized to a time termination", () => {
+    const timed = { ...strideRun, segments: [{ ...strideRun.segments[0], distance: undefined, duration: 40 }] };
+    const steps = mapGarminWorkout(timed, options).workoutSegments[0].workoutSteps;
+    expect(steps).toHaveLength(12);
+    expect(steps[0].endCondition).toEqual({ conditionTypeId: 2, conditionTypeKey: "time" });
+    expect(steps[0].endConditionValue).toBe(2400);
+  });
+  it("does not duplicate structured strides or silently drop unrecognized text-only prescriptions", () => {
+    const structured = { ...strideRun, segments: [strideRun.segments[0],
+      { type: "easy" as const, duration: 1 / 3, repetitions: 6, restBetween: 60, description: "Relaxed strides" }] };
+    expect(mapGarminWorkout(structured, options).workoutSegments[0].workoutSteps).toHaveLength(12);
+    expect(() => mapGarminWorkout({ ...strideRun, description: "Finish with strides",
+      segments: [{ ...strideRun.segments[0], description: "Easy then strides" }] }, options)).toThrow("Strides need");
+    expect(() => mapGarminWorkout({ ...strideRun, description: "25 x 20s strides" }, options)).toThrow("Invalid stride");
+  });
   it.each(["pace", "power"] as const)("adds secondary cadence without changing %s targets or repeat recoveries", (target) => {
     const run = { ...workout, segments: [
       { type: "threshold" as const, duration: 5, pace: 6.5, power: 330, repetitions: 3, restBetween: 60, description: "Cruise intervals" },

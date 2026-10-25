@@ -16,6 +16,29 @@ function saved(): SavedWorkoutExport {
   } };
 }
 describe("Garmin full-plan status", () => {
+  const strideRun: Workout = { ...workout, title: "Easy + Strides",
+    description: "Easy followed by 6–8 relaxed 20–30 second strides with full recovery." };
+  it("marks text-only stride exports changed and preserves their remote identity", () => {
+    const legacy = plannedWorkoutVersion("user", "plan", strideRun, date, false, "pace", {}, false, true, false);
+    const row: SavedWorkoutExport = { source_workout_id: workout.id, updated_at: new Date(),
+      state: { confirmed: { ...legacy, workoutId: 42 } } };
+    expect(buildPlanSyncReport("user", "plan", plan(strideRun), [row], "pace").entries[0]).toMatchObject({
+      status: "changed", url: "https://connect.garmin.com/modern/workout/42",
+    });
+    const current = plannedWorkoutVersion("user", "plan", strideRun, date, false, "pace", row.state);
+    expect(current.payload.workoutName).toBe(legacy.payload.workoutName);
+    expect(current.payload.workoutSegments[0].workoutSteps).toHaveLength(12);
+    expect(current.fingerprint).not.toBe(legacy.fingerprint);
+  });
+  it.each([false, true])("reconciles text-only stride checkpoints with original cadence/labels (%s)", (cadence) => {
+    const legacy = plannedWorkoutVersion("user", "plan", strideRun, date, false, "pace", {}, false, cadence, false);
+    for (const state of [
+      { creation: { phase: "creating" as const, fingerprint: legacy.fingerprint } },
+      { confirmed: { ...legacy, workoutId: 42 }, pending: { ...legacy, phase: "updating" as const } },
+    ]) {
+      expect(plannedWorkoutVersion("user", "plan", strideRun, date, false, "pace", state, true)).toEqual(legacy);
+    }
+  });
   it("marks pre-cadence confirmed exports changed while preserving their Garmin identity", () => {
     const legacy = plannedWorkoutVersion("user", "plan", workout, date, false, "pace", {}, false, false);
     const row: SavedWorkoutExport = { source_workout_id: workout.id, updated_at: new Date(), state: { confirmed: { ...legacy, workoutId: 42 } } };

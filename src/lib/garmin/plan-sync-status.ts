@@ -27,12 +27,12 @@ function digest(value: unknown): string {
 
 export function plannedWorkoutVersion(userId: string, planId: string, workout: Workout,
   date: string, secondary: boolean, target: "pace" | "power", state: WorkoutSyncState,
-  doubleDay = false, cadence = true): WorkoutSyncVersion {
+  doubleDay = false, cadence = true, strides = true): WorkoutSyncVersion {
   const key = state.confirmed?.payload.description.split("\n")[0].replace("EnduroLab export ", "") ??
     digest([userId, planId, date, secondary, workout.id]).slice(0, 16);
   const payload = mapGarminWorkout(workout, {
     name: `EL ${date} ${doubleDay ? secondary ? "PM / second · " : "AM / first · " : ""}${workout.title.slice(0, 50)} [${key}]`,
-    marker: `EnduroLab export ${key}`, target, cadence,
+    marker: `EnduroLab export ${key}`, target, cadence, strides,
   });
   const fingerprint = digest({ payload, date });
   payload.description += `\nSHA256 ${fingerprint}`;
@@ -40,11 +40,15 @@ export function plannedWorkoutVersion(userId: string, planId: string, workout: W
   const unresolved = state.pending?.fingerprint ?? state.creation?.fingerprint;
   if (unresolved && unresolved !== fingerprint) {
     if (doubleDay) {
-      const legacy = plannedWorkoutVersion(userId, planId, workout, date, secondary, target, state, false, cadence);
+      const legacy = plannedWorkoutVersion(userId, planId, workout, date, secondary, target, state, false, cadence, strides);
       if (legacy.fingerprint === unresolved) return legacy;
     }
     if (cadence) {
-      const legacy = plannedWorkoutVersion(userId, planId, workout, date, secondary, target, state, doubleDay, false);
+      const legacy = plannedWorkoutVersion(userId, planId, workout, date, secondary, target, state, doubleDay, false, strides);
+      if (legacy.fingerprint === unresolved) return legacy;
+    }
+    if (strides) {
+      const legacy = plannedWorkoutVersion(userId, planId, workout, date, secondary, target, state, doubleDay, cadence, false);
       if (legacy.fingerprint === unresolved) return legacy;
     }
   }
