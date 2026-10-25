@@ -44,6 +44,11 @@ export async function upsertActivitySamples(activityId: string, samples: GarminA
         latitude: sql`excluded.latitude`,
         longitude: sql`excluded.longitude`,
         temperatureCelsius: sql`excluded.temperature_celsius`,
+        verticalOscillationCm: sql`excluded.vertical_oscillation_cm`,
+        verticalRatioPercent: sql`excluded.vertical_ratio_percent`,
+        groundContactTimeMs: sql`excluded.ground_contact_time_ms`,
+        groundContactBalanceLeftPercent: sql`excluded.ground_contact_balance_left_percent`,
+        strideLengthCm: sql`excluded.stride_length_cm`,
       },
     });
   }

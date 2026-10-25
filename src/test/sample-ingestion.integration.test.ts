@@ -3,6 +3,8 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import postgres from "postgres";
 import type { GarminActivitySample } from "@/lib/garmin/activity-detail";
+import { mapGarminActivityDetail } from "@/lib/garmin/activity-detail";
+import { downsampleActivitySamples } from "@/lib/activities/activity-chart";
 
 const testDatabaseUrl = process.env.TEST_DATABASE_URL;
 const suite = testDatabaseUrl ? describe : describe.skip;
@@ -69,6 +71,47 @@ suite("sample ingestion PostgreSQL integration", () => {
     await upsertActivitySamples(fixtureActivityId, samples(false));
     const [row] = await sql`select quality_score as "qualityScore" from run_activities where id = ${fixtureActivityId}`;
     expect(row.qualityScore).toBeLessThan(60);
+  });
+
+  it("round-trips fractional dynamics at the same sample keys without changing unrelated provider/user data", async () => {
+    await upsertActivitySamples(fixtureActivityId, samples(true));
+    const original = await sql`select id, elapsed_seconds, timestamp, heart_rate, power, distance_meters
+      from activity_samples where activity_id = ${fixtureActivityId} order by elapsed_seconds`;
+    await sql`update run_activities set excluded_from_analytics = true, effort_override = 'easy', calculated_power = 299
+      where id = ${fixtureActivityId}`;
+    const trace = mapGarminActivityDetail({ activityDetailMetrics: samples(true).map((sample, index) => ({
+      directElapsedTime: sample.elapsedSeconds, directDistance: sample.distanceMeters,
+      directHeartRate: sample.heartRate, directPower: sample.power, directSpeed: sample.speedMetersPerSecond,
+      directElevation: sample.elevationMeters, directGrade: sample.grade, directRunCadence: sample.cadence,
+      directLatitude: sample.latitude, directLongitude: sample.longitude, directTemperature: sample.temperatureCelsius,
+      directVerticalOscillation: 6.44 + index / 100, directVerticalRatio: 5.71,
+      directGroundContactTime: 272.3, directStrideLength: 109.14,
+      directGroundContactBalanceLeft: index % 2 === 0 ? 50.79 : null,
+    })) }, new Date("2026-08-03T07:00:00Z"));
+    expect(await upsertActivitySamples(fixtureActivityId, trace)).toBe(41);
+    expect(await upsertActivitySamples(fixtureActivityId, trace)).toBe(41);
+    expect(await sql`select id, elapsed_seconds, timestamp, heart_rate, power, distance_meters
+      from activity_samples where activity_id = ${fixtureActivityId} order by elapsed_seconds`).toEqual(original);
+    const { db } = await import("@/lib/db/client");
+    const { activitySamples } = await import("@/lib/db/schema");
+    const { asc, eq } = await import("drizzle-orm");
+    const stored = await db.select().from(activitySamples).where(eq(activitySamples.activityId, fixtureActivityId))
+      .orderBy(asc(activitySamples.elapsedSeconds));
+    expect(stored[0]).toMatchObject({ verticalOscillationCm: 6.44, verticalRatioPercent: 5.71,
+      groundContactTimeMs: 272.3, strideLengthCm: 109.14, groundContactBalanceLeftPercent: 50.79 });
+    expect(stored[1].groundContactBalanceLeftPercent).toBeNull();
+    // Full-trace consumer example: a 600-second split, before chart decimation.
+    const split = stored.filter((sample) => sample.elapsedSeconds <= 600);
+    const weightedOscillation = split.slice(0, -1).reduce((sum, sample, index) =>
+      sum + sample.verticalOscillationCm! * (split[index + 1].elapsedSeconds - sample.elapsedSeconds), 0) / 600;
+    expect(weightedOscillation).toBeCloseTo(6.535, 8);
+    const chart = downsampleActivitySamples(stored, 10);
+    expect(chart.length).toBeLessThan(stored.length);
+    expect(chart[0].verticalOscillationCm).toBe(6.44);
+    const [activity] = await sql`select excluded_from_analytics, effort_override, calculated_power, distance_meters
+      from run_activities where id = ${fixtureActivityId}`;
+    expect(activity).toMatchObject({ excluded_from_analytics: true, effort_override: "easy", calculated_power: 299, distance_meters: 5000 });
+    await sql`update run_activities set excluded_from_analytics = false, effort_override = null where id = ${fixtureActivityId}`;
   });
 
   it("upserts one run score and invalidates it after cadence/detail changes", async () => {

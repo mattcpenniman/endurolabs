@@ -3,6 +3,7 @@
 // ============================================================
 
 import { MarathonPlan, Workout } from "@/lib/training/models";
+import { mapGarminSummaryDynamics, type RunningDynamics } from "./running-dynamics.mjs";
 
 export interface GarminActivityPayload {
   activityId: number | string;
@@ -21,9 +22,15 @@ export interface GarminActivityPayload {
   avgPower?: number;
   calories?: number;
   manufacturer?: string;
+  avgVerticalOscillation?: number | null;
+  avgVerticalRatio?: number | null;
+  avgGroundContactTime?: number | null;
+  avgGroundContactBalance?: number | null;
+  avgStrideLength?: number | null;
+  summaryDTO?: Record<string, unknown>;
 }
 
-export interface NormalizedGarminActivity {
+export interface NormalizedGarminActivity extends RunningDynamics {
   providerActivityId: string;
   source: "garmin";
   powerSource: "garmin" | "apple_watch";
@@ -70,6 +77,7 @@ export function normalizeGarminActivity(activity: GarminActivityPayload): Normal
   }
 
   return {
+    ...mapGarminSummaryDynamics(activity),
     providerActivityId: String(activity.activityId),
     source: "garmin",
     powerSource: activity.manufacturer?.toLowerCase().includes("apple") ? "apple_watch" : "garmin",
