@@ -1,5 +1,5 @@
 /** Workout sync authenticates, checks saved source/ownership and commits durable state. */
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { NextRequest } from "next/server";
 const mocks = vi.hoisted(() => ({ auth: vi.fn(), reserve: vi.fn(), sync: vi.fn(), restore: vi.fn(), decrypt: vi.fn() }));
 vi.mock("@/lib/auth", () => ({ getCurrentUser: mocks.auth }));
@@ -33,6 +33,7 @@ function database(options: { owned?: boolean; locked?: boolean; connected?: bool
   return sql;
 }
 describe("Planned Garmin workout API", () => {
+  afterEach(() => vi.unstubAllEnvs());
   beforeEach(() => {
     vi.resetAllMocks();
     mocks.auth.mockResolvedValue({ id: "athlete-a" });
@@ -68,6 +69,18 @@ describe("Planned Garmin workout API", () => {
     expect((await POST(request(body, "https://attacker.test"), context)).status).toBe(403);
     expect((await POST(request({ ...body, target: "hr" }), context)).status).toBe(400);
     expect(mocks.reserve).not.toHaveBeenCalled();
+  });
+  it("syncs behind the deployed Apache TLS/www redirect and Next HTTP backend headers", async () => {
+    vi.stubEnv("APP_URL", "https://spacetimeapollo.com");
+    database();
+    const proxied = new NextRequest(`http://localhost:3001/api/plan/${id}/garmin-workout`, {
+      method: "POST", body: JSON.stringify(body), headers: {
+        origin: "https://www.spacetimeapollo.com", host: "www.spacetimeapollo.com",
+        "x-forwarded-host": "www.spacetimeapollo.com", "x-forwarded-proto": "http", "x-forwarded-port": "3001",
+      },
+    });
+    expect((await POST(proxied, context)).status).toBe(200);
+    expect(mocks.sync).toHaveBeenCalledOnce();
   });
   it("scopes the lookup to the owner and never publishes a non-owned plan", async () => {
     const sql = database({ owned: false });

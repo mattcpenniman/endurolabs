@@ -87,6 +87,16 @@ URL and the effective public proxy host, so TLS termination and public host
 aliases do not produce `Invalid request origin`. The reverse proxy must overwrite
 forwarded host/protocol headers; foreign origins remain rejected.
 
+For the deployed Apache setup, `APP_URL` may use the bare domain while Apache
+redirects the browser to `www`. `ProxyPreserveHost On` retains that public host,
+but Apache does not currently send `X-Forwarded-Proto`. Next.js therefore fills
+it with `http` from its internal connection, even for a public HTTPS request.
+The origin check also accepts HTTPS on that exact public host/port in this case;
+it does not accept another host, another port, or downgrade an HTTPS proxy origin
+to HTTP. Changing only `APP_URL` does not address all public aliases. Regression
+tests cover the bare-domain configuration, `www` Origin/Host, and Next's generated
+`x-forwarded-proto: http` / internal `x-forwarded-port: 3001` together.
+
 Authentication and plan ownership are required. The server selects the workout
 from its saved plan; `expectedWorkout` and `date` detect stale or unsaved frontend
 changes, and cannot override the saved prescription. Success returns `workoutId`,
