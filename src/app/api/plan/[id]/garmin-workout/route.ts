@@ -1,30 +1,46 @@
 /** Export/update a single owned, saved planned run using Garmin Connect. */
 import { NextRequest, NextResponse } from "next/server";
-import { createHash } from "node:crypto";
 import { isDeepStrictEqual } from "node:util";
 import { createFromSession } from "garmin-connect-client";
 import type { PersistedSession } from "garmin-connect-client";
 import { getCurrentUser } from "@/lib/auth";
 import { conn } from "@/lib/db/client";
 import { decryptGarminTokens } from "@/lib/garmin/crypto";
-import { mapGarminWorkout, selectPlannedRun, workoutCalendarDate } from "@/lib/garmin/workout-export";
+import { selectPlannedRun, workoutCalendarDate } from "@/lib/garmin/workout-export";
+import { buildPlanSyncReport, plannedWorkoutVersion, type SavedWorkoutExport } from "@/lib/garmin/plan-sync-status";
+import { isValidRequestOrigin } from "@/lib/request-origin";
 import { syncGarminWorkout } from "@/lib/garmin/workout-sync";
 import type { WorkoutSyncState, WorkoutSyncTransport } from "@/lib/garmin/workout-sync";
 import type { MarathonPlan } from "@/lib/training/models";
 
 export const runtime = "nodejs";
 
-function digest(value: unknown): string {
-  return createHash("sha256").update(JSON.stringify(value)).digest("hex");
+export async function GET(request: NextRequest, { params }: { params: Promise<{ id: string }> }): Promise<NextResponse> {
+  const user = await getCurrentUser();
+  if (!user) return NextResponse.json({ error: "Authentication required" }, { status: 401 });
+  const { id } = await params;
+  if (!/^[0-9a-f-]{36}$/i.test(id)) return NextResponse.json({ error: "Save this plan before syncing" }, { status: 400 });
+  const target = request.nextUrl.searchParams.get("target") ?? "pace";
+  if (target !== "pace" && target !== "power") return NextResponse.json({ error: "Invalid target" }, { status: 400 });
+  const sql = await conn.reserve();
+  try {
+    const [row] = await sql<Array<{ plan_data: MarathonPlan | string }>>`
+      select plan_data from plans where id=${id} and user_id=${user.id}`;
+    if (!row) return NextResponse.json({ error: "Plan not found" }, { status: 404 });
+    const plan: MarathonPlan = typeof row.plan_data === "string" ? JSON.parse(row.plan_data) : row.plan_data;
+    const exports = await sql<SavedWorkoutExport[]>`
+      select source_workout_id, state, updated_at from garmin_workout_exports where user_id=${user.id} and plan_id=${id}`;
+    return NextResponse.json(buildPlanSyncReport(user.id, id, plan, exports, target), { headers: { "Cache-Control": "no-store" } });
+  } catch {
+    return NextResponse.json({ error: "Sync status unavailable. Check the server configuration and database migration." }, { status: 503 });
+  } finally { sql.release(); }
 }
 
 export async function POST(request: NextRequest, { params }: { params: Promise<{ id: string }> }): Promise<NextResponse> {
   const user = await getCurrentUser();
   if (!user) return NextResponse.json({ error: "Authentication required" }, { status: 401 });
   // Same-origin browser writes only; native clients without Origin remain authenticated.
-  const origin = request.headers.get("origin");
-  const appOrigin = new URL(process.env.APP_URL ?? process.env.NEXT_PUBLIC_APP_URL ?? request.nextUrl.origin).origin;
-  if (origin && origin !== appOrigin) {
+  if (!isValidRequestOrigin(request)) {
     return NextResponse.json({ error: "Invalid request origin" }, { status: 403 });
   }
   const { id } = await params;
@@ -61,15 +77,8 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     const [existing] = await sql<Array<{ state: WorkoutSyncState }>>`
       select state from garmin_workout_exports where user_id=${user.id} and plan_id=${id} and source_workout_id=${workout.id}`;
     let state = existing?.state ?? {};
-    // Retain the CLI's initial deterministic identity, adopting verified CLI exports.
-    const key = state.confirmed?.payload.description.split("\n")[0].replace("EnduroLab export ", "") ??
-      digest([user.id, id, date, secondary, workout.id]).slice(0, 16);
-    const payload = mapGarminWorkout(workout, {
-      name: `EL ${date} ${workout.title.slice(0, 50)} [${key}]`,
-      marker: `EnduroLab export ${key}`, target: body.target ?? "pace",
-    });
-    const fingerprint = digest({ payload, date });
-    payload.description += `\nSHA256 ${fingerprint}`;
+    const { payload, fingerprint } = plannedWorkoutVersion(user.id, id, workout, date, secondary, body.target ?? "pace", state,
+      Boolean(day.secondaryWorkout && !["rest", "strength", "cross_training"].includes(day.secondaryWorkout.type)));
     const [connection] = await sql<Array<{ encrypted_tokens: string; status: string }>>`
       select encrypted_tokens, status from garmin_connections where user_id=${user.id}`;
     if (!connection || connection.status !== "connected") {

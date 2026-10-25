@@ -7,7 +7,7 @@ vi.mock("@/lib/db/client", () => ({ conn: { reserve: mocks.reserve } }));
 vi.mock("@/lib/garmin/workout-sync", () => ({ syncGarminWorkout: mocks.sync }));
 vi.mock("garmin-connect-client", () => ({ createFromSession: mocks.restore }));
 vi.mock("@/lib/garmin/crypto", () => ({ decryptGarminTokens: mocks.decrypt }));
-import { POST } from "@/app/api/plan/[id]/garmin-workout/route";
+import { GET, POST } from "@/app/api/plan/[id]/garmin-workout/route";
 import type { WorkoutSyncJournal, WorkoutSyncVersion } from "@/lib/garmin/workout-sync";
 
 const id = "12345678-1234-4123-8123-123456789012";
@@ -47,6 +47,22 @@ describe("Planned Garmin workout API", () => {
     mocks.auth.mockResolvedValue(null);
     expect((await POST(request(), context)).status).toBe(401);
     expect(mocks.reserve).not.toHaveBeenCalled();
+    expect((await GET(request(), context)).status).toBe(401);
+  });
+  it("reads owner-scoped durable full-plan status without contacting Garmin", async () => {
+    const sql = database();
+    const response = await GET(request(), context);
+    expect(response.status).toBe(200);
+    expect(response.headers.get("Cache-Control")).toBe("no-store");
+    expect(await response.json()).toMatchObject({ entries: [{ workout, date: body.date, status: "not_synced" }], removedExports: 0 });
+    expect(sql.mock.calls.filter(([parts]) => parts.join("").includes("where user_id"))[0]?.slice(1)).toEqual(["athlete-a", id]);
+    expect(mocks.restore).not.toHaveBeenCalled();
+    expect(sql.release).toHaveBeenCalledOnce();
+  });
+  it("does not reveal another owner's plan sync status", async () => {
+    database({ owned: false });
+    expect((await GET(request(), context)).status).toBe(404);
+    expect(mocks.sync).not.toHaveBeenCalled();
   });
   it("rejects cross-origin writes and invalid target selection", async () => {
     expect((await POST(request(body, "https://attacker.test"), context)).status).toBe(403);

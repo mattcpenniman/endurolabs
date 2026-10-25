@@ -22,6 +22,7 @@ import RaceDayPlanCard from "@/app/components/plan/RaceDayPlanCard";
 import GoalScorecard from "@/app/components/plan/GoalScorecard";
 import ImpactBeaconCard from "@/app/components/plan/ImpactBeaconCard";
 import ImpactBeaconWidget from "@/app/components/plan/ImpactBeaconWidget";
+import { GarminPlanSyncCard } from "@/app/components/plan/GarminPlanSyncCard";
 import MileageTrendChart from "@/app/components/charts/MileageTrendChart";
 import LongRunProgressionChart from "@/app/components/charts/LongRunProgressionChart";
 import IntensityDistributionChart from "@/app/components/charts/IntensityDistributionChart";
@@ -2124,6 +2125,7 @@ function PlanPageContent(): React.ReactNode {
                   {garminConnection.connected ? "Manage in Profile" : "Connect in Profile"}
                 </a>
               </div>
+              <GarminPlanSyncCard key={plan.id} plan={plan} disabled={isLoading} />
               <div id="mileage-targets" className="scroll-mt-24 rounded-lg border border-gray-200 bg-white p-5 md:col-span-2">
                 <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
                   <div>

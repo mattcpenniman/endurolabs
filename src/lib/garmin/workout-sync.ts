@@ -13,7 +13,7 @@ export interface WorkoutSyncVersion {
 }
 export interface WorkoutSyncState {
   creation?: ExportCheckpoint;
-  confirmed?: WorkoutSyncVersion & { workoutId: number };
+  confirmed?: WorkoutSyncVersion & { workoutId: number; verifiedAt?: string };
   pending?: WorkoutSyncVersion & { phase: "updating" | "moving" };
 }
 export interface WorkoutSyncJournal {
@@ -43,7 +43,7 @@ export async function syncGarminWorkout(
       read: async () => state.creation ?? null,
       save: async (creation) => save({ ...state, creation }),
     }, desired.payload, desired.date, desired.fingerprint);
-    await save({ confirmed: { ...desired, workoutId: result.workoutId } });
+    await save({ confirmed: { ...desired, workoutId: result.workoutId, verifiedAt: new Date().toISOString() } });
     return result;
   }
   const previous = state.confirmed;
@@ -97,6 +97,6 @@ export async function syncGarminWorkout(
   if (previous.date !== desired.date) {
     if ((await schedules(previous.date)).length) throw new Error("Old Garmin date remains; reconcile in Garmin before retrying.");
   }
-  await save({ confirmed: { ...desired, workoutId: id } });
+  await save({ confirmed: { ...desired, workoutId: id, verifiedAt: new Date().toISOString() } });
   return { workoutId: id, date: desired.date, verified: true };
 }

@@ -58,6 +58,7 @@ describe("Durable Garmin workout updates", () => {
     await syncGarminWorkout(f.transport, f.journal, version(6));
     expect(f.writes).toEqual([expect.stringContaining("/workout/42")]);
     expect(f.state().confirmed?.workoutId).toBe(42);
+    expect(Date.parse(f.state().confirmed!.verifiedAt!)).toBeGreaterThan(0);
     expect(f.state().pending).toBeUndefined();
   });
   it("moves the existing schedule and keeps the workout ID", async () => {
