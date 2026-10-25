@@ -125,23 +125,64 @@ suite("resumable dynamics backfill PostgreSQL/CLI", () => {
       {elapsed_seconds:1,vertical_oscillation_cm:6.45,heart_rate:null,power:null},
     ]);
   });
-  it("does not certify truncated/summary-only results and bounds persisted retry attempts", async () => {
+  it("rejects deterministic incomplete detail once and retains its cooldown", async () => {
     mocks.get.mockResolvedValue({summaryDTO:{verticalOscillation:6.44}});
     const before = await sql`select * from activity_samples order by elapsed_seconds`;
     await run("--apply");
-    expect(mocks.get).toHaveBeenCalledTimes(3);
+    expect(mocks.get).toHaveBeenCalledTimes(1);
     expect(await sql`select * from activity_samples order by elapsed_seconds`).toEqual(before);
-    expect((await sql`select * from garmin_dynamics_backfill`)[0]).toMatchObject({status:"failed",attempts:3,error_code:"incomplete_detail"});
-    await run("--apply"); expect(mocks.get).toHaveBeenCalledTimes(3);
+    expect((await sql`select * from garmin_dynamics_backfill`)[0]).toMatchObject({status:"failed",attempts:1,error_code:"incomplete_detail"});
+    await run("--apply"); expect(mocks.get).toHaveBeenCalledTimes(1);
   });
   it("recovers an interrupted running checkpoint but refuses changed sample alignment atomically", async () => {
     await sql`insert into garmin_dynamics_backfill(activity_id,version,status,attempts) values (${activity},'dynamics-detail-v1','running',1)`;
     await sql`update activity_samples set timestamp=timestamp+interval '1 second' where elapsed_seconds=1`;
     const before = await sql`select * from activity_samples order by elapsed_seconds`;
     await run("--apply");
-    expect(mocks.get).toHaveBeenCalledTimes(2);
+    expect(mocks.get).toHaveBeenCalledTimes(1);
     expect(await sql`select * from activity_samples order by elapsed_seconds`).toEqual(before);
     expect((await sql`select * from garmin_dynamics_backfill`)[0]).toMatchObject({status:"failed",error_code:"stored_alignment_changed"});
+  });
+  it("patches agreeing repeated timestamps once without changing stored IDs or unrelated metrics", async () => {
+    const before = await sql`select * from activity_samples order by elapsed_seconds`;
+    const activityBefore = await sql`select * from run_activities`;
+    mocks.get.mockResolvedValue({ ...payload, totalMetricsCount: 3,
+      metricDescriptors: [...payload.metricDescriptors, { key: "directHeartRate", metricsIndex: 3 }],
+      activityDetailMetrics: [
+        { metrics: [0, 6.44, 109.14, 150] },
+        { metrics: [0, 6.44, 109.14, 151] },
+        { metrics: [1, 6.45, null, 152] },
+      ],
+    });
+    await run("--apply");
+    expect(process.exitCode).toBe(0);
+    expect(await sql`select * from run_activities`).toEqual(activityBefore);
+    const rows = await sql`select * from activity_samples order by elapsed_seconds`;
+    expect(rows.map(({id,timestamp,heart_rate,power}) => ({id,timestamp,heart_rate,power})))
+      .toEqual(before.map(({id,timestamp,heart_rate,power}) => ({id,timestamp,heart_rate,power})));
+    expect((await sql`select * from garmin_dynamics_backfill`)[0]).toMatchObject({
+      status: "succeeded", attempts: 1, sample_count: 2,
+      coverage: { vertical_oscillation_cm: 2, stride_length_cm: 1 },
+    });
+    await run("--apply");
+    expect(mocks.get).toHaveBeenCalledTimes(1);
+    expect(await sql`select * from activity_samples order by elapsed_seconds`).toEqual(rows);
+  });
+  it("rejects conflicting repeated dynamics atomically without immediate refetch", async () => {
+    const before = await sql`select * from activity_samples order by elapsed_seconds`;
+    mocks.get.mockResolvedValue({ ...payload, totalMetricsCount: 3,
+      activityDetailMetrics: [payload.activityDetailMetrics[0], { metrics: [0, 6.5, 109.14] }, payload.activityDetailMetrics[1]],
+    });
+    await run("--apply");
+    expect(process.exitCode).toBe(1);
+    expect(mocks.get).toHaveBeenCalledTimes(1);
+    expect(mocks.delay).not.toHaveBeenCalled();
+    expect(await sql`select * from activity_samples order by elapsed_seconds`).toEqual(before);
+    expect((await sql`select * from garmin_dynamics_backfill`)[0]).toMatchObject({
+      status: "failed", attempts: 1, error_code: "invalid_alignment",
+    });
+    await run("--apply");
+    expect(mocks.get).toHaveBeenCalledTimes(1);
   });
   it("detects changed counts after terminal success and never deletes unmatched rows", async () => {
     await run("--apply");
