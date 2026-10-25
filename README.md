@@ -28,6 +28,11 @@ Plans are persisted to PostgreSQL per authenticated user, so each runner only se
 
 ## Garmin planned-workout export
 
+Expand a week on the plan page and choose **Sync to Garmin** on a planned run.
+Save edits and sync again to update that workout's prescription or scheduled day
+in place. See [Planned-workout Garmin sync](docs/garmin-workout-sync.md) for the
+required database migration, target selection, and reconciliation behavior.
+
 Preview and send one saved run to Garmin Connect with the
 [single-run export CLI](docs/garmin-workout-cli.md):
 

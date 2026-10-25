@@ -16,6 +16,8 @@ import { formatPlanDate } from "@/lib/training/date-utils";
 import { RunActivity } from "@/lib/activities/models";
 import { summarizeRunScores } from "@/lib/analytics/run-score";
 import { RunScoreBadge, RunScoreSummaryBadge } from "./RunScoreDetails";
+import { GarminWorkoutSyncButton } from "./GarminWorkoutSyncButton";
+import { resizeWorkout } from "@/lib/training/workout-edit";
 import { useUnits } from "@/app/components/units/UnitsProvider";
 import {
   formatElevationGain,
@@ -683,13 +685,16 @@ export default function WeeklyPlanCard({
     const existingWorkout = sourceDay[location.slot];
     if (!existingWorkout) return;
 
-    const updatedWorkout: Workout = {
-      ...existingWorkout,
-      title: editor.title,
-      totalDistance: editor.totalDistance,
-      estimatedDuration: editor.estimatedDuration,
-      weeklyMileageContribution: existingWorkout.weeklyMileageContribution > 0 ? editor.totalDistance : existingWorkout.weeklyMileageContribution,
-    };
+    let updatedWorkout: Workout;
+    try {
+      updatedWorkout = {
+        ...resizeWorkout(existingWorkout, editor.totalDistance, editor.estimatedDuration),
+        title: editor.title.trim() || existingWorkout.title,
+      };
+    } catch (error) {
+      window.alert(error instanceof Error ? error.message : "Unable to update workout");
+      return;
+    }
 
     const nextDays = localDays.map((day) => ({ ...day }));
     nextDays[location.dayIndex] = { ...nextDays[location.dayIndex] };
@@ -718,10 +723,13 @@ export default function WeeklyPlanCard({
       return;
     }
 
-    setLocalDays(nextDays);
-    setEditingRunId(null);
-    if (onWeekUpdate) {
-      await onWeekUpdate(buildUpdatedWeek(week, nextDays));
+    try {
+      if (onWeekUpdate) await onWeekUpdate(buildUpdatedWeek(week, nextDays));
+      setLocalDays(nextDays);
+      setEditingRunId(null);
+      setRunEditors((prev) => { const next = { ...prev }; delete next[runId]; return next; });
+    } catch {
+      window.alert("Plan change could not be saved. Try again before syncing to Garmin.");
     }
   };
 
@@ -1376,6 +1384,8 @@ export default function WeeklyPlanCard({
                                   {Math.floor(entry.workout.estimatedDuration / 60)}h {entry.workout.estimatedDuration % 60}min
                                 </p>
                                 {renderWorkoutSegments(entry.workout, units)}
+                                <GarminWorkoutSyncButton planId={planId} date={day.date} workout={entry.workout}
+                                  disabled={editingRunId === entry.runId} />
                               </>
                             )}
 
@@ -1449,7 +1459,7 @@ export default function WeeklyPlanCard({
                                   />
                                 </label>
                                 <label className="block">
-                                  <span className="text-xs font-medium text-gray-600">Duration (min)</span>
+                                  <span className="text-xs font-medium text-gray-600">Duration (min; converts steps to time)</span>
                                   <input
                                     type="number"
                                     min={0}
@@ -1464,6 +1474,7 @@ export default function WeeklyPlanCard({
                                     className="mt-1 w-full rounded border border-gray-300 px-2 py-1 text-sm"
                                   />
                                 </label>
+                                <p className="text-xs text-gray-500 sm:col-span-2">Change distance or duration one at a time. All steps and recoveries scale together; pace and power targets stay fixed.</p>
                                 <label className="block sm:col-span-2">
                                   <span className="text-xs font-medium text-gray-600">Shift to day</span>
                                   <select

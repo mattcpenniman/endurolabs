@@ -1,5 +1,9 @@
 # Single-run Garmin export CLI
 
+For the plan-page sync controls and in-place updates/rescheduling, see
+[Planned-workout Garmin sync](garmin-workout-sync.md). The CLI below remains a
+single-run create/verify tool with its own journal.
+
 `npm run garmin:export-workout` previews or publishes one stored planned run
 through the athlete's **existing Garmin Connect session**. This is an unofficial
 Garmin Connect workout-service integration, not Garmin's registered Training API.

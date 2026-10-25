@@ -1121,15 +1121,12 @@ function PlanPageContent(): React.ReactNode {
       peakWeeklyMileage: Math.max(...updatedWeeks.map((week) => week.totalMileage)),
     };
 
-    setPlan(updatedPlan);
-
     try {
       const savedPlan = await persistPlan(updatedPlan, planName);
-      if (savedPlan) {
-        setPlan(savedPlan);
-      }
+      if (!savedPlan) throw new Error("Plan change could not be saved");
+      setPlan(savedPlan);
     } catch {
-      // Silently fail while keeping in-session edits visible.
+      throw new Error("Plan change could not be saved");
     }
   };
 

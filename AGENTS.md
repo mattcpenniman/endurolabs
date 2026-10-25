@@ -58,6 +58,7 @@ src/
 
 ## Garmin Data Ingestion
 
+- Planned-run export is separate from activity ingestion: `POST /api/plan/[id]/garmin-workout` and `GarminWorkoutSyncButton` send one owned saved workout through the unofficial Garmin Connect workout service. `workout-sync.ts` persists write-ahead state in `garmin_workout_exports`, uses the CLI's per-athlete advisory lock, updates the same remote workout ID, and moves existing schedules by schedule ID. Apply `scripts/add-garmin-workout-sync.sql` before deployment. Preserve unresolved checkpoints; never clear them or replay unknown writes. See `docs/garmin-workout-sync.md`. Workout editor resizing lives in the pure `training/workout-edit.ts` so displayed totals and executable steps change together.
 - Summary sync: `src/app/api/integrations/garmin/sync/route.ts`
 - Detail API: `src/app/api/integrations/garmin/samples/route.ts`
 - Detail mapping: `src/lib/garmin/activity-detail.ts`
