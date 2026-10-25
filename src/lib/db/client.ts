@@ -30,4 +30,4 @@ export async function endDb(): Promise<void> {
   await conn.end({ timeout: 5 });
 }
 
-export { db };
+export { db, conn };

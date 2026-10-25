@@ -115,8 +115,11 @@ interval builders for the same pattern before generalizing the mapper.
 
 The official Training API remains the recommended longer-term integration path.
 VEC-1077 supplies a pure mapper, unofficial adapter, private file journals and
-an administrative CLI for single-run exports. A registered provider integration,
-product UI, and bulk/edit/cancellation workflows remain future work.
+an administrative CLI for single-run exports. VEC-1086 adds the
+[plan-page sync UI and durable in-place updates/rescheduling](garmin-workout-sync.md)
+over that unofficial connection. A registered provider integration and bulk/
+cancellation workflows remain future work; live update and watch acceptance
+remain separate rollout checks.
 
 For the official integration, the next action is for the EnduroLab owner to
 request Starter Access and retrieve the portal contract. No approved app

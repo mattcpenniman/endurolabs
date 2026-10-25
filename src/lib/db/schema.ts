@@ -86,6 +86,18 @@ export const garminConnections = pgTable("garmin_connections", {
   uniqueIndex("garmin_connections_user_unique").on(table.userId),
 ]);
 
+/** Write-ahead state survives HTTP failures and application restarts. */
+export const garminWorkoutExports = pgTable("garmin_workout_exports", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  userId: uuid("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  planId: uuid("plan_id").notNull().references(() => plans.id, { onDelete: "cascade" }),
+  sourceWorkoutId: varchar("source_workout_id", { length: 255 }).notNull(),
+  state: jsonb("state").notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+}, (table) => [
+  uniqueIndex("garmin_workout_exports_source_unique").on(table.userId, table.planId, table.sourceWorkoutId),
+]);
+
 export const garminSyncJobs = pgTable("garmin_sync_jobs", {
   id: uuid("id").primaryKey().defaultRandom(),
   userId: uuid("user_id")
