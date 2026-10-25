@@ -5,6 +5,14 @@ workout. Primary and secondary runs have separate controls. Choose pace targets
 (default) or explicit prescribed power targets. Missing power anchors stop the
 request rather than substituting another target. Connect Garmin in Profile first.
 
+Each run loads its saved **Synced**, **Changed since sync**, **Not synced**,
+**Needs reconciliation**, or **Cannot sync** status for the selected target mode.
+The last verified time and Garmin link persist after reloading; a confirmed,
+unchanged run offers **Resync to Garmin**. Use **Refresh status** to reload the
+saved record. Unsaved workout edits are labeled **Save changes before syncing**.
+These labels compare the saved export with the plan; they do not poll Garmin
+or confirm watch delivery. Status refreshes after a sync and on window focus.
+
 Both single-run and full-plan sync include a **180–190 steps/minute cadence goal**
 as Garmin's secondary target on every executable running step, including warm-up,
 cool-down and between-rep running recovery (excluding the walk/jog full-recovery
