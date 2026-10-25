@@ -34,6 +34,21 @@ Workout publishing is not currently implemented.
 
 ## Historical plan analysis
 
+Pull saved plan details as JSON without regenerating or changing the plan:
+
+```bash
+npm run plan:details -- --email runner@example.com --list
+npm run plan:details -- --email runner@example.com
+npm run plan:details -- --email runner@example.com --date 2027-02-16
+npm run plan:details -- --plan-id PLAN_UUID --week 16
+```
+
+`--email` selects the designated current plan; `--plan-id` selects an exact saved
+plan. A day includes both runs on double days and the plan's pace/power zones.
+Requires `DATABASE_URL` from the environment or `.env`. Use `npm run --silent
+plan:details -- ...` (or `node scripts/plan-details.mjs ...`) for clean JSON when
+piping output. This command is read-only and does not contact Garmin.
+
 Compare the current marathon plan with past race cycles and same-race drafts:
 
 ```bash
