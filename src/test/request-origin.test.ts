@@ -21,6 +21,25 @@ describe("Garmin write origins", () => {
     expect(valid("https://training.example.com", { "x-forwarded-host": "training.example.com", "x-forwarded-proto": "https" })).toBe(true);
     expect(valid("http://localhost:3000")).toBe(true);
   });
+  it("accepts the deployed Apache www redirect when Next fills the internal HTTP scheme", () => {
+    vi.stubEnv("APP_URL", "https://spacetimeapollo.com");
+    expect(valid("https://www.spacetimeapollo.com", {
+      host: "www.spacetimeapollo.com",
+      "x-forwarded-host": "www.spacetimeapollo.com",
+      "x-forwarded-proto": "http",
+      "x-forwarded-port": "3001",
+    })).toBe(true);
+  });
+  it.each(["https://attacker.test", "https://www.spacetimeapollo.com.attacker.test", "https://www.spacetimeapollo.com:444"])("rejects a foreign host/port even with the internal HTTP scheme: %s", (origin) => {
+    vi.stubEnv("APP_URL", "https://spacetimeapollo.com");
+    expect(valid(origin, { host: "www.spacetimeapollo.com", "x-forwarded-host": "www.spacetimeapollo.com", "x-forwarded-proto": "http" })).toBe(false);
+  });
+  it("does not downgrade an HTTPS proxy origin to HTTP on a public alias", () => {
+    vi.stubEnv("APP_URL", "https://spacetimeapollo.com");
+    expect(valid("http://www.spacetimeapollo.com", {
+      host: "www.spacetimeapollo.com", "x-forwarded-host": "www.spacetimeapollo.com", "x-forwarded-proto": "https",
+    })).toBe(false);
+  });
   it.each(["https://attacker.test", "null", "https://training.example.com.attacker.test", "https://training.example.com/path", "http://training.example.com"])("rejects foreign, opaque and mismatched origins: %s", (origin) => {
     vi.stubEnv("APP_URL", "https://training.example.com");
     expect(valid(origin, { "x-forwarded-host": "training.example.com", "x-forwarded-proto": "https" })).toBe(false);

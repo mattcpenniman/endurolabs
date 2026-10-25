@@ -14,9 +14,14 @@ export function isValidRequestOrigin(request: NextRequest): boolean {
     const host = request.headers.get("x-forwarded-host") ?? request.headers.get("host");
     const proto = request.headers.get("x-forwarded-proto");
     if (host) {
-      if (proto) return supplied.origin === new URL(`${proto}://${host}`).origin;
-      // TLS-terminating proxies may preserve Host without forwarding the scheme.
-      return supplied.host === host && (supplied.protocol === "https:" || supplied.protocol === request.nextUrl.protocol);
+      const protocol = proto ? `${proto}:` : request.nextUrl.protocol;
+      if (!["http:", "https:"].includes(protocol)) return false;
+      if (supplied.origin === new URL(`${protocol}//${host}`).origin) return true;
+      // Apache may preserve the public Host without forwarding the TLS scheme.
+      // Next then fills x-forwarded-proto=http from the backend socket. Permit
+      // HTTPS on that exact host/port, never a foreign host or an HTTP downgrade.
+      return protocol === "http:" && supplied.protocol === "https:" &&
+        supplied.origin === new URL(`https://${host}`).origin;
     }
     return supplied.origin === request.nextUrl.origin;
   } catch { return false; }
