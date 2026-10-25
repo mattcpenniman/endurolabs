@@ -33,6 +33,7 @@ import { mergePowerZoneDefaults, parsePowerZoneDefaults } from '@/lib/training/p
 import type { MarathonPlan, RunnerProfile } from '@/lib/training/models';
 import { buildPlanHistory, type PlanHistoryReport } from '@/lib/planner/plan-history';
 import { formatPace } from '@/lib/training/models';
+import { buildPaceHistory, type PaceHistoryReport } from '@/lib/planner/pace-history';
 
 // ─── Arg helpers ──────────────────────────────────────────────
 
@@ -51,15 +52,18 @@ const distance = argument('distance') ?? 'marathon';
 const goalTimeStr = argument('goal');
 const asOfStr = argument('as-of') ?? new Date().toISOString().slice(0, 10);
 const jsonOnly = argv.includes('--json');
-const historyMode = argv.includes('--history');
+const paceHistoryMode = argv.includes('--pace-history');
+const historyMode = argv.includes('--history') || paceHistoryMode;
 
 if (argv.includes('--help')) {
   console.log(`Usage: npm run planner:recommend -- --email EMAIL | --plan-id ID
-  [--goal H:MM:SS] [--as-of YYYY-MM-DD] [--json] [--history]
+  [--goal H:MM:SS] [--as-of YYYY-MM-DD] [--json] [--history] [--pace-history]
 
 --email selects the designated current plan, falling back to the newest plan.
 --history compares all historical marathon cycles, actual final-16-week training,
 race execution, and same-race drafts. Recommendations are read-only.
+--pace-history analyzes actual run paces, completed pace blocks, HR and measured-power
+distributions, coverage, load flags and prior-year speed benchmarks; prescribed intent is separate.
 --plan-id selects a specific stored plan, including an alternative draft.
 --as-of excludes activities on/after that day; schedules reflect current stored data.
 
@@ -173,7 +177,7 @@ interface PlanRow {
   id: string; raceName: string | null; runnerProfile: RunnerProfile; planData: MarathonPlan; createdAt: Date; updatedAt: Date;
 }
 
-function printHistory(report: PlanHistoryReport): void {
+function printHistory(report: PlanHistoryReport, includeRecommendations = true): void {
   console.log('\n=== Historical Marathon Cycles ===');
   console.log(`Goal pace: ${formatPace(report.goalPaceMinutesPerMile)}/mi; half equivalent ${secondsToHMS(report.halfMarathonEquivalentSeconds)} (speed benchmark only).`);
   console.log(`Days to race: ${report.daysToRace}. Volume and long-run counts below use matched final 16 weeks, excluding the target race.`);
@@ -189,14 +193,64 @@ function printHistory(report: PlanHistoryReport): void {
     scheduled20: row.plannedFinal16Weeks.runsAtLeast20Miles,
     actual20: row.raceDate < report.asOf ? row.actualFinal16Weeks.runsAtLeast20Miles : 'incomplete',
   })));
-  console.log('\nHistory-based recommendations:');
-  for (const rec of report.recommendations) {
+  if (includeRecommendations) console.log('\nHistory-based recommendations:');
+  for (const rec of includeRecommendations ? report.recommendations : []) {
     console.log(`  [${rec.priority.toUpperCase()}] ${rec.action}`);
     for (const evidence of rec.evidence) console.log(`    ${evidence}`);
     if (rec.candidateWeeks?.length) console.log(`    Candidate build weeks to review: ${rec.candidateWeeks.join(', ')} (not an applied prescription).`);
   }
   console.log('\nInterpretation:');
   for (const caveat of report.caveats) console.log(`  - ${caveat}`);
+}
+
+function printPaceHistory(report: PaceHistoryReport): void {
+  console.log('\n=== Actual Training Paces and Completed Intensity ===');
+  console.log(`Reference zones: ${JSON.stringify(report.reference)}`);
+  for (const cycle of report.cycles) {
+    console.log(`\n${cycle.raceName} (${cycle.role}; ${cycle.raceDate}; ${cycle.planId})`);
+    console.log(cycle.actual.observedDays > 0
+      ? `Observed window: ${cycle.actual.start} → ${cycle.actual.endExclusive} exclusive; ${cycle.actual.runs} runs, ${cycle.actual.miles} mi.`
+      : `Final-112-day window has not started (begins ${cycle.actual.start}); actual training is not yet observable in this window.`);
+    console.table({ completedRawPace: cycle.actual.rawPace.minutes, completedGAP: cycle.actual.gap.minutes,
+      completedHR: cycle.actual.heartRate.minutes, completedMeasuredPower: cycle.actual.measuredPower.minutes,
+      prescribedFinal112: cycle.prescribedFinal112.minutes, prescribedObserved: cycle.prescribedObservedWindow.minutes });
+    console.log(`Prescribed unknown minutes: ${cycle.prescribedFinal112.unknownMinutes.toFixed(1)} (full window), ${cycle.prescribedObservedWindow.unknownMinutes.toFixed(1)} (observed window).`);
+    printActualPace(cycle.actual);
+    console.table(cycle.speedBenchmarks.map(r => ({ date: r.date, miles: (r.distanceMeters / 1609.344).toFixed(2),
+      result: secondsToHMS(r.seconds), marathonEquivalent: secondsToHMS(r.equivalentMarathonSeconds), source: r.source })));
+  }
+  console.log('\nRecent trailing 112 days (current training context):');
+  printActualPace(report.recent);
+  console.log(`Recent intensity minutes: ${JSON.stringify({ rawPace: report.recent.rawPace.minutes, gap: report.recent.gap.minutes, hr: report.recent.heartRate.minutes, power: report.recent.measuredPower.minutes })}`);
+  console.log('\nActual-pace recommendations:');
+  for (const recommendation of report.recommendations) console.log(`  - ${recommendation}`);
+  for (const note of report.interpretation) console.log(`  - ${note}`);
+}
+
+function printActualPace(actual: PaceHistoryReport['recent']): void {
+  const pace = (value: number | null | undefined): string => {
+    if (value == null) return '—';
+    const seconds = Math.round(value * 60);
+    return `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`;
+  };
+  console.log(`Actual distance-weighted moving pace: ${pace(actual.summaryPaceMinutesPerMile)}/mi (${(actual.summaryPaceDistanceCoverage * 100).toFixed(1)}% distance coverage)`);
+  console.log(`Coverage GAP/HR/power: ${[actual.gap, actual.heartRate, actual.measuredPower].map(d => `${(d.coverage * 100).toFixed(1)}% (${d.uncoveredMinutes} min uncovered)`).join(' / ')}`);
+  console.log(`Mean GAP by zone: ${JSON.stringify(Object.fromEntries(Object.entries(actual.gapPaceByZone).map(([z, p]) => [z, p ? formatPace(p) : null])))}`);
+  console.log(`Measured sensor watts (independent of zone anchors): ${JSON.stringify(actual.measuredSensorPower)}`);
+  console.log('Completed long runs and strongest sustained near-goal blocks (all runs available in --json):');
+  const strongest = [...actual.completedRuns].sort((a, b) => (b.longestRawNearGoalBlock?.minutes ?? 0) - (a.longestRawNearGoalBlock?.minutes ?? 0)).slice(0, 5);
+  console.table(actual.completedRuns.filter(r => r.miles >= 14 || strongest.includes(r)).map(r => ({ date: r.date,
+    miles: r.miles, actualPace: pace(r.actualMovingPace), hr: r.averageHr,
+    gap: pace(r.averageGapPace), gapCoverage: `${(r.gapCoverage * 100).toFixed(1)}%`,
+    rawSustainedGoalMinutes: r.longestRawNearGoalBlock?.minutes.toFixed(1) ?? '—',
+    blockActualPace: pace(r.longestRawNearGoalBlock?.actualPace),
+    blockHr: r.longestRawNearGoalBlock?.averageHr?.toFixed(0) ?? '—',
+  })));
+  console.log(`Load/context: ${JSON.stringify({ weeklyMiles: actual.averageWeeklyMiles, peak7DayMiles: actual.peak7DayMiles,
+    qualityDays: actual.qualityDays, adjacentQualityDayPairs: actual.adjacentQualityDayPairs,
+    final21ToPrior21MileageRatio: actual.final21ToPrior21MileageRatio, easyReferenceAverageHr: actual.easyReferenceAverageHr,
+    longRuns: actual.longRuns, rawNearGoalMinutes: actual.rawNearGoalMinutes, longRunRawNearGoalMinutes: actual.longRunRawNearGoalMinutes,
+    gapNearGoalMinutes: actual.nearGoalMinutes, gapLongRunNearGoalMinutes: actual.longRunNearGoalMinutes })}`);
 }
 
 // ─── Create mode ─────────────────────────────────────────────
@@ -415,20 +469,28 @@ async function main() {
   const recs = buildRecommendations(snapshot, planP as MarathonPlan, goalMinutes);
   const safety = runSafetyGates(planP, snapshot, {});
   let history: PlanHistoryReport | undefined;
+  let paceHistory: PaceHistoryReport | undefined;
   if (historyMode) {
     if (finalGoal.distanceMeters !== 42195) throw new Error('--history currently supports marathon goals only');
     const rows = await sql<PlanRow[]>`
       select id, race_name as "raceName", plan_data as "planData"
       from plans where user_id = ${user.id} order by created_at desc, id
     `;
+    const current = { id: dbPlan.id, raceName: dbPlan.raceName, plan: planP };
+    const storedPlans = rows.flatMap(row => {
+      const plan = normalizePlanData(row.planData);
+      return plan?.runnerProfile ? [{ id: row.id, raceName: row.raceName, plan }] : [];
+    });
     history = buildPlanHistory({
-      current: { id: dbPlan.id, raceName: dbPlan.raceName, plan: planP },
-      plans: rows.flatMap(row => {
-        const plan = normalizePlanData(row.planData);
-        return plan?.runnerProfile ? [{ id: row.id, raceName: row.raceName, plan }] : [];
-      }),
+      current, plans: storedPlans,
       activities, asOf: asOfStr, goalMinutes,
     });
+    if (paceHistoryMode) {
+      const { loadPaceHistoryTraces } = await import('@/lib/planner/pace-history-loader');
+      const traces = await loadPaceHistoryTraces({ userId: user.id, asOf: asOfStr, plan: planP,
+        goalPace: history.goalPaceMinutesPerMile });
+      paceHistory = buildPaceHistory({ history, reference: current, plans: storedPlans, activities, traces });
+    }
   }
 
   // ─── Output ──────────────────────────────────────────────
@@ -452,9 +514,12 @@ async function main() {
       },
       goalGap,
       limiters,
-      recommendations: history?.recommendations ?? recs,
+      recommendations: paceHistory ? paceHistory.recommendations.map((action, index) => ({
+        id: `actual-pace-${index + 1}`, priority: 'medium', action, evidence: [],
+      })) : history?.recommendations ?? recs,
       safetyGates: safety,
       ...(history ? { history } : {}),
+      ...(paceHistory ? { paceHistory } : {}),
     }, null, 2));
   } else {
     const gapMin = Math.abs(goalGap.gapSeconds / 60);
@@ -481,8 +546,9 @@ async function main() {
     console.log(`  Peak weekly: ${snapshot.peakWeeklyMiles.toFixed(1)} mi | Longest run: ${tf.longestRunMiles.toFixed(1)} mi`);
     console.log(`  Fitness trend: ${snapshot.fitnessTrend}`);
 
-    if (history) printHistory(history);
+    if (history) printHistory(history, !paceHistory);
     else console.log('\n' + formatReport(recs, limiters));
+    if (paceHistory) printPaceHistory(paceHistory);
 
     const refusals = safety.filter(s => s.result === 'refuse');
     const warnings = safety.filter(s => s.result === 'warn');
