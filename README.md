@@ -26,6 +26,12 @@ Plans are persisted to PostgreSQL per authenticated user, so each runner only se
 - **Testing:** Vitest 3 + jsdom
 - **Utilities:** dayjs, ics
 
+## Garmin workout export
+
+For the feasibility and implementation path for sending planned runs to Garmin
+Connect and compatible watches, see [Sending planned runs to Garmin](docs/garmin-workout-export.md).
+Workout publishing is not currently implemented.
+
 ## Historical plan analysis
 
 Compare the current marathon plan with past race cycles and same-race drafts:
