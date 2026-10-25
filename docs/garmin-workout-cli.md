@@ -84,8 +84,10 @@ Garmin Connect, not watch delivery; sync and inspect the device separately.
   targets stop the export rather than substituting pace or modeled sensor data.
 - Repeated work expands to executable steps with recovery only between reps.
   Known aggregate recovery rows from the planner are consumed, not duplicated.
-  Ambiguous aggregate recovery or simultaneous distance/duration rules stop the
-  export. This initial version supports at most 50 executable steps.
+  Their explicit duration is authoritative; legacy distance-only aggregates may
+  match the planner's quarter-mile-rounded estimate. Ambiguous aggregate recovery
+  or simultaneous distance/duration rules on executable steps stop the export.
+  This initial version supports at most 50 executable steps.
 - Rest, strength, and cross-training are rejected. Races require selecting that
   particular date. RPE is retained in notes, not converted to invented HR targets.
 

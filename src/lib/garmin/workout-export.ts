@@ -158,13 +158,19 @@ export function mapGarminWorkout(
     if (repetitions > 1 && segment.restBetween) {
       const next = workout.segments[index + 1];
       if (next?.type === "recovery") {
-        // These are aggregate distance rows in EnduroLab's interval builders.
-        // Require both the naming convention and a numerically consistent total.
+        // Interval builders store timed recovery with a quarter-mile-rounded
+        // distance estimate. Duration is authoritative, not distance × pace.
+        // Older saved plans have only the rounded estimate; recognize that
+        // exact builder output as well as consistent resized distance rows.
         const expected = (repetitions - 1) * segment.restBetween / 60;
-        const aggregateMinutes = next.distance !== undefined && next.pace !== undefined
-          ? next.distance * next.pace : next.duration;
+        const aggregateMinutes = next.duration ?? (next.distance !== undefined && next.pace !== undefined
+          ? next.distance * next.pace : undefined);
+        const roundedEstimate = next.duration === undefined && next.distance !== undefined &&
+          Number.isFinite(next.distance) && next.distance >= 0 &&
+          next.pace !== undefined && Number.isFinite(next.pace) && next.pace > 0 &&
+          Math.abs(next.distance - Math.round(expected / next.pace * 4) / 4) < 1e-9;
         if (!/recoveries/i.test(next.description) || aggregateMinutes === undefined ||
-            !Number.isFinite(aggregateMinutes) || Math.abs(aggregateMinutes - expected) > 0.2 ||
+            !Number.isFinite(aggregateMinutes) || (!roundedEstimate && Math.abs(aggregateMinutes - expected) > 0.2) ||
             next.repetitions !== undefined || next.restBetween !== undefined) {
           throw new Error("Ambiguous aggregate recovery segment; normalize it before export");
         }

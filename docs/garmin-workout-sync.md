@@ -51,6 +51,17 @@ Training API. The run-level button sends one saved workout per click. Success me
 steps and the calendar date were read back from Garmin Connect; sync your watch
 in Garmin Connect afterward. Watch delivery has not been verified by this feature.
 
+### Interval recoveries
+
+Cruise and VO2 intervals export exactly one timed recovery between repetitions,
+with none after the final rep. The planner's separate **Recoveries** row is an
+aggregate, not an extra executable step. Its explicit duration takes precedence
+over its quarter-mile-rounded distance estimate. Older saved plans without that
+duration are also supported when the distance matches the planner's rounded
+estimate (including zero for short recoveries), or the existing time-consistency
+check. Conflicting durations or unrecognized aggregate rows still block sync.
+Saved plans do not need regeneration for this normalization.
+
 ## Editing
 
 Use the existing run editor to change its title, distance, duration, or day within
