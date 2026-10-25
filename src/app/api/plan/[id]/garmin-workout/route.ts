@@ -15,6 +15,16 @@ import type { MarathonPlan } from "@/lib/training/models";
 
 export const runtime = "nodejs";
 
+/** Log only fixed stage and SQLSTATE; never messages, queries, payloads or tokens. */
+function syncFailure(error: unknown, stage: string): string {
+  const code = (error as { code?: unknown } | null)?.code;
+  const sqlState = typeof code === "string" && /^[0-9A-Z]{5}$/.test(code) ? code : "unknown";
+  console.error("Garmin workout sync failed", { stage, sqlState });
+  if (sqlState === "42P01") return "Workout sync database migration is missing. Ask the server administrator to apply scripts/add-garmin-workout-sync.sql.";
+  if (stage === "credentials") return "Garmin credentials could not be opened. Ask the server administrator to check the existing encryption key; do not replace it.";
+  return "Workout sync unavailable. Check the server configuration and database migration.";
+}
+
 export async function GET(request: NextRequest, { params }: { params: Promise<{ id: string }> }): Promise<NextResponse> {
   const user = await getCurrentUser();
   if (!user) return NextResponse.json({ error: "Authentication required" }, { status: 401 });
@@ -31,8 +41,8 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
     const exports = await sql<SavedWorkoutExport[]>`
       select source_workout_id, state, updated_at from garmin_workout_exports where user_id=${user.id} and plan_id=${id}`;
     return NextResponse.json(buildPlanSyncReport(user.id, id, plan, exports, target), { headers: { "Cache-Control": "no-store" } });
-  } catch {
-    return NextResponse.json({ error: "Sync status unavailable. Check the server configuration and database migration." }, { status: 503 });
+  } catch (error) {
+    return NextResponse.json({ error: syncFailure(error, "status") }, { status: 503 });
   } finally { sql.release(); }
 }
 
@@ -55,6 +65,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
   }
   const sql = await conn.reserve();
   let locked = false;
+  let stage = "database";
   try {
     const [lock] = await sql`select pg_try_advisory_lock(hashtext(${`garmin-export:${user.id}`})) as ok`;
     locked = lock.ok === true;
@@ -84,10 +95,12 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     if (!connection || connection.status !== "connected") {
       return NextResponse.json({ error: "Connect Garmin in Profile before syncing workouts." }, { status: 409 });
     }
+    stage = "credentials";
     const auth = decryptGarminTokens<{ kind: string; session: PersistedSession }>(connection.encrypted_tokens);
     if (auth.kind !== "session" || !auth.session.oauth2Token.expires_at || auth.session.oauth2Token.expires_at <= Date.now() / 1000) {
       return NextResponse.json({ error: "Refresh or reconnect Garmin in Profile, then sync this workout again." }, { status: 409 });
     }
+    stage = "client";
     const client = createFromSession(auth.session) as unknown as {
       httpClient: WorkoutSyncTransport & {
         client: { defaults: { timeout: number }; interceptors: { response: { clear(): void } } };
@@ -95,6 +108,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     };
     client.httpClient.client.defaults.timeout = 30_000;
     client.httpClient.client.interceptors.response.clear(); // Never replay a write after token refresh.
+    stage = "provider";
     const result = await syncGarminWorkout(client.httpClient, {
       read: async () => state,
       async save(next): Promise<void> {
@@ -115,7 +129,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
       : error instanceof Error ? error.message : "Workout sync failed";
     // Database/internal errors must not leak query values or connection details.
     const safe = /^(Garmin |A previous sync |Previous |Old Garmin |Invalid Garmin |Ambiguous Garmin |Workout library |Workout date |Multiple matching |Journal and remote |Prescription changed|Selected entry |Not a running |Non-running segment |Segment has |Repetitions must |Recovery seconds must |Ambiguous aggregate |Export exceeds |Distance must |Duration must |Estimated duration must |pace must |power must )/.test(message);
-    return NextResponse.json({ error: safe ? message : "Workout sync unavailable. Check the server configuration and database migration." }, { status: 409 });
+    return NextResponse.json({ error: safe ? message : syncFailure(error, stage) }, { status: 409 });
   } finally {
     try { if (locked) await sql`select pg_advisory_unlock(hashtext(${`garmin-export:${user.id}`}))`; }
     finally { sql.release(); }
