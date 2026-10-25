@@ -62,6 +62,14 @@ estimate (including zero for short recoveries), or the existing time-consistency
 check. Conflicting durations or unrecognized aggregate rows still block sync.
 Saved plans do not need regeneration for this normalization.
 
+Single-repetition sessions may retain an empty aggregate **Recoveries** row;
+that zero-duration/zero-distance bookkeeping row is omitted. A nonzero recovery
+row is not silently discarded. Threshold ladders also retain quarter-mile-rounded
+distance estimates on their individual **Float recovery** steps. When the estimate
+matches the timed prescription, these export by duration (for example, two minutes),
+not by estimated distance. This also recognizes proportional distance edits to
+those floats. Other conflicting distance/duration steps remain errors.
+
 ## Editing
 
 Use the existing run editor to change its title, distance, duration, or day within

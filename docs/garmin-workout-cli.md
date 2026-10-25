@@ -87,6 +87,8 @@ Garmin Connect, not watch delivery; sync and inspect the device separately.
   Their explicit duration is authoritative; legacy distance-only aggregates may
   match the planner's quarter-mile-rounded estimate. Ambiguous aggregate recovery
   or simultaneous distance/duration rules on executable steps stop the export.
+  Exceptions: empty aggregate rows on single-rep sessions are omitted, and known
+  timed ladder floats with matching rounded distance estimates export by time.
   This initial version supports at most 50 executable steps.
 - Rest, strength, and cross-training are rejected. Races require selecting that
   particular date. RPE is retained in notes, not converted to invented HR targets.

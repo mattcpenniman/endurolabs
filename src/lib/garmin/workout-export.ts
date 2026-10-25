@@ -61,7 +61,16 @@ export function workoutCalendarDate(value: string): string {
 function step(segment: WorkoutSegment, order: number, target: "pace" | "power"): GarminWorkoutStep {
   if (NON_RUNNING.has(segment.type)) throw new Error("Non-running segment cannot be exported");
   if (segment.distance !== undefined && segment.duration !== undefined) {
-    throw new Error("Segment has both distance and duration; choose a termination rule first");
+    // Threshold ladders prescribe a timed float and retain a rounded distance
+    // for mileage accounting. Recognize only that builder's consistent format.
+    const timedFloat = segment.type === "recovery" && segment.description === "Float recovery — 2 min easy jog" &&
+      segment.pace !== undefined && Number.isFinite(segment.pace) && segment.pace > 0 &&
+      (Math.abs(segment.distance - Math.round(segment.duration / segment.pace * 4) / 4) < 1e-9 ||
+        // Distance edits scale both the original two-minute float and its
+        // rounded estimate; the editor intentionally retains coaching text.
+        Math.abs(segment.distance - Math.round(2 / segment.pace * 4) / 4 * segment.duration / 2) < 1e-9);
+    if (!timedFloat) throw new Error("Segment has both distance and duration; choose a termination rule first");
+    segment = { ...segment, distance: undefined };
   }
   const distance = segment.distance !== undefined;
   const value = distance
@@ -155,7 +164,7 @@ export function mapGarminWorkout(
     }
     if (segment.restBetween !== undefined) positive(segment.restBetween, "Recovery seconds");
     let recovery: WorkoutSegment | undefined;
-    if (repetitions > 1 && segment.restBetween) {
+    if (segment.restBetween) {
       const next = workout.segments[index + 1];
       if (next?.type === "recovery") {
         // Interval builders store timed recovery with a quarter-mile-rounded
@@ -171,6 +180,7 @@ export function mapGarminWorkout(
           Math.abs(next.distance - Math.round(expected / next.pace * 4) / 4) < 1e-9;
         if (!/recoveries/i.test(next.description) || aggregateMinutes === undefined ||
             !Number.isFinite(aggregateMinutes) || (!roundedEstimate && Math.abs(aggregateMinutes - expected) > 0.2) ||
+            (repetitions === 1 && (aggregateMinutes !== 0 || (next.distance ?? 0) !== 0)) ||
             next.repetitions !== undefined || next.restBetween !== undefined) {
           throw new Error("Ambiguous aggregate recovery segment; normalize it before export");
         }
