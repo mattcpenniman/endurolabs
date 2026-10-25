@@ -87,6 +87,7 @@ export function GarminPlanSyncCard({ plan, disabled = false }: { plan: MarathonP
   return <section className="rounded-lg border border-gray-200 bg-white p-5 md:col-span-2" aria-label="Garmin plan sync">
     <h3 className="text-sm font-semibold text-gray-900">Sync full plan to Garmin</h3>
     <p className="mt-1 text-sm text-gray-500">Exports all saved running workouts with their scheduled dates. On double days, the main run is sent first and labeled AM / first; the secondary run follows as PM / second. Updates previous exports in place. Keep this tab open during sync, then sync your watch in Garmin Connect.</p>
+    <p className="mt-1 text-sm text-gray-500">Every running step includes a secondary cadence goal of 180–190 spm alongside the selected pace or power target.</p>
     <div className="mt-3 flex flex-wrap items-center gap-3">
       <select aria-label="Full plan Garmin target" value={target} disabled={busy || disabled} onChange={(event) => setTarget(event.target.value as "pace" | "power")}
         className="rounded border border-gray-300 px-3 py-2 text-sm">

@@ -16,6 +16,23 @@ function saved(): SavedWorkoutExport {
   } };
 }
 describe("Garmin full-plan status", () => {
+  it("marks pre-cadence confirmed exports changed while preserving their Garmin identity", () => {
+    const legacy = plannedWorkoutVersion("user", "plan", workout, date, false, "pace", {}, false, false);
+    const row: SavedWorkoutExport = { source_workout_id: workout.id, updated_at: new Date(), state: { confirmed: { ...legacy, workoutId: 42 } } };
+    expect(buildPlanSyncReport("user", "plan", plan(), [row], "pace").entries[0]).toMatchObject({ status: "changed", url: expect.stringContaining("/42") });
+    const current = plannedWorkoutVersion("user", "plan", workout, date, false, "pace", row.state);
+    expect(current.payload.workoutName).toBe(legacy.payload.workoutName);
+    expect(current.payload.workoutSegments[0].workoutSteps[0].secondaryTargetValueOne).toBe(180);
+  });
+  it.each([false, true])("reconciles pre-cadence unknown writes before changing targets (double day: %s)", (doubleDay) => {
+    const legacy = plannedWorkoutVersion("user", "plan", workout, date, false, "pace", {}, doubleDay, false);
+    for (const state of [
+      { creation: { phase: "creating" as const, fingerprint: legacy.fingerprint } },
+      { confirmed: { ...legacy, workoutId: 42 }, pending: { ...legacy, phase: "updating" as const } },
+    ]) {
+      expect(plannedWorkoutVersion("user", "plan", workout, date, false, "pace", state, true)).toEqual(legacy);
+    }
+  });
   it("reports persisted verified status and compares executable changes rather than object key order", () => {
     const row = saved();
     const reordered = Object.fromEntries(Object.entries(workout).reverse()) as unknown as Workout;

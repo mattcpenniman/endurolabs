@@ -31,7 +31,7 @@ function digest(value: unknown): string {
 if (process.argv.includes("--help")) {
   console.log(`Usage: npm run garmin:export-workout -- --email EMAIL --date YYYY-MM-DD
   [--plan-id UUID] [--secondary] [--target pace|power]
-  [--test-intervals N]
+  [--test-intervals N] [--cadence]
   [--apply --journal /private/directory/export.json]
 
 Defaults to the athlete's current plan and primary run. Preview makes no Garmin
@@ -40,6 +40,7 @@ Garmin Connect session, then verifies steps/targets and the scheduled date.
 --test-intervals N instead builds 1 mile easy + N x (100 m marathon / 100 m easy),
 including the final recovery. N must be 1-24; easy uses the plan range midpoint.
 This standalone pace-only test does not edit the plan and allows dates outside it.
+--cadence adds a secondary 180-190 spm goal to every running step.
 Use the same private journal path on every retry. Unknown writes are not retried.
 Changed prescriptions/edits require explicit reconciliation, not automatic updates.
 No watch-delivery claim is made. Sync the device in Garmin Connect afterward.`);
@@ -83,7 +84,7 @@ try {
   const key = digest([row.user_id, row.id, date, secondary, workout.id]).slice(0, 16);
   const payload = mapGarminWorkout(workout, {
     name: `EL ${date} ${workout.title.slice(0, 50)} [${key}]`,
-    marker: `EnduroLab export ${key}`, target: target as "pace" | "power",
+    marker: `EnduroLab export ${key}`, target: target as "pace" | "power", cadence: process.argv.includes("--cadence"),
   });
   const fingerprint = digest({ payload, date });
   payload.description = `${payload.description}\nSHA256 ${fingerprint}`;

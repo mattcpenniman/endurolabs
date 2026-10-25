@@ -60,8 +60,10 @@ export function verifyRemoteWorkout(remote: RemoteWorkout, payload: GarminWorkou
         Math.abs(a.endConditionValue - e.endConditionValue) > 0.01 ||
         !Number.isFinite(a.endConditionValue) ||
         a.targetType?.workoutTargetTypeKey !== e.targetType.workoutTargetTypeKey ||
-        ["targetValueOne", "targetValueTwo"].some((key) => {
-          const field = key as "targetValueOne" | "targetValueTwo";
+        (a.secondaryTargetType?.workoutTargetTypeKey ?? "no.target") !==
+          (e.secondaryTargetType?.workoutTargetTypeKey ?? "no.target") ||
+        ["targetValueOne", "targetValueTwo", "secondaryTargetValueOne", "secondaryTargetValueTwo"].some((key) => {
+          const field = key as "targetValueOne" | "targetValueTwo" | "secondaryTargetValueOne" | "secondaryTargetValueTwo";
           return e[field] !== undefined && (typeof a[field] !== "number" ||
             !Number.isFinite(a[field]) || Math.abs(a[field]! - e[field]!) > 0.001);
         })) throw new Error(`Garmin prescription mismatch at step ${i + 1}`);
