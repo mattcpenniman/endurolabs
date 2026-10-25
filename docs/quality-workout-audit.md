@@ -132,3 +132,28 @@ segment-duration limits, and mileage arithmetic. Run:
 npm test -- src/test/marathon-sessions.test.ts src/test/plan-generator.test.ts src/test/zone-calculator.test.ts src/test/quality-workout-audit.test.ts
 npx tsc --noEmit
 ```
+
+## Saved Newport 2027 regeneration (VEC-1104, 2026-10-25)
+
+After PR #53 merged (`c589feaa5632bd330da82dbda3bd2fbf10e979a4`), the runner
+explicitly requested applying the updated generator to the saved 2027 plan.
+Regeneration was applied at **2026-10-25 13:47 UTC** to the same plan ID,
+`d953d707-5428-4cd8-9fa9-3b30627eb36a`; it remains the athlete's current plan.
+
+- Used the exact saved runner profile. Goal, race date, mileage settings,
+  training days, rest day, doubles, pace provenance and calendar are preserved.
+  The 24 weeks still span 2026-11-02 through 2027-04-18, with race day April 17.
+- Confirmed zero linked activities, run logs and Garmin workout exports before
+  replacement. Saved a restricted local before-image and updated only
+  `plan_data` plus `updated_at` in a row-locked transaction, using `sql.json()`.
+  Verified the returned JSON against the serialized generated payload.
+- Weeks 1–23 retain their weekly totals. Race-week training mileage changes
+  from 17.25 to 17.5 mi due to the corrected closing E segment; the race remains
+  excluded from that training total.
+- An independent post-commit `plan:details --quality --json` read of the saved
+  plan confirms 40 quality-containing runs, no week-level findings, and only
+  informational `prose-strides` session prompts. The Monday April 12 sharpener
+  is 4 × 0.75 mi T with 2-min jogs and 2 mi E on each side.
+
+This is an applied database operation; the accompanying documentation PR
+records the operation and does not need to merge for the saved plan to update.
