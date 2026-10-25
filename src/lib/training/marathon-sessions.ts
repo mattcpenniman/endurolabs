@@ -2,12 +2,16 @@
  * Personalized Q1/Q2 rotation from docs/elite-training-plan.md, weeks 7–23.
  * The elite examples supply session families, not unrestricted mileages: the
  * limits in training-types-reference.md govern the scaled prescriptions.
+ * Long sessions use the approved 160-minute ceiling on prescribed segment time,
+ * rather than the reference's conservative all-E 150-minute sizing shortcut.
  */
 import { PaceZones, PowerZones, WeeklyPlan, Workout } from "./models";
 import { WorkoutLibrary } from "./workout-library";
 
 type LongSession = "marathon" | "threshold" | "easy";
 type SecondSession = "threshold" | "interval";
+
+const MAX_LONG_RUN_MINUTES = 160;
 
 // Indexed by weeks remaining (race week is handled separately). Keeping this
 // race-relative preserves the documented taper in 14–28-week plans.
@@ -78,8 +82,7 @@ export interface MarathonSessionsInput {
   powerZones?: PowerZones;
 }
 
-/** Q1 owns the long-run slot; Q2 shares the week's threshold budget with Q1. */
-export function buildMarathonSessions(input: MarathonSessionsInput): { longRun: Workout; keyWorkout: Workout | null } {
+function buildSessionsAtDistance(input: MarathonSessionsInput): { longRun: Workout; keyWorkout: Workout | null } {
   const { week, weeksBeforeRace, weeklyMileage, longRunMiles, secondSessionBudget,
     isDownWeek, targets, paceZones: zones, powerZones: power } = input;
   const rotation = input.allowQuality ? ROTATION[weeksBeforeRace] : undefined;
@@ -116,4 +119,22 @@ export function buildMarathonSessions(input: MarathonSessionsInput): { longRun: 
     ? intervalSession(week, intervalBudget, secondSessionBudget, zones, power)
     : thresholdSession(week, 1, remainingThreshold, secondSessionBudget, zones, power);
   return { longRun, keyWorkout };
+}
+
+/**
+ * Q1 owns the long-run slot and shares the weekly T budget with Q2. Build the
+ * actual segments before testing duration: faster M/T miles must not be priced
+ * as easy miles. Rebuild in quarter-mile steps so work, titles, Q2's remaining
+ * threshold budget, and totals stay consistent when a long run must shrink.
+ */
+export function buildMarathonSessions(input: MarathonSessionsInput): { longRun: Workout; keyWorkout: Workout | null } {
+  const maximumDistance = floorMiles(Math.min(input.longRunMiles, input.weeklyMileage * 0.25));
+  for (let distance = maximumDistance; distance >= 0; distance -= 0.25) {
+    const sessions = buildSessionsAtDistance({ ...input, longRunMiles: distance });
+    const minutes = sessions.longRun.segments.reduce((sum, segment) => sum +
+      (segment.duration ?? (segment.distance ?? 0) * (segment.pace ?? 0)) * (segment.repetitions ?? 1), 0);
+    // Do not use rounded estimatedDuration: 160.2 minutes is still over the cap.
+    if (minutes <= MAX_LONG_RUN_MINUTES) return sessions;
+  }
+  throw new Error("Unable to fit a long run within the prescribed duration limit");
 }

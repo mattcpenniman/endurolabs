@@ -2,6 +2,8 @@
 import { describe, expect, it } from "vitest";
 import { generatePlan } from "@/lib/training/plan-generator";
 import { RunnerProfile, Workout } from "@/lib/training/models";
+import { buildMarathonSessions, MarathonSessionsInput } from "@/lib/training/marathon-sessions";
+import { calculatePaceZones } from "@/lib/training/zone-calculator";
 
 function profile(overrides: Partial<RunnerProfile> = {}): RunnerProfile {
   return {
@@ -74,7 +76,9 @@ describe("documented marathon prescriptions", () => {
         expect(dist.marathon).toBeLessThanOrEqual(Math.min(16, 90 / plan.paceZones.marathon));
         expect(dist.vo2).toBeLessThanOrEqual(Math.min(10 / 1.609344, week.totalMileage * 0.08));
         expect(week.longRunDistance).toBeLessThanOrEqual(week.totalMileage * 0.25);
-        expect(week.longRunDistance * (plan.paceZones.easy.min + plan.paceZones.easy.max) / 2).toBeLessThanOrEqual(150);
+        const long = week.days.find((day) => day.workout?.type === "long")!.workout!;
+        expect(long.segments.reduce((sum, segment) => sum +
+          (segment.duration ?? (segment.distance ?? 0) * (segment.pace ?? 0)) * (segment.repetitions ?? 1), 0)).toBeLessThanOrEqual(160);
         for (const day of week.days) {
           if (day.secondaryWorkout) expect(day.secondaryWorkout.totalDistance).toBeLessThanOrEqual(6);
           for (const workout of [day.workout, day.secondaryWorkout].filter((workout): workout is Workout => !!workout)) {
@@ -124,7 +128,7 @@ describe("documented marathon prescriptions", () => {
     for (const week of plan.weeks.filter((week) => !week.isRaceWeek)) {
       expect(week.longRunDistance).toBeLessThanOrEqual(week.totalMileage * 0.25);
       expect(week.intensityDistribution.threshold).toBeLessThanOrEqual(week.totalMileage * 0.1);
-      for (const day of week.days) if (day.workout) expect(day.workout.estimatedDuration).toBeLessThanOrEqual(150);
+      for (const day of week.days) if (day.workout) expect(day.workout.estimatedDuration).toBeLessThanOrEqual(day.workout.type === "long" ? 160 : 150);
     }
   });
 
@@ -144,5 +148,66 @@ describe("documented marathon prescriptions", () => {
     for (const week of sparse.weeks.filter((week) => !week.isRaceWeek)) {
       expect(week.days.filter((day) => ["threshold", "vo2"].includes(day.workout?.type ?? ""))).toHaveLength(0);
     }
+  });
+});
+
+describe("segment-aware long-run duration", () => {
+  function input(easyPace: number, overrides: Partial<MarathonSessionsInput> = {}): MarathonSessionsInput {
+    return {
+      week: 13, weeksBeforeRace: 11, weeklyMileage: 80, longRunMiles: 20,
+      secondSessionBudget: 10, isDownWeek: false, allowQuality: true,
+      targets: { easy: 60, marathon: 8, threshold: 8, vo2: 4 },
+      paceZones: { ...calculatePaceZones(profile()), easy: { min: easyPace, max: easyPace }, marathon: 7, threshold: 6 },
+      ...overrides,
+    };
+  }
+
+  it("keeps 20 mixed-pace miles that take 158 minutes even though all-E would take 180", () => {
+    const { longRun } = buildMarathonSessions(input(9));
+    expect(longRun.totalDistance).toBe(20);
+    expect(miles(longRun, "marathon_pace")).toBe(8);
+    expect(miles(longRun, "threshold")).toBe(2);
+    expect(longRun.estimatedDuration).toBe(158); // 10 E x 9 + 8 M x 7 + 2 T x 6
+  });
+
+  it("rebuilds an over-limit mixed session and returns its released miles to the plan", () => {
+    const { longRun, keyWorkout } = buildMarathonSessions(input(10));
+    expect(longRun.totalDistance).toBe(19);
+    expect(longRun.estimatedDuration).toBe(158); // 19.25 miles would take 160.5 minutes
+    expect(miles(longRun, "threshold") + miles(keyWorkout!, "threshold")).toBeLessThanOrEqual(8);
+    const plan = generatePlan(profile());
+    for (const week of plan.weeks.filter((week) => !week.isRaceWeek)) {
+      const long = week.days.find((day) => day.dayOfWeek === "Saturday")!;
+      expect(week.longRunDistance).toBe(long.workout!.totalDistance);
+      expect(long.plannedMileage).toBe(long.workout!.totalDistance + (long.secondaryWorkout?.totalDistance ?? 0));
+      expect(week.days.reduce((sum, day) => sum + day.plannedMileage, 0)).toBe(week.totalMileage);
+    }
+    expect(plan.weeks[12].longRunDistance).toBe(20);
+    expect(plan.peakWeeklyMileage).toBe(80);
+  });
+
+  it("allows exactly 160 minutes but checks unrounded segment time above the boundary", () => {
+    expect(buildMarathonSessions(input(8, { allowQuality: false })).longRun.totalDistance).toBe(20);
+    const { longRun } = buildMarathonSessions(input(8.01, { allowQuality: false }));
+    // 20 x 8.01 = 160.2, even though estimatedDuration would round to 160.
+    expect(longRun.totalDistance).toBe(19.75);
+    expect(longRun.estimatedDuration).toBe(158);
+  });
+
+  it("also rebuilds threshold/easy/threshold long runs using their mixed segment time", () => {
+    const { longRun, keyWorkout } = buildMarathonSessions(input(9.6, { week: 14, weeksBeforeRace: 10 }));
+    expect(longRun.title).toContain("T/E/T");
+    expect(longRun.totalDistance).toBe(18);
+    expect(miles(longRun, "threshold")).toBe(4);
+    // 14 E x 9.6 + 4 T x 6 = 158.4; the next quarter mile would take 160.8.
+    expect(longRun.estimatedDuration).toBe(158);
+    expect(miles(longRun, "threshold") + miles(keyWorkout!, "threshold")).toBeLessThanOrEqual(8);
+  });
+
+  it("enforces the weekly share and user distance cap even when faster segments would fit", () => {
+    expect(buildMarathonSessions(input(8, { weeklyMileage: 72 })).longRun.totalDistance).toBe(18);
+    expect(buildMarathonSessions(input(8, { longRunMiles: 16 })).longRun.totalDistance).toBe(16);
+    const plan = generatePlan(profile({ maxLongRunOverride: 16 }));
+    expect(Math.max(...plan.weeks.map((week) => week.longRunDistance))).toBe(16);
   });
 });
