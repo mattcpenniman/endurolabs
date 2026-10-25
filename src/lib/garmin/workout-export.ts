@@ -93,10 +93,56 @@ function step(segment: WorkoutSegment, order: number, target: "pace" | "power"):
   return result;
 }
 
+/** Normalize the generator's legacy text-only strides without editing saved plans.
+ * Ranges use their lower bound. Full recovery stays athlete-controlled (Lap),
+ * and relaxed strides have no invented pace/power anchor in either export mode.
+ */
+function textStrideSteps(workout: Workout, firstOrder: number): GarminWorkoutStep[] {
+  const descriptions = [workout.description, ...workout.segments.map((segment) => segment.description)];
+  const mentionsStrides = [workout.title, ...descriptions].some((text) => /\bstrides\b/i.test(text));
+  if (!mentionsStrides) return [];
+  // Already executable strides are handled by the ordinary segment/repeat mapper.
+  if (workout.segments.some((segment) => segment.duration !== undefined &&
+      (workout.segments.length > 1 || (segment.repetitions ?? 1) > 1) &&
+      /\bstrides?\b/i.test(segment.description))) return [];
+  const prescription = /(\d+)(?:\s*[-–]\s*(\d+))?\s*(?:[×x]\s*|relaxed\s+)(\d+)(?:\s*[-–]\s*(\d+))?\s*(?:s\b|seconds?\b)\s+strides\b/i;
+  // Overall description is authoritative for base runs; their original shakeout
+  // segment text can carry the shorter race-week prescription in old plans.
+  const match = descriptions.map((text) => text.match(prescription)).find((item) => item !== null);
+  const segment = workout.segments[0];
+  if (!match || workout.segments.length !== 1 || !["easy", "recovery"].includes(segment.type) ||
+      (segment.repetitions ?? 1) !== 1 || segment.restBetween !== undefined) {
+    throw new Error("Strides need an explicit count and seconds on a simple easy run, or structured timed segments");
+  }
+  const count = Number(match[1]), seconds = Number(match[3]);
+  if (count < 1 || count > 20 || seconds < 1 || seconds > 60 ||
+      (match[2] && Number(match[2]) < count) || (match[4] && Number(match[4]) < seconds)) {
+    throw new Error("Invalid stride count or duration");
+  }
+  const steps: GarminWorkoutStep[] = [];
+  for (let rep = 1; rep <= count; rep++) {
+    steps.push({
+      type: "ExecutableStepDTO", stepOrder: firstOrder + steps.length,
+      stepType: { stepTypeId: 3, stepTypeKey: "interval" },
+      endCondition: { conditionTypeId: 2, conditionTypeKey: "time" }, endConditionValue: seconds,
+      targetType: { workoutTargetTypeId: 1, workoutTargetTypeKey: "no.target" },
+      description: `Relaxed stride ${rep}/${count} — ${seconds}s; fast and smooth, not a sprint`,
+    });
+    if (rep < count) steps.push({
+      type: "ExecutableStepDTO", stepOrder: firstOrder + steps.length,
+      stepType: { stepTypeId: 4, stepTypeKey: "recovery" },
+      endCondition: { conditionTypeId: 1, conditionTypeKey: "lap.button" }, endConditionValue: 0,
+      targetType: { workoutTargetTypeId: 1, workoutTargetTypeKey: "no.target" },
+      description: "Full recovery — walk or jog; press Lap when ready for the next stride",
+    });
+  }
+  return steps;
+}
+
 /** Expand repeats with between-rep recovery only, consuming known aggregate recovery rows. */
 export function mapGarminWorkout(
   workout: Workout,
-  options: { name: string; marker: string; target?: "pace" | "power"; cadence?: boolean },
+  options: { name: string; marker: string; target?: "pace" | "power"; cadence?: boolean; strides?: boolean },
 ): GarminWorkoutPayload {
   if (NON_RUNNING.has(workout.type) || !workout.segments.length) throw new Error("Not a running workout");
   const target = options.target ?? "pace";
@@ -138,17 +184,22 @@ export function mapGarminWorkout(
       }
     }
   }
-  if (steps.length > 50) throw new Error("Export exceeds the initial 50-step limit");
-  if (options.cadence) for (const item of steps) {
+  const strides = options.strides === false ? [] : textStrideSteps(workout, steps.length + 1);
+  // Cadence remains on running steps, not the athlete-controlled walk/jog recovery.
+  if (options.cadence) for (const item of [...steps, ...strides.filter((item) => item.stepType.stepTypeKey !== "recovery")]) {
     item.secondaryTargetType = { workoutTargetTypeId: 3, workoutTargetTypeKey: "cadence" };
     item.secondaryTargetValueOne = 180;
     item.secondaryTargetValueTwo = 190;
   }
+  steps.push(...strides);
+  if (steps.length > 50) throw new Error("Export exceeds the initial 50-step limit");
   return {
     workoutName: options.name,
     description: `${options.marker}\n${workout.description}`,
     sportType: RUNNING,
-    estimatedDurationInSecs: Math.round(positive(workout.estimatedDuration, "Estimated duration") * 60),
+    // Open-ended full recovery cannot be included in the duration estimate.
+    estimatedDurationInSecs: Math.round(positive(workout.estimatedDuration, "Estimated duration") * 60 +
+      strides.filter((item) => item.endCondition.conditionTypeKey === "time").reduce((sum, item) => sum + item.endConditionValue, 0)),
     workoutSegments: [{ segmentOrder: 1, sportType: RUNNING, workoutSteps: steps }],
   };
 }
