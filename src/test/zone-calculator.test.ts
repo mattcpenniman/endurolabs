@@ -123,6 +123,17 @@ describe("calculatePaceZones", () => {
     expect(zones.easy.min).toBeGreaterThan(0);
   });
 
+  it.each([
+    { currentMarathonPR: 240, currentHalfMarathonPR: null },
+    { currentMarathonPR: null, currentHalfMarathonPR: 110 },
+  ])("keeps easy/recovery tied to current race evidence when the goal changes: %o", (evidence) => {
+    const current = calculatePaceZones(makeProfile({ ...evidence, goalMarathonTime: 240 }));
+    const ambitious = calculatePaceZones(makeProfile({ ...evidence, goalMarathonTime: 180 }));
+    expect(ambitious.easy).toEqual(current.easy);
+    expect(ambitious.recovery).toBe(current.recovery);
+    expect(ambitious.marathon).toBeLessThan(current.marathon);
+  });
+
   it("returns effort descriptions", () => {
     const zones = calculatePaceZones(makeProfile());
     expect(zones.easyEffort).toContain("Conversational");
