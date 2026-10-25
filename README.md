@@ -91,6 +91,29 @@ npm run dev
 
 This starts the app on **`http://localhost:3000`**.
 
+### Google sign-in
+
+Sign-in uses Google and matches Google's verified email to an existing EnduroLab user.
+The existing user ID, plans, Garmin connection, preferences, and history are retained.
+Unknown emails are rejected; signing in does not create another account. Password
+sign-in is disabled.
+
+1. In Google Cloud, configure the OAuth consent screen and create an OAuth client
+   of type **Web application**. If the consent screen is in Testing, add your
+   runners as test users.
+2. Register the exact authorized redirect URI
+   `https://your-domain/api/auth/google/callback`. For the current deployment this
+   is `https://spacetimeapollo.com/api/auth/google/callback`. For local development,
+   also register `http://localhost:3000/api/auth/google/callback`.
+3. Set `APP_URL`, `GOOGLE_CLIENT_ID`, and `GOOGLE_CLIENT_SECRET` in `.env` and
+   restart/recreate the app container so it receives the new environment.
+4. Open `/login` and choose **Continue with Google** using the email already
+   stored on your EnduroLab account.
+
+The client secret stays server-side. OAuth uses short-lived, HTTP-only state/PKCE
+cookies and the existing 30-day EnduroLab session; Google access tokens are not stored.
+Until credentials are configured, the login page shows a setup message.
+
 ### Create a user
 
 After the database schema has been pushed (`npm run db:push`, or automatically through Docker), create a login user from the backend.
