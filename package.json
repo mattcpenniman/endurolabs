@@ -13,6 +13,7 @@
     "plan:align-garmin": "node scripts/align-plan-to-garmin.mjs",
     "plan:create-from-garmin": "node scripts/create-plan-from-garmin.mjs",
     "plan:compare": "vite-node --config vitest.config.ts scripts/compare-plans.ts",
+    "plan:details": "node scripts/plan-details.mjs",
     "plan:rebuild-week": "vite-node --config vitest.config.ts scripts/rebuild-plan-week.ts",
     "seed:dev": "node scripts/seed-dev.mjs",
     "samples:backfill": "node scripts/backfill-samples.mjs",
