@@ -702,6 +702,7 @@ function PlanPageContent(): React.ReactNode {
 
   const handleAdjustRunsPerWeek = async (newRuns: number) => {
     if (!plan) return;
+    if (plan.runnerProfile.preferredRestDay === "None" && newRuns < 7) return;
     setIsLoading(true);
     try {
       const profile = {
@@ -1176,7 +1177,12 @@ function PlanPageContent(): React.ReactNode {
         ...plan.runnerProfile,
         raceName: planName.trim() || undefined,
         preferredRestDay: newRestDay,
-        preferredDoubleUpDays: (plan.runnerProfile.preferredDoubleUpDays ?? []).filter((day) => day !== newRestDay),
+        trainingDaysPerWeek: newRestDay === "None"
+          ? 7
+          : Math.min(6, plan.runnerProfile.trainingDaysPerWeek),
+        preferredDoubleUpDays: (plan.runnerProfile.preferredDoubleUpDays ?? [])
+          .filter((day) => day !== newRestDay)
+          .slice(0, newRestDay === "None" ? 3 : 4),
       };
       const nextRunsPerWeek = profile.trainingDaysPerWeek + profile.preferredDoubleUpDays.length;
       profile.runsPerWeekOverride = nextRunsPerWeek;
@@ -1191,8 +1197,8 @@ function PlanPageContent(): React.ReactNode {
       setRunsPerWeek(nextRunsPerWeek);
       const savedPlan = await persistPlan(regenerated, planName);
       setPlan(savedPlan ?? regenerated);
-    } catch {
-      // Silently fail
+    } catch (error) {
+      setError(error instanceof Error ? error.message : "Failed to update rest day");
     } finally {
       setIsLoading(false);
     }
@@ -1643,6 +1649,7 @@ function PlanPageContent(): React.ReactNode {
   const weeklyLogs = dailyLogsToWeeklyLogs(plan, dailyLogs);
   const progress = analyzeProgress(plan, weeklyLogs);
   const trainingDayCount = plan.runnerProfile.trainingDaysPerWeek;
+  const minimumRunCount = plan.runnerProfile.preferredRestDay === "None" ? 7 : 3;
   const currentRunCount =
     runsPerWeek ??
     (plan.runnerProfile.runsPerWeekOverride
@@ -1722,8 +1729,8 @@ function PlanPageContent(): React.ReactNode {
             {runsPerWeek !== null && (
               <div className="flex items-center gap-1 rounded-lg border border-gray-300 bg-white pr-3">
                 <button
-                  onClick={() => handleAdjustRunsPerWeek(Math.max(3, runsPerWeek - 1))}
-                  disabled={runsPerWeek <= 3 || isLoading}
+                  onClick={() => handleAdjustRunsPerWeek(Math.max(minimumRunCount, runsPerWeek - 1))}
+                  disabled={runsPerWeek <= minimumRunCount || isLoading}
                   className="px-2 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-30"
                   aria-label="Decrease runs per week"
                 >
@@ -2296,13 +2303,18 @@ function PlanPageContent(): React.ReactNode {
                 <p className="mt-1 text-sm text-gray-500">
                   Long run day: {plan.runnerProfile.availableLongRunDays[0] ?? "Sunday"}
                 </p>
+                <p id="rest-day-help" className="mt-1 text-sm text-gray-500">
+                  Choose No rest days to spread weekly mileage across all seven days. Race week still includes recovery after the race.
+                </p>
                 <select
                   id="rest-day"
+                  aria-describedby="rest-day-help"
                   value={plan.runnerProfile.preferredRestDay}
                   onChange={(e) => handleAdjustRestDay(e.target.value)}
                   disabled={isLoading}
                   className="mt-4 w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-700 focus:border-enduro-500 focus:outline-none focus:ring-2 focus:ring-enduro-500/20 disabled:opacity-60"
                 >
+                  <option value="None">No rest days (7 training days)</option>
                   {DAYS_OF_WEEK.map((day) => {
                     const isLongRunDay = day === (plan.runnerProfile.availableLongRunDays[0] ?? "Sunday");
                     return (
