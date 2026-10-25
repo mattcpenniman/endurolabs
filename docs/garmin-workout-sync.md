@@ -6,7 +6,7 @@ workout. Primary and secondary runs have separate controls. Choose pace targets
 request rather than substituting another target. Connect Garmin in Profile first.
 
 This uses the existing **unofficial Garmin Connect** connection, not the official
-Training API. It sends one saved workout per click. Success means executable
+Training API. The run-level button sends one saved workout per click. Success means executable
 steps and the calendar date were read back from Garmin Connect; sync your watch
 in Garmin Connect afterward. Watch delivery has not been verified by this feature.
 
@@ -24,7 +24,36 @@ Sync again after saving to update the **same Garmin workout ID**, rather than
 creating a second template. Date changes move the existing calendar schedule.
 Other plan edits do not automatically contact Garmin; explicit sync is required.
 Changes to already exported workouts via a different plan copy are separate
-exports. Cancellation/deletion and bulk sync are not provided.
+exports. Cancellation/deletion is not provided.
+
+## Full-plan sync and status
+
+Open **Plan → Settings → Sync full plan to Garmin**. Choose pace or prescribed
+power targets. Sync exports every saved running workout (including past dates
+and doubles), skipping rest, strength, and cross-training sessions. On double
+days the main run is sent before the secondary run; names include **AM / first**
+and **PM / second**. These are order labels, not scheduled start times: Garmin's
+calendar/watch may choose its own display order. Existing workout IDs remain stable.
+
+The card shows per-run **Synced**, **Changed since sync**, **Not synced**,
+**Needs reconciliation**, or **Cannot sync**, plus the last verified timestamp
+and Garmin link. Status is read from durable exports and compared against the
+current saved prescription, date, and selected target mode. It survives reloads;
+it does not poll Garmin for external edits. Refresh status to check again.
+
+Keep the Settings tab open during a batch. Runs are sent sequentially, and each
+is verified before the next starts. Invalid prescriptions are checked before
+any upload. A failure stops the batch; successful earlier runs remain saved.
+Retry sends only changed/unconfirmed runs. When everything matches, **Resync
+full plan** explicitly reads back/verifies every run again. **Stop after current
+workout** preserves the in-flight checkpoint and stops subsequent runs. Changing
+the displayed plan also stops subsequent uploads. Unsaved/newer server edits are
+rejected by the per-run endpoint. Unknown writes still require the exact saved
+version and readback reconciliation; no blind retries are introduced.
+
+Exports whose source IDs disappeared (for example after regeneration) are counted
+separately. Their remote schedules remain and must be removed in Garmin Connect;
+the product does not silently delete previous Garmin calendar entries.
 
 ## Deployment
 
@@ -47,6 +76,16 @@ refresh/reconnect in Profile; the workout endpoint disables automatic write repl
   "target": "pace"
 }
 ```
+
+`GET /api/plan/[id]/garmin-workout?target=pace` (or `power`) returns owner-only,
+uncached saved-plan sync status and saved workout snapshots for the batch.
+Both controls use the same POST and durable export table; no new migration is
+required beyond the existing workout-sync migration. Confirmed state now records
+`verifiedAt`; older confirmed rows fall back to their last database update when
+there is no unresolved operation. Same-origin writes accept the configured public
+URL and the effective public proxy host, so TLS termination and public host
+aliases do not produce `Invalid request origin`. The reverse proxy must overwrite
+forwarded host/protocol headers; foreign origins remain rejected.
 
 Authentication and plan ownership are required. The server selects the workout
 from its saved plan; `expectedWorkout` and `date` detect stale or unsaved frontend
