@@ -9,9 +9,12 @@ the Garmin Connect calendar.** After the runner consents, Garmin Connect handles
 delivery to compatible devices when they sync. This is the appropriate API for
 EnduroLab's planned runs, rather than the Activity API used for recorded runs.
 
-EnduroLab does **not** currently send planned workouts to Garmin. This document
-answers the feasibility question and proposes the implementation path; it does
-not add an upload endpoint or establish live device compatibility.
+The follow-on VEC-1077 [single-run export CLI](garmin-workout-cli.md) now sends
+selected workouts through the existing **unofficial Garmin Connect session**.
+Its February 16, 2027 test verified a six-step, 14-mile workout and calendar date
+in Garmin Connect. Official Training API authorization and watch-delivery
+acceptance remain separate future steps. This document describes that official
+integration path; the CLI guide describes the implemented immediate path.
 
 ## Access and prerequisites
 
@@ -44,10 +47,11 @@ not add an upload endpoint or establish live device compatibility.
 | Planned workout model | `src/lib/training/models.ts` already has workout IDs, titles, descriptions, ordered segments, distance, duration, pace, power, repetitions, and recovery seconds. `DailyPlan` provides a date and optional secondary workout for doubles. |
 | Calendar export | `src/lib/training/calendar-export.ts` generates `.ics` calendar events. Those are not executable Garmin structured workouts. |
 
-Reaching undocumented Garmin Connect web endpoints through the existing client
-would be a separate reverse-engineered approach, with an unverified contract.
-Recommend the supported Training API integration rather than making that the
-production export path.
+VEC-1077 extends the existing client's authenticated transport to Garmin Connect
+web workout endpoints. Its narrow contract was checked against public client
+models, the account's workout type dictionaries, and one live workout/calendar
+readback; it is not an official Training API contract. Recommend the supported
+Training API for the longer-term integration.
 
 ## Proposed mapping
 
@@ -109,14 +113,16 @@ interval builders for the same pattern before generalizing the mapper.
 
 ## Decision and remaining unknowns
 
-Proceed with the official Training API as the recommended integration path.
-EnduroLab already has most of the source workout structure needed, but it needs
-a mapper, provider authorization/adapter, export persistence, and UI.
+The official Training API remains the recommended longer-term integration path.
+VEC-1077 supplies a pure mapper, unofficial adapter, private file journals and
+an administrative CLI for single-run exports. A registered provider integration,
+product UI, and bulk/edit/cancellation workflows remain future work.
 
-The next action is for the EnduroLab owner to request Starter Access and retrieve
-the portal contract. No approved app credentials, portal schema, live workout
-upload, or watch-delivery result was available in this investigation. Those are
-implementation prerequisites, not blockers to answering this feasibility issue.
+For the official integration, the next action is for the EnduroLab owner to
+request Starter Access and retrieve the portal contract. No approved app
+credentials or portal schema were available in the feasibility investigation.
+The subsequent unofficial live upload is documented in the CLI guide;
+on-device delivery was not observed.
 
 ## Sources
 
@@ -131,4 +137,5 @@ Official Garmin pages retrieved on 2026-10-25:
 Repository evidence: `src/lib/garmin/client.ts`, `src/lib/training/models.ts`,
 `src/lib/training/workout-library.ts`, `src/lib/training/calendar-export.ts`,
 `package-lock.json`, and the installed package's `dist/types.d.ts`
-(`GarminConnectClient` interface). No Garmin account was contacted for a write.
+(`GarminConnectClient` interface). The original feasibility investigation made no
+Garmin writes; the owner-authorized follow-on CLI test did, as documented above.

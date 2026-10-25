@@ -26,11 +26,21 @@ Plans are persisted to PostgreSQL per authenticated user, so each runner only se
 - **Testing:** Vitest 3 + jsdom
 - **Utilities:** dayjs, ics
 
-## Garmin workout export
+## Garmin planned-workout export
 
-For the feasibility and implementation path for sending planned runs to Garmin
-Connect and compatible watches, see [Sending planned runs to Garmin](docs/garmin-workout-export.md).
-Workout publishing is not currently implemented.
+Preview and send one saved run to Garmin Connect with the
+[single-run export CLI](docs/garmin-workout-cli.md):
+
+```bash
+npm run garmin:export-workout -- --email runner@example.com --date 2027-02-16
+```
+
+Preview is read-only. Publishing requires `--apply` and a private journal path;
+see the guide for duplicate handling and recovery. This uses the existing
+unofficial Garmin Connect session, not the registered Garmin Training API.
+
+For the official Training API feasibility and longer-term integration path,
+see [Sending planned runs to Garmin](docs/garmin-workout-export.md).
 
 ## Historical plan analysis
 
