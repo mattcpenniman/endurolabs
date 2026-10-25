@@ -26,6 +26,7 @@
     "race:snapshots": "vite-node --config vitest.config.ts scripts/issue-race-predictions.ts",
     "planner:recommend": "vite-node --config vitest.config.ts scripts/recommend-training-plan.ts",
     "garmin:history": "node scripts/sync-garmin-history.mjs",
+    "garmin:export-workout": "vite-node --config vitest.config.ts scripts/export-garmin-workout.ts",
     "garmin:worker": "node scripts/garmin-worker.mjs",
     "samples:classify-empty": "node scripts/classify-empty-details.mjs",
     "lint": "next lint",
