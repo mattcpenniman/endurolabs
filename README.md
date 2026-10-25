@@ -26,6 +26,32 @@ Plans are persisted to PostgreSQL per authenticated user, so each runner only se
 - **Testing:** Vitest 3 + jsdom
 - **Utilities:** dayjs, ics
 
+## Historical plan analysis
+
+Compare the current marathon plan with past race cycles and same-race drafts:
+
+```bash
+npm run planner:recommend -- --email runner@example.com --goal 2:59:59 --history
+npm run planner:recommend -- --plan-id PLAN_UUID --history --json
+```
+
+`--email` uses the athlete's designated current plan, falling back to the newest
+created plan. `--plan-id` selects a specific draft. Add `--as-of YYYY-MM-DD` to
+exclude activities on and after a cutoff day.
+
+The history report compares scheduled and recorded mileage and long-run counts
+over the same final 112 days before each marathon. It includes race result
+provenance, execution classifications, alternative drafts, goal-pace benchmarks,
+and evidence-linked recommendations with candidate build weeks to review.
+Canonical race results are deduplicated from Garmin activities; a target race
+does not count toward its own preparation. Historical schedules may have been
+reconstructed or edited, and recorded training may omit manual-only runs.
+
+This analysis is read-only. It does not change the saved plan or assign a
+probability of reaching the goal. Forecast ranges reflect historical errors,
+not calibrated prediction intervals. Run with `--help` for creation-preview
+options; `--history` and `--create` are separate modes.
+
 ## Getting Started
 
 ### Run with Docker

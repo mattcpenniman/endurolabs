@@ -113,6 +113,17 @@ describe('buildAthleteSnapshot', () => {
 // ─── Goal Gap ────────────────────────────────────────────────
 
 describe('identifyLimiters', () => {
+  it('converts the 28-day total to weekly mileage before comparing volume', () => {
+    const limiters = identifyLimiters({
+      consistencyRate: 1, peakWeeklyMiles: 40,
+      trainingFeatures: { milesLast28Days: 120, longestRunMiles: 20, runsAtLeast12Miles: 3,
+        runsAtLeast14Miles: 2, missingWeeks: 0, longestTrainingGapDays: 1, activeWeeks: 16, peakWeeklyMiles: 40 },
+      injuryFlags: [], feelTrend: null,
+    }, 179.983, 42195);
+    const volume = limiters.find(row => row.id === 'insufficient_aerobic_volume');
+    expect(volume?.description).toContain('30.0 mi/week');
+  });
+
   it('flags insufficient volume for ambitious goals', () => {
     const limiters = identifyLimiters(
       {

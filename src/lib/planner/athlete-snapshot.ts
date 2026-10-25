@@ -91,7 +91,7 @@ function computeConsistency(activities: readonly RaceAnalysisActivity[], cutoffD
 export function buildAthleteSnapshot(data: PlannerPlanData): PlannerAthleteSnapshot {
   const { activities, fitnessObservations, logs, asOf } = data;
 
-  const filteredActivities = activities.filter(a => a.localDate < asOf);
+  const filteredActivities = activities.filter(a => a.localDate < asOf && !a.excludedFromAnalytics && !a.trainingExcluded);
   const trainingFeatures = buildRaceTrainingFeatures(filteredActivities, asOf, 112);
 
   const fitnessTrend = classifyFitnessTrend(fitnessObservations, asOf);
