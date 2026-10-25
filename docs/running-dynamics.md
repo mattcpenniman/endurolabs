@@ -1,4 +1,4 @@
-# Garmin running dynamics persistence (VEC-1141)
+# Garmin running dynamics persistence and display (VEC-1141 / VEC-1139)
 
 The real per-sample sensor trace is primary. Summary values are supplemental;
 they never fill missing samples. No raw Garmin payloads are stored.
@@ -63,7 +63,57 @@ split calculations must consume ordered full-resolution samples **before** chart
 downsampling and report independent per-metric contributing duration. The
 PostgreSQL ingestion test demonstrates fractional full-trace split consumption
 and chart readback without replacing actual traces with summary averages.
-Production split averages, coverage policy and dynamics UI are VEC-1139.
+### Detail API and display (VEC-1139)
+
+The authenticated activity endpoint and existing run, race and plan token-scoped
+detail endpoints deliberately expose the same `dynamics` report. Existing
+ownership/token restrictions remain in place; shared Stats and splits are
+read-only. The five nullable provider run averages remain in the activity
+serializer and are labeled separately from trace-derived means. Disagreement
+is not silently corrected: providers can use different filtering.
+
+`src/lib/activities/running-dynamics.ts` consumes the ordered complete stored
+trace before generic sample decimation. Each interval requires two valid moving
+speeds (>0 and <=12 m/s), increasing elapsed time, and a gap <=30 seconds. Each
+metric independently requires two in-range endpoints, never a summary fallback.
+Values are linearly integrated over elapsed time, clipped at the exact existing
+distance-split elapsed boundaries (including fractional seconds). Existing
+speed-integrated, summary-distance-reconciled split boundaries are unchanged.
+All four supported split lengths include their own dynamics window.
+
+Each report/window includes recorded `durationSeconds`, `eligibleSeconds` and
+per-metric `average`, `validSeconds` and `coverage` (fraction of eligible time).
+No eligible time gives null coverage; eligible time with missing metrics gives
+zero coverage and null average. Stops, long gaps and unrecorded leading/trailing
+time are not valid metric duration. Thus 100% eligible coverage does not claim
+100% recorded coverage; both contributing seconds and eligible time are shown.
+
+The report also supplies at most 360 fixed elapsed-time weighted chart bins,
+each with independent metric coverage and speed-integrated pace on the same
+time axis. Bins aggregate every overlapping full-resolution interval; they are
+not sampled rows or fabricated copies of summary values. The SVG leaves any
+partially observed metric bin blank rather than bridging nulls or stops. This
+conservative display can hide a brief valid portion of an incomplete bin; the
+read-only expandable values table retains that bin's weighted mean and coverage.
+Pace uses a separate labeled scale and excludes invalid/stationary/gap intervals.
+
+The existing Stats tab shows five provider averages, corresponding trace means,
+coverage and a selectable responsive SVG dynamics/pace chart. Stride uses meters
+or feet with explicit units; oscillation stays cm, contact time ms, and ratio
+percentage points. Balance explicitly labels left/right and derives right only
+from valid left. Descriptive copy stresses pace, terrain and sensor variation;
+no lower-is-better rule or form score is added. Route & splits includes all five
+dynamics columns with independent valid seconds/coverage. The existing image
+export includes the active Stats SVG; wider split tables retain scrolling on
+screen and expand through the existing export sizing path. Switching activities
+keys detail state to its URL so the previous trace cannot accompany a new run.
+
+Tests: `dynamics-aggregation.test.ts`, `dynamics-api.test.ts`, and the existing
+`run-score-card.test.tsx` cover full-trace aggregation, fractional split weights,
+missing metrics/balance, gaps/stops, null/zero coverage, summary-only behavior,
+units, all four serializers, activity switching and the PNG export pipeline.
+The export test mocks the rasterizer/clipboard; real-device clipboard, sensor
+and browser layout acceptance remains part of VEC-1138 rollout.
 
 ## Migration and verification
 

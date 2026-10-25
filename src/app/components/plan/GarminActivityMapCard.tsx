@@ -17,6 +17,8 @@ import { buildSharedRunUrl } from "@/lib/plan-url";
 import { toBlob } from "html-to-image";
 import RunScoreDetails, { RunScoreBadge, RunEffortTargets } from "./RunScoreDetails";
 import RunStats from "./RunStats";
+import { DYNAMICS_KEYS } from "@/lib/activities/running-dynamics";
+import { DYNAMICS_LABELS, formatDynamics, formatDynamicsCoverage } from "@/lib/activities/dynamics-format";
 import type { RunEffort, RunScore } from "@/lib/analytics/run-score";
 import {
   elevationMetersForDisplay,
@@ -47,23 +49,23 @@ const activityDetailCache = new Map<string, ActivityDetailResponse>();
 
 function useActivityDetail(activityId: string | null, detailUrlPrefix: string): ActivityDetailResponse | null {
   const cacheKey = activityId ? `${detailUrlPrefix}/${activityId}` : null;
-  const [detail, setDetail] = useState<ActivityDetailResponse | null>(
-    cacheKey ? activityDetailCache.get(cacheKey) ?? null : null
+  const [loaded, setLoaded] = useState<{ key: string | null; detail: ActivityDetailResponse | null }>(
+    { key: cacheKey, detail: cacheKey ? activityDetailCache.get(cacheKey) ?? null : null }
   );
 
   useEffect(() => {
     if (!activityId || !cacheKey) {
-      setDetail(null);
+      setLoaded({ key: cacheKey, detail: null });
       return;
     }
     const cached = activityDetailCache.get(cacheKey);
     if (cached) {
-      setDetail(cached);
+      setLoaded({ key: cacheKey, detail: cached });
       return;
     }
 
     let cancelled = false;
-    setDetail(null);
+    setLoaded({ key: cacheKey, detail: null });
     fetch(cacheKey)
       .then(async (response) => {
         const body = (await response.json()) as ActivityDetailResponse & { error?: string };
@@ -73,19 +75,18 @@ function useActivityDetail(activityId: string | null, detailUrlPrefix: string): 
       .then((body) => {
         if (cancelled) return;
         activityDetailCache.set(cacheKey, body);
-        setDetail(body);
+        setLoaded({ key: cacheKey, detail: body });
       })
       .catch(() => {
         if (cancelled) return;
         const empty = { samples: [], splits: [] };
-        activityDetailCache.set(cacheKey, empty);
-        setDetail(empty);
+        setLoaded({ key: cacheKey, detail: empty });
       });
 
     return () => { cancelled = true; };
   }, [activityId, cacheKey]);
 
-  return detail;
+  return loaded.key === cacheKey ? loaded.detail : (cacheKey ? activityDetailCache.get(cacheKey) ?? null : null);
 }
 
 function formatElapsed(totalSeconds: number): string {
@@ -521,6 +522,7 @@ function DistanceSplits({
                 <th className="px-3 py-2 font-medium">Cadence</th>
                 <th className="px-3 py-2 font-medium">Elevation</th>
                 <th className="px-3 py-2 font-medium">Temp</th>
+                {DYNAMICS_KEYS.map((key) => <th key={key} className="px-3 py-2 font-medium">{DYNAMICS_LABELS[key]}</th>)}
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-100">
@@ -552,6 +554,10 @@ function DistanceSplits({
                     <span className="ml-1 text-rose-700">-{Math.round(elevationMetersForDisplay(split.elevationLossMeters, units)).toLocaleString()} {elevationUnitAbbr(units)}</span>
                   </td>
                   <td className="px-3 py-2.5">{split.averageTemperatureCelsius !== null ? `${Math.round(split.averageTemperatureCelsius)} °C` : "--"}</td>
+                  {DYNAMICS_KEYS.map((key) => <td key={key} className="min-w-[150px] px-3 py-2.5">
+                    {formatDynamics(key, split.dynamics?.metrics[key].average, units)}
+                    <span className="block text-[10px] text-gray-500">{formatDynamicsCoverage(split.dynamics?.metrics[key])}</span>
+                  </td>)}
                 </tr>
               ))}
             </tbody>

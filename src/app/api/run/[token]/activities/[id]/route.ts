@@ -5,6 +5,7 @@ import { db } from "@/lib/db/client";
 import { activitySamples, runActivities } from "@/lib/db/schema";
 import { downsampleActivitySamples, normalizeActivityCadence } from "@/lib/activities/activity-chart";
 import { buildActivitySplitOptions } from "@/lib/activities/activity-splits";
+import { buildDynamicsReport } from "@/lib/activities/running-dynamics";
 import { loadRunScores } from "@/lib/analytics/run-score-persistence";
 
 export async function GET(
@@ -41,6 +42,7 @@ export async function GET(
   });
   const runScore = (await loadRunScores([activity])).get(id) ?? null;
   return NextResponse.json({
+    dynamics: buildDynamicsReport(samples, activity.durationSeconds),
     samples: downsampleActivitySamples(samples.map((sample) => ({
       ...sample, cadence: normalizeActivityCadence(sample.cadence),
     }))),
