@@ -69,10 +69,24 @@ the product does not silently delete previous Garmin calendar entries.
 
 The generic unavailable message is not proof that a migration is missing. Check
 the deployed server's database and original encryption-key configuration. The
-route logs only a fixed failure stage and sanitized SQLSTATE, without raw errors,
-queries or credentials. SQLSTATE `42P01` identifies a missing relation and returns
+route logs a fixed failure stage, sanitized SQLSTATE, allowlisted exception type
+and runtime code, and an application call-site location. It admits only narrow
+structural JavaScript messages such as an undefined-property access; arbitrary
+error text, queries and credentials are excluded. Provider reads/creates/updates
+and checkpoint saves have separate stages. SQLSTATE `42P01` identifies a missing
+relation and returns
 the workout migration path; credential-decryption failures identify the existing
 encryption key separately. Never generate a replacement key for stored sessions.
+
+VEC-1115 identified the October 25 checkpoint failure: Drizzle initializes the
+shared app SQL client's JSON serializers as identity functions. Passing an object
+through `sql.json()` on that client raises `ERR_INVALID_ARG_TYPE` while encoding
+the checkpoint, before the Garmin upload. `saveWorkoutSyncState` therefore sends
+`JSON.stringify(state)::jsonb` through that **Drizzle-initialized client**, with a
+PostgreSQL regression that asserts the stored value is an object and upserts one
+row. Standalone scripts using an ordinary postgres.js client must continue using
+`sql.json(object)`; serializing a string through its default JSON serializer would
+double-encode it. These are different client configurations.
 
 Apply `scripts/add-garmin-workout-sync.sql` (or `npm run db:push`) before deploying
 the application. It creates `garmin_workout_exports`, keyed by athlete, plan, and

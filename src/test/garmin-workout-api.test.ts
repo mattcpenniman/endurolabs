@@ -102,6 +102,7 @@ describe("Planned Garmin workout API", () => {
     expect(response.status).toBe(200);
     expect(await response.json()).toMatchObject({ workoutId: 42, verified: true, url: "https://connect.garmin.com/modern/workout/42" });
     expect(sql.mock.calls.some(([parts]) => parts.join("").includes("insert into garmin_workout_exports"))).toBe(true);
+    expect(sql.json).not.toHaveBeenCalled();
     expect(sql.release).toHaveBeenCalledOnce();
   });
   it("serializes athlete exports without calling Garmin when another owns the lock", async () => {
@@ -140,5 +141,19 @@ describe("Planned Garmin workout API", () => {
     expect(result.error).toContain("existing encryption key");
     expect(JSON.stringify(result)).not.toContain("secret key material");
     expect(mocks.restore).not.toHaveBeenCalled();
+  });
+  it("logs structural runtime diagnostics without arbitrary exception text", async () => {
+    database();
+    const log = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      mocks.sync.mockRejectedValue(new TypeError("Cannot read properties of undefined (reading 'json')"));
+      await POST(request(), context);
+      expect(log).toHaveBeenLastCalledWith("Garmin workout sync failed", expect.objectContaining({
+        errorType: "TypeError", detail: "Cannot read properties of undefined (reading 'json')",
+      }));
+      mocks.sync.mockRejectedValue(new Error("private token and database query"));
+      await POST(request(), context);
+      expect(JSON.stringify(log.mock.calls)).not.toContain("private token");
+    } finally { log.mockRestore(); }
   });
 });

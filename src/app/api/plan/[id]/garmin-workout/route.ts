@@ -10,16 +10,28 @@ import { selectPlannedRun, workoutCalendarDate } from "@/lib/garmin/workout-expo
 import { buildPlanSyncReport, plannedWorkoutVersion, type SavedWorkoutExport } from "@/lib/garmin/plan-sync-status";
 import { isValidRequestOrigin } from "@/lib/request-origin";
 import { syncGarminWorkout } from "@/lib/garmin/workout-sync";
+import { saveWorkoutSyncState } from "@/lib/garmin/workout-sync-persistence";
 import type { WorkoutSyncState, WorkoutSyncTransport } from "@/lib/garmin/workout-sync";
 import type { MarathonPlan } from "@/lib/training/models";
 
 export const runtime = "nodejs";
 
-/** Log only fixed stage and SQLSTATE; never messages, queries, payloads or tokens. */
+/** Log allowlisted runtime diagnostics, never arbitrary errors, queries or tokens. */
 function syncFailure(error: unknown, stage: string): string {
-  const code = (error as { code?: unknown } | null)?.code;
+  const failure = error as { code?: unknown; name?: unknown; message?: unknown; stack?: unknown } | null;
+  const code = failure?.code;
   const sqlState = typeof code === "string" && /^[0-9A-Z]{5}$/.test(code) ? code : "unknown";
-  console.error("Garmin workout sync failed", { stage, sqlState });
+  const errorType = ["Error", "TypeError", "ReferenceError", "SyntaxError", "RangeError", "PostgresError"].includes(String(failure?.name))
+    ? String(failure?.name) : "unknown";
+  const runtimeCode = ["UNDEFINED_VALUE", "INVALID_ARG_TYPE", "ERR_INVALID_ARG_TYPE", "CONNECTION_CLOSED", "CONNECT_TIMEOUT"].includes(String(code))
+    ? String(code) : "unknown";
+  // Only structural JS messages are admitted; arbitrary error text stays private.
+  const detail = typeof failure?.message === "string" &&
+    /^(?:Cannot read properties of (?:undefined|null) \(reading '[A-Za-z_$][\w$]{0,40}'\)|[A-Za-z_$][\w$.[\]]{0,80} is not a function)$/.test(failure.message)
+    ? failure.message : undefined;
+  const callsite = typeof failure?.stack === "string"
+    ? failure.stack.match(/\/app\/(?:\.next|src|node_modules)\/[A-Za-z0-9_./\[\]-]+:\d+:\d+/)?.[0] : undefined;
+  console.error("Garmin workout sync failed", { stage, sqlState, errorType, runtimeCode, detail, callsite });
   if (sqlState === "42P01") return "Workout sync database migration is missing. Ask the server administrator to apply scripts/add-garmin-workout-sync.sql.";
   if (stage === "credentials") return "Garmin credentials could not be opened. Ask the server administrator to check the existing encryption key; do not replace it.";
   return "Workout sync unavailable. Check the server configuration and database migration.";
@@ -109,14 +121,19 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     client.httpClient.client.defaults.timeout = 30_000;
     client.httpClient.client.interceptors.response.clear(); // Never replay a write after token refresh.
     stage = "provider";
-    const result = await syncGarminWorkout(client.httpClient, {
+    const transport: WorkoutSyncTransport = {
+      get: async <T,>(url: string): Promise<T> => { stage = "provider_read"; return client.httpClient.get<T>(url); },
+      post: async <T,>(url: string, value: unknown): Promise<T> => { stage = "provider_create"; return client.httpClient.post<T>(url, value); },
+      put: async <T,>(url: string, value: unknown): Promise<T> => { stage = "provider_update"; return client.httpClient.put<T>(url, value); },
+    };
+    const result = await syncGarminWorkout(transport, {
       read: async () => state,
       async save(next): Promise<void> {
+        stage = "checkpoint";
         // Autocommit each checkpoint BEFORE dispatch; rolling back would lose uncertain writes.
-        await sql`insert into garmin_workout_exports (user_id, plan_id, source_workout_id, state)
-          values (${user.id}, ${id}, ${workout.id}, ${sql.json(JSON.parse(JSON.stringify(next)))})
-          on conflict (user_id, plan_id, source_workout_id) do update set state=excluded.state, updated_at=now()`;
+        await saveWorkoutSyncState(sql, user.id, id, workout.id, next);
         state = next;
+        stage = "provider";
       },
     }, { payload, date, fingerprint });
     return NextResponse.json({ ...result, url: `https://connect.garmin.com/modern/workout/${result.workoutId}` },
