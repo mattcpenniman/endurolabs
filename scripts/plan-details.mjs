@@ -3,6 +3,7 @@
 /** Read-only saved-plan inspection, usable with Node and the existing postgres dependency. */
 import postgres from "postgres";
 import { pathToFileURL } from "node:url";
+import { auditQualityWorkouts, formatQualityAudit } from "./quality-workout-audit.mjs";
 
 function argument(args, name) {
   const inline = args.find((value) => value.startsWith(`--${name}=`));
@@ -43,8 +44,13 @@ export async function main(args = process.argv.slice(2)) {
   npm run plan:details -- --email runner@example.com [--date YYYY-MM-DD | --week N]
   npm run plan:details -- --plan-id UUID [--date YYYY-MM-DD | --week N]
   npm run plan:details -- --email runner@example.com --list
+  npm run plan:details -- --plan-id UUID --quality [--week N | --date YYYY-MM-DD] [--json]
 
-Prints JSON only to stdout. --email selects users.current_plan_id (no newest-plan
+Default output is JSON. --quality prints a human-readable quality-workout audit;
+add --json for its versioned structured report. Filters actual segments, including
+quality inside long/easy-labeled runs and secondary workouts; excludes the race.
+Shows documentation review prompts, not a complete approval or automatic edits.
+--email selects users.current_plan_id (no newest-plan
 guess); --list shows the athlete's plan IDs, race names and current-plan flag.
 Without --date/--week the complete saved plan is returned. A selected day includes
 both primary and secondary workouts, plus the plan's pace/power zones.
@@ -57,8 +63,10 @@ Garmin, regenerate plans, or change stored data.`);
   const date = argument(args, "date");
   const week = argument(args, "week");
   const list = args.includes("--list");
+  const quality = args.includes("--quality");
   if ((!email && !planId) || (email && planId)) throw new Error("Provide exactly one of --email or --plan-id");
   if (list && (!email || date || week)) throw new Error("--list requires --email and no date/week filter");
+  if (list && quality) throw new Error("Choose --list or --quality, not both");
   // Validate selectors before opening a connection, including impossible dates.
   if (date !== undefined || week !== undefined) {
     selectPlanDetails({ weeks: [{ weekNumber: Number(week ?? 1), days: [{ date }] }] }, { date, week });
@@ -86,9 +94,11 @@ Garmin, regenerate plans, or change stored data.`);
             join plans p on p.id=u.current_plan_id and p.user_id=u.id where u.email=${email} limit 1`;
       const row = rows[0];
       if (!row) throw new Error("Plan not found; use --email EMAIL --list to find a saved plan ID");
-      return { planId: row.id, raceName: row.race_name, details: selectPlanDetails(row.plan_data, { date, week }) };
+      const selected = selectPlanDetails(row.plan_data, { date, week });
+      const details = quality ? auditQualityWorkouts(selectPlanDetails(row.plan_data), { date, week }) : selected;
+      return { planId: row.id, raceName: row.race_name, details };
     });
-    console.log(JSON.stringify(result, null, 2));
+    console.log(quality && !args.includes("--json") ? formatQualityAudit(result) : JSON.stringify(result, null, 2));
   } finally { await sql.end(); }
 }
 
