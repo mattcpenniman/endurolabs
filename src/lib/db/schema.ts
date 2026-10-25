@@ -17,7 +17,10 @@ import {
   doublePrecision,
   uniqueIndex,
   index,
+  primaryKey,
+  check,
 } from "drizzle-orm/pg-core";
+import { sql } from "drizzle-orm";
 
 export const users = pgTable("users", {
   id: uuid("id").primaryKey().defaultRandom(),
@@ -391,6 +394,19 @@ export const activityMetricWindows = pgTable("activity_metric_windows", {
   uniqueIndex("activity_metric_windows_analytics_start_unique").on(table.activityAnalyticsId, table.windowStartSeconds),
   index("activity_metric_windows_analytics_idx").on(table.activityAnalyticsId),
 ]);
+
+export const garminDynamicsBackfill = pgTable("garmin_dynamics_backfill", {
+  activityId: uuid("activity_id").notNull().references(() => runActivities.id, { onDelete: "cascade" }),
+  version: text("version").notNull(),
+  status: text("status").notNull(),
+  attempts: integer("attempts").notNull().default(0),
+  errorCode: text("error_code"),
+  sampleCount: integer("sample_count"),
+  coverage: jsonb("coverage"),
+  nextRetryAt: timestamp("next_retry_at", { withTimezone: true }),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+}, (table) => [primaryKey({ columns: [table.activityId, table.version] }),
+  check("garmin_dynamics_backfill_status_check", sql`${table.status} in ('running','succeeded','unavailable','failed')`)]);
 
 export const weightMeasurements = pgTable("weight_measurements", {
   id: uuid("id").primaryKey().defaultRandom(),
