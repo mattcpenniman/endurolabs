@@ -80,6 +80,18 @@ function paceFromVO2Fraction(vdot: number, fraction: number): number {
   return 1609.344 / velocity;
 }
 
+/** Equivalent marathon pace at the supplied current VDOT (not goal VDOT). */
+function marathonPaceFromVDOT(vdot: number): number {
+  let low = 60;
+  let high = 1000;
+  for (let i = 0; i < 40; i++) {
+    const time = (low + high) / 2;
+    if (estimateVDOTFromTime(26.2, time) > vdot) low = time;
+    else high = time;
+  }
+  return (low + high) / 2 / 26.2;
+}
+
 // ─── Pace Factors ───────────────────────────────────────────
 // Multiplier from VDOT to get pace (min/mile) for each zone.
 // Derived from Daniels' Running Formula tables.
@@ -153,8 +165,14 @@ export function calculatePaceZones(profile: RunnerProfile): PaceZones {
     vdot = estimateVDOTFromTime(26.2, marathonPace * 26.2);
   }
 
-  const easyPace = marathonPace * getEasyPaceFactor(vdot);
-  const recoveryPace = marathonPace * getRecoveryPaceFactor(vdot);
+  // Training intensities are based on current VDOT. An ambitious goal must not
+  // accelerate E/recovery while T/I are still based on the supplied race result.
+  const fitnessMarathonPace = profile.averageMarathonPace ?? (
+    profile.currentMarathonPR ? profile.currentMarathonPR / 26.2
+      : profile.currentHalfMarathonPR ? marathonPaceFromVDOT(vdot) : marathonPace
+  );
+  const easyPace = fitnessMarathonPace * getEasyPaceFactor(vdot);
+  const recoveryPace = fitnessMarathonPace * getRecoveryPaceFactor(vdot);
   const thresholdPace = profile.averageThresholdPace
     ? profile.averageThresholdPace
     : Math.max(

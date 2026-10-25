@@ -268,30 +268,23 @@ function addSegmentDistance(
   const roundedDistance = roundMiles(distance);
   if (roundedDistance <= 0) return;
 
+  if (segmentType === "marathon_pace" || segmentType === "threshold" || segmentType === "vo2") {
+    const key = segmentType === "marathon_pace" ? "marathon" : segmentType;
+    const currentTotal = workoutDistanceByType(workout, segmentType);
+    updateRepeatedQualitySegment(workout, key, roundMiles(currentTotal + roundedDistance), paceZones, powerZones);
+    return;
+  }
+
   const existing = workout.segments.find((segment) => segment.type === segmentType && !segment.repetitions);
   if (existing) {
-    if (segmentType === "marathon_pace" || segmentType === "threshold" || segmentType === "vo2") {
-      const key = segmentType === "marathon_pace" ? "marathon" : segmentType;
-      const currentTotal = workoutDistanceByType(workout, segmentType);
-      updateRepeatedQualitySegment(workout, key, roundMiles(currentTotal + roundedDistance), paceZones, powerZones);
-    } else {
-      existing.distance = roundMiles((existing.distance ?? 0) + roundedDistance);
-      existing.description = getSegmentDescription(segmentType, existing.distance, workout.type);
-    }
+    existing.distance = roundMiles((existing.distance ?? 0) + roundedDistance);
+    existing.description = getSegmentDescription(segmentType, existing.distance, workout.type);
     return;
   }
 
   if (segmentType === "easy" || segmentType === "long") {
     workout.segments.push(getEasySegment(roundedDistance, workout.type, paceZones, powerZones));
     return;
-  }
-
-  if (segmentType === "marathon_pace") {
-    updateRepeatedQualitySegment(workout, "marathon", roundedDistance, paceZones, powerZones);
-  } else if (segmentType === "threshold") {
-    updateRepeatedQualitySegment(workout, "threshold", roundedDistance, paceZones, powerZones);
-  } else if (segmentType === "vo2") {
-    updateRepeatedQualitySegment(workout, "vo2", roundedDistance, paceZones, powerZones);
   }
 }
 
@@ -409,7 +402,10 @@ function updateWorkoutMetadata(workout: Workout, paceZones: PaceZones): void {
   const vo2Miles = workoutDistanceByType(workout, "vo2");
 
   if (workout.type === "long") {
-    workout.title = marathonMiles > 0 ? `${totalDistance} mi Long Run w/ MP Finish` : `${totalDistance} mi Long Run`;
+    workout.title = thresholdMiles > 0
+      ? `${totalDistance} mi Long Run w/ Threshold${marathonMiles > 0 ? " + Marathon" : ""} Work`
+      : marathonMiles > 0 ? `${totalDistance} mi Long Run w/ MP Finish` : `${totalDistance} mi Long Run`;
+    workout.intensityCategory = thresholdMiles > 0 || vo2Miles > 0 ? "hard" : marathonMiles > 0 ? "moderate" : "easy";
     return;
   }
 

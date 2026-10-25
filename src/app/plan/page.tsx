@@ -89,12 +89,12 @@ const MILEAGE_BUILD_STEPS = 4;
 const DEFAULT_INTENSITY_TARGET_PERCENTS: NonNullable<RunnerProfile["intensityTargetPercents"]> = {
   marathon: 10,
   threshold: 6,
-  vo2: 2,
+  vo2: 5,
 };
 const INTENSITY_TARGET_RANGES: Record<IntensityTargetKey, { min: number; max: number }> = {
   marathon: { min: 8, max: 15 },
   threshold: { min: 5, max: 8 },
-  vo2: { min: 1, max: 4 },
+  vo2: { min: 1, max: 8 },
 };
 
 function parsePlanTab(value: string | null): PlanTab | null {
