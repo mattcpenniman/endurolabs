@@ -16,6 +16,7 @@ import { useUnits } from "@/app/components/units/UnitsProvider";
 import { buildSharedRunUrl } from "@/lib/plan-url";
 import { toBlob } from "html-to-image";
 import RunScoreDetails, { RunScoreBadge, RunEffortTargets } from "./RunScoreDetails";
+import RunStats from "./RunStats";
 import type { RunEffort, RunScore } from "@/lib/analytics/run-score";
 import {
   elevationMetersForDisplay,
@@ -123,7 +124,7 @@ export default function GarminActivityMapCard({
   );
   const selectedActivityId = activityId === undefined ? localActivityId : activityId;
   const [selectedIndex, setSelectedIndex] = useState<number | null>(null);
-  const [activeTab, setActiveTab] = useState<"run" | "score">("run");
+  const [activeTab, setActiveTab] = useState<"run" | "stats" | "score">("run");
   const [splitLength, setSplitLength] = useState<ActivitySplitLength>("mile");
   const [imageStatus, setImageStatus] = useState<"idle" | "copying" | "copied" | "downloaded" | "error">("idle");
   const [imageError, setImageError] = useState<string | null>(null);
@@ -318,12 +319,15 @@ export default function GarminActivityMapCard({
       </div>
 
       <div className="flex gap-2 border-b border-gray-100 px-5 py-2" role="tablist" aria-label="Run details">
-        {(["run", "score"] as const).map((tab) => <button key={tab} type="button" role="tab"
+        {(["run", "stats", "score"] as const).map((tab) => <button key={tab} type="button" role="tab"
           aria-selected={activeTab === tab} aria-controls={`run-card-${tab}-panel`} id={`run-card-${tab}-tab`}
           onClick={() => setActiveTab(tab)} className={`rounded-lg px-4 py-2 text-sm font-semibold ${activeTab === tab ? "bg-enduro-100 text-enduro-800" : "text-gray-500 hover:bg-gray-50"}`}>
-          {tab === "run" ? "Route & splits" : "Score"}
+          {tab === "run" ? "Route & splits" : tab === "stats" ? "Stats" : "Score"}
         </button>)}
       </div>
+      {activeTab === "stats" && <div role="tabpanel" id="run-card-stats-panel" aria-labelledby="run-card-stats-tab">
+        {selectedActivity && <RunStats activity={selectedActivity} detail={detail} units={units} />}
+      </div>}
       {activeTab === "score" && <div role="tabpanel" id="run-card-score-panel" aria-labelledby="run-card-score-tab">
         <RunScoreDetails key={selectedActivityId} score={runScore} onEffortChange={detailUrlPrefix === "/api/activities" ? saveEffort : undefined} />
       </div>}
@@ -391,7 +395,7 @@ export default function GarminActivityMapCard({
               <RouteMetric label="Elev. gain" value={formatElevationGain(selectedActivity.elevationGainMeters ?? null, units)} />
               <RouteMetric label="Avg HR" value={selectedActivity.averageHeartRate ? `${Math.round(selectedActivity.averageHeartRate)} bpm` : "--"} />
               <RouteMetric label="Max HR" value={selectedActivity.maxHeartRate ? `${Math.round(selectedActivity.maxHeartRate)} bpm` : "--"} />
-              <RouteMetric label="Avg power" value={selectedActivity.averagePower ? `${Math.round(selectedActivity.averagePower)} W` : "--"} />
+              <RouteMetric label={selectedActivity.averagePowerEstimated ? "Est. avg power" : "Avg power"} value={selectedActivity.averagePower ? `${selectedActivity.averagePowerEstimated ? "~" : ""}${Math.round(selectedActivity.averagePower)} W` : "--"} />
               <RouteMetric label="Avg cadence" value={selectedActivity.averageCadence ? `${Math.round(selectedActivity.averageCadence)} spm` : "--"} />
               <RouteMetric label="Calories" value={selectedActivity.calories ? `${Math.round(selectedActivity.calories)} kcal` : "--"} />
               <RouteMetric label="Device" value={selectedActivity.deviceName ?? "--"} />

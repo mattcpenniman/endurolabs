@@ -6,6 +6,8 @@ import type { RunActivity } from "@/lib/activities/models";
 import { buildRunScore, summarizeRunScores } from "@/lib/analytics/run-score";
 import { RunScoreSummaryBadge } from "@/app/components/plan/RunScoreDetails";
 import { buildActivitySplitOptions } from "@/lib/activities/activity-splits";
+import RunStats from "@/app/components/plan/RunStats";
+import { summarizeTimeAtEffort } from "@/lib/analytics/time-at-effort";
 
 vi.mock("@/app/components/plan/GarminActivityLeafletMap", () => ({ default: () => <div>Map</div> }));
 function activity(id: string, cadence: number | null): RunActivity {
@@ -40,6 +42,49 @@ describe("Run card score tab", () => {
     expect(panel.textContent).toContain("Easy selected; no configured pace/power zones available");
     expect(panel.textContent).toContain("remaining weights are renormalized");
     expect([...panel.querySelectorAll("p")].map((element) => element.textContent)).not.toContain("0.0/10");
+  });
+
+  it("opens Stats for a summary-only run with moving time and unavailable effort", async () => {
+    const run = { ...activity("stats-summary", 180), movingDurationSeconds: 1620 };
+    await act(async () => root.render(<GarminActivityMapCard activities={[run]} />));
+    const tab = [...container.querySelectorAll<HTMLButtonElement>('[role="tab"]')].find((button) => button.textContent === "Stats")!;
+    await act(async () => tab.click());
+    expect(tab.getAttribute("aria-selected")).toBe("true");
+    const panel = container.querySelector('[role="tabpanel"]')!;
+    expect(panel.textContent).toContain("Moving time27:00");
+    expect(panel.textContent).toContain("Time outside moving3:00");
+    expect(panel.textContent).toContain("Moving pace9:00/mi");
+    expect(panel.textContent).toContain("Unavailable: linked plan zones");
+    expect(panel.textContent).not.toContain("0%");
+  });
+
+  it("shows full-trace effort with classified-time percentages and missing metric time", async () => {
+    const zone = (max: number) => ({ targetBpm: { min: 0, max }, hrrPercent: { min: 0, max: 1 }, hrMaxPercent: { min: 0, max: 1 } });
+    const timeAtEffort = summarizeTimeAtEffort({
+      durationSeconds: 120,
+      heartRateZones: { recovery: zone(120), easy: zone(150), marathon: zone(165), threshold: zone(180), vo2: zone(190) },
+      samples: [0, 10, 20, 30, 40, 100, 110, 120].map((elapsedSeconds) => ({
+        elapsedSeconds, speedMetersPerSecond: 3, cadence: null, power: null,
+        heartRate: elapsedSeconds <= 20 ? 140 : null,
+      })),
+    });
+    vi.stubGlobal("fetch", vi.fn(async () => ({ ok: true, json: async () => ({ samples: [], splits: [], timeAtEffort }) })));
+    await act(async () => root.render(<GarminActivityMapCard activities={[activity("stats-trace", 180)]} />));
+    await act(async () => [...container.querySelectorAll<HTMLButtonElement>('[role="tab"]')].find((button) => button.textContent === "Stats")!.click());
+    const heartRate = container.querySelector('[aria-label="Heart rate effort"]')!;
+    expect(heartRate.textContent).toContain("0:30 classified · 0:30 missing metric");
+    expect(heartRate.textContent).toContain("Easy0:30 · 100%");
+    expect(heartRate.textContent).toContain("Percentages use classified time only");
+  });
+
+  it("rejects inconsistent moving time and hides modeled power effort, with metric pace conversion", async () => {
+    const run = { ...activity("stats-invalid", 180), movingDurationSeconds: 1801, averagePowerEstimated: true };
+    const power = { totalSeconds: 60, unclassifiedSeconds: 0, buckets: [{ zone: "easy" as const, seconds: 60 }] };
+    await act(async () => root.render(<RunStats activity={run} detail={{ samples: [], splits: [], timeAtEffort: { durationSeconds: 1800, heartRate: null, power } }} units="metric" />));
+    expect(container.textContent).toContain("Moving time--");
+    expect(container.querySelector('[aria-label="Measured power effort"]')!.textContent).toContain("Unavailable");
+    await act(async () => root.render(<RunStats activity={{ ...run, movingDurationSeconds: 1620 }} detail={{ samples: [], splits: [] }} units="metric" />));
+    expect(container.textContent).toContain("Moving pace5:36/km");
   });
 
   it("updates score details when another run is selected", async () => {

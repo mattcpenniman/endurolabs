@@ -16,6 +16,7 @@ Plans are persisted to PostgreSQL per authenticated user, so each runner only se
 - **User overrides** — Adjust peak weekly mileage and training week count to suit your schedule
 - **Login-protected plans** — Saved plans are behind an HTTP-only session login and scoped per user
 - **Plan persistence** — Save and reload user-specific plans across sessions via PostgreSQL
+- **Run stats** — The run card’s Stats tab shows provider moving time/pace and time in recovery, easy, marathon, threshold and VO2 effort bands from the full trace and linked plan zones. HR and measured-power breakdowns show classified and metric-missing time; percentages use classified time only. Missing zones/data remain unavailable, and modeled average watts are labeled as estimates.
 
 ## Tech Stack
 
