@@ -6,6 +6,7 @@
 import { createCipheriv, createDecipheriv, createHash, randomBytes, randomUUID } from "crypto";
 import { createFromSession } from "garmin-connect-client";
 import postgres from "postgres";
+import { mapGarminActivityDetail } from "../src/lib/garmin/activity-detail.mjs";
 
 try {
   process.loadEnvFile(".env");
@@ -14,7 +15,7 @@ try {
 }
 
 const databaseUrl = process.env.DATABASE_URL || "postgresql://enduro:endurodev@localhost:5432/endurolab";
-const concurrency = Math.min(Math.max(Number(argument("concurrency") ?? 2), 1), 4);
+const concurrency = Math.min(Math.max(Number(argument("concurrency") ?? 2), 1), 2);
 const email = argument("email");
 const days = argument("days") ? Math.max(Number(argument("days")), 1) : null;
 const onlyMissing = process.argv.includes("--only-missing");
@@ -45,62 +46,10 @@ function encrypt(value) {
   return `${iv.toString("base64url")}.${cipher.getAuthTag().toString("base64url")}.${ciphertext.toString("base64url")}`;
 }
 
-function number(value) {
-  const parsed = Number(value);
-  return value !== null && value !== undefined && value !== "" && Number.isFinite(parsed) ? parsed : null;
-}
-
-function integer(value) {
-  const parsed = number(value);
-  return parsed === null ? null : Math.round(parsed);
-}
-
 function mapDetail(payload, startTime) {
-  const descriptors = Array.isArray(payload?.metricDescriptors) ? payload.metricDescriptors : [];
-  const indexes = new Map(descriptors.map((descriptor, index) => [String(descriptor.key).replace(/[^a-z0-9]/gi, "").toLowerCase(), descriptor.metricsIndex ?? index]));
-  const rows = Array.isArray(payload?.activityDetailMetrics) ? payload.activityDetailMetrics : [];
-  const aliases = {
-    timestamp: ["directtimestamp", "timestamp"], elapsed: ["directelapsedtime", "elapsedtime"],
-    distance: ["directdistance", "distance"], heartRate: ["directheartrate", "heartrate"],
-    power: ["directpower", "power", "enhancedpower"], speed: ["directspeed", "speed", "enhancedspeed"],
-    elevation: ["directelevation", "elevation", "enhancedelevation"], grade: ["directgrade", "grade"],
-    cadence: ["directruncadence", "runcadence", "directcadence", "cadence"], latitude: ["directlatitude", "latitude", "positionlat"],
-    longitude: ["directlongitude", "longitude", "positionlong"], temperature: ["directtemperature", "temperature"],
-  };
-  const value = (row, names) => {
-    const metrics = Array.isArray(row?.metrics) ? row.metrics : Array.isArray(row) ? row : null;
-    for (const name of names) {
-      const index = indexes.get(name);
-      if (metrics && index !== undefined && metrics[index] !== undefined) return metrics[index];
-      const key = Object.keys(row ?? {}).find((candidate) => candidate.replace(/[^a-z0-9]/gi, "").toLowerCase() === name);
-      if (key) return row[key];
-    }
-    return null;
-  };
-  const mapped = rows.flatMap((row) => {
-    const elapsedValue = number(value(row, aliases.elapsed));
-    const timestampValue = value(row, aliases.timestamp);
-    const numericTimestamp = number(timestampValue);
-    let timestamp = timestampValue === null
-      ? null
-      : new Date(numericTimestamp === null ? timestampValue : numericTimestamp < 10_000_000_000 ? numericTimestamp * 1000 : numericTimestamp);
-    if (!timestamp || Number.isNaN(timestamp.getTime())) timestamp = elapsedValue === null ? null : new Date(startTime.getTime() + elapsedValue * 1000);
-    const elapsed = elapsedValue ?? (timestamp ? (timestamp.getTime() - startTime.getTime()) / 1000 : null);
-    if (!timestamp || elapsed === null || elapsed < 0) return [];
-    const coordinate = (raw) => {
-      const parsed = number(raw);
-      return parsed !== null && Math.abs(parsed) > 180 ? parsed * (180 / 2 ** 31) : parsed;
-    };
-    return [{
-      timestamp, elapsed_seconds: Math.round(elapsed), distance_meters: number(value(row, aliases.distance)),
-      heart_rate: integer(value(row, aliases.heartRate)), power: integer(value(row, aliases.power)),
-      speed_meters_per_second: number(value(row, aliases.speed)), elevation_meters: number(value(row, aliases.elevation)),
-      grade: number(value(row, aliases.grade)), cadence: integer(value(row, aliases.cadence)),
-      latitude: coordinate(value(row, aliases.latitude)), longitude: coordinate(value(row, aliases.longitude)),
-      temperature_celsius: number(value(row, aliases.temperature)),
-    }];
-  });
-  return [...new Map(mapped.map((sample) => [sample.elapsed_seconds, sample])).values()].sort((a, b) => a.elapsed_seconds - b.elapsed_seconds);
+  return mapGarminActivityDetail(payload, startTime).map((sample) => Object.fromEntries(
+    Object.entries(sample).map(([key, value]) => [key.replace(/[A-Z]/g, (letter) => `_${letter.toLowerCase()}`), value]),
+  ));
 }
 
 async function runPool(values, mapper) {
@@ -159,7 +108,11 @@ try {
           timestamp = excluded.timestamp, distance_meters = excluded.distance_meters, heart_rate = excluded.heart_rate,
           power = excluded.power, speed_meters_per_second = excluded.speed_meters_per_second,
           elevation_meters = excluded.elevation_meters, grade = excluded.grade, cadence = excluded.cadence,
-          latitude = excluded.latitude, longitude = excluded.longitude, temperature_celsius = excluded.temperature_celsius`;
+          latitude = excluded.latitude, longitude = excluded.longitude, temperature_celsius = excluded.temperature_celsius,
+          vertical_oscillation_cm = excluded.vertical_oscillation_cm, vertical_ratio_percent = excluded.vertical_ratio_percent,
+          ground_contact_time_ms = excluded.ground_contact_time_ms,
+          ground_contact_balance_left_percent = excluded.ground_contact_balance_left_percent,
+          stride_length_cm = excluded.stride_length_cm`;
       }
       await sql`delete from activity_samples
         where activity_id = ${activity.id}

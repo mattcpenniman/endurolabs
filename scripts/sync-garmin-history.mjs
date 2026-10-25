@@ -6,6 +6,7 @@
 import { createCipheriv, createDecipheriv, createHash, randomBytes, randomUUID } from "crypto";
 import { createFromSession } from "garmin-connect-client";
 import postgres from "postgres";
+import { mapGarminSummaryDynamics } from "../src/lib/garmin/running-dynamics.mjs";
 
 try {
   process.loadEnvFile(".env");
@@ -87,6 +88,7 @@ try {
   });
   let imported = 0;
   for (const activity of runs) {
+    const dynamics = mapGarminSummaryDynamics(activity);
     const startTimeGmt = new Date(`${activity.startTimeGMT}${String(activity.startTimeGMT).endsWith("Z") ? "" : "Z"}`);
     if (!activity.activityId || Number.isNaN(startTimeGmt.getTime())) continue;
     const now = new Date();
@@ -94,7 +96,8 @@ try {
       user_id, provider_activity_id, source, power_source, activity_name, activity_type, event_type,
       local_date, start_time_local, start_time_gmt, distance_meters, duration_seconds,
       moving_duration_seconds, elevation_gain_meters, average_heart_rate, max_heart_rate,
-      average_cadence, average_power, calories, device_name, synced_at, updated_at
+      average_cadence, average_power, calories, device_name, synced_at, updated_at,
+      vertical_oscillation_cm, vertical_ratio_percent, ground_contact_time_ms, ground_contact_balance_left_percent, stride_length_cm
     ) values (
       ${connection.userId}, ${String(activity.activityId)}, 'garmin', ${String(activity.manufacturer ?? "").toLowerCase().includes("apple") ? "apple_watch" : "garmin"},
       ${activity.activityName?.trim() || "Garmin run"}, ${activity.activityType?.typeKey || "running"}, ${activity.eventType?.typeKey || null},
@@ -103,7 +106,8 @@ try {
       ${rounded(activity.movingDuration)}, ${rounded(activity.elevationGain)}, ${rounded(activity.averageHR)},
       ${rounded(activity.maxHR)}, ${rounded(activity.averageRunningCadenceInStepsPerMinute)},
       ${rounded(activity.avgPower)}, ${rounded(activity.calories)}, ${activity.manufacturer?.trim() || null},
-      ${now}, ${now}
+      ${now}, ${now}, ${dynamics.verticalOscillationCm}, ${dynamics.verticalRatioPercent},
+      ${dynamics.groundContactTimeMs}, ${dynamics.groundContactBalanceLeftPercent}, ${dynamics.strideLengthCm}
     ) on conflict (user_id, source, provider_activity_id) do update set
       power_source = excluded.power_source,
       activity_name = excluded.activity_name, activity_type = excluded.activity_type,
@@ -114,7 +118,11 @@ try {
       elevation_gain_meters = excluded.elevation_gain_meters, average_heart_rate = excluded.average_heart_rate,
       max_heart_rate = excluded.max_heart_rate, average_cadence = excluded.average_cadence,
       average_power = excluded.average_power, calories = excluded.calories,
-      device_name = excluded.device_name, synced_at = excluded.synced_at, updated_at = excluded.updated_at`;
+      device_name = excluded.device_name, synced_at = excluded.synced_at, updated_at = excluded.updated_at,
+      vertical_oscillation_cm = excluded.vertical_oscillation_cm, vertical_ratio_percent = excluded.vertical_ratio_percent,
+      ground_contact_time_ms = excluded.ground_contact_time_ms,
+      ground_contact_balance_left_percent = excluded.ground_contact_balance_left_percent,
+      stride_length_cm = excluded.stride_length_cm`;
     imported += 1;
   }
 

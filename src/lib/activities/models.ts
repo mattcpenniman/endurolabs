@@ -5,8 +5,9 @@
 import type { TimeAtEffortSummary } from "@/lib/analytics/time-at-effort";
 import type { RunScore } from "@/lib/analytics/run-score";
 import type { ActivitySplitOptions } from "@/lib/activities/activity-splits";
+import type { RunningDynamics } from "@/lib/garmin/running-dynamics.mjs";
 
-export interface RunActivity {
+export interface RunActivity extends Partial<RunningDynamics> {
   id: string;
   providerActivityId: string;
   source: string;
@@ -93,7 +94,7 @@ export interface RaceResultRecord {
   ageGroupPlacing: number | null;
 }
 
-export interface ActivityChartSample {
+export interface ActivityChartSample extends Partial<RunningDynamics> {
   elapsedSeconds: number;
   heartRate: number | null;
   power: number | null;

@@ -26,6 +26,11 @@ export async function GET(
     longitude: activitySamples.longitude,
     elevationMeters: activitySamples.elevationMeters,
     temperatureCelsius: activitySamples.temperatureCelsius,
+    verticalOscillationCm: activitySamples.verticalOscillationCm,
+    verticalRatioPercent: activitySamples.verticalRatioPercent,
+    groundContactTimeMs: activitySamples.groundContactTimeMs,
+    groundContactBalanceLeftPercent: activitySamples.groundContactBalanceLeftPercent,
+    strideLengthCm: activitySamples.strideLengthCm,
   }).from(activitySamples).where(eq(activitySamples.activityId, id))
     .orderBy(asc(activitySamples.elapsedSeconds));
   const splitOptions = buildActivitySplitOptions({
