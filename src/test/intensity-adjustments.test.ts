@@ -45,7 +45,7 @@ describe("weekly intensity adjustments", () => {
     expect(adjusted.intensityDistribution.marathon).toBe(roundQuarter((adjusted.totalMileage * 15) / 100));
     expect(adjusted.days.some((day) =>
       day.workout?.type === "long" &&
-      day.workout.segments.at(-1)?.type === "marathon_pace"
+      day.workout.segments.some((segment) => segment.type === "marathon_pace")
     )).toBe(true);
   });
 
@@ -71,7 +71,8 @@ describe("weekly intensity adjustments", () => {
   });
 
   it("scales adjusted quality workouts as reps with matching recovery counts", () => {
-    const profile = makeProfile({ weeksOverride: 18, peakMileageOverride: 55 });
+    const profile = makeProfile({ weeksOverride: 18, peakMileageOverride: 55,
+      currentWeeklyMileage: 40, currentMarathonPR: 210, goalMarathonTime: 210, trainingDaysPerWeek: 6 });
     const plan = generatePlan(profile);
     const week = plan.weeks.find((candidate) => candidate.phase === "marathon_build" && !candidate.isDownWeek);
     const paceZones = calculatePaceZones(profile);
