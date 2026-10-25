@@ -285,6 +285,25 @@ describe("generatePlan", () => {
     }
   });
 
+  it.each([7, 10])("supports no rest days with %i runs per week", (runsPerWeek) => {
+    const plan = generatePlan(makeProfile({
+      preferredRestDay: "None",
+      trainingDaysPerWeek: 7,
+      runsPerWeekOverride: runsPerWeek,
+      preferredDoubleUpDays: runsPerWeek === 10 ? ["Monday", "Wednesday", "Friday"] : [],
+    }));
+
+    for (const week of plan.weeks.slice(0, -1)) {
+      expect(week.days).toHaveLength(7);
+      expect(week.days.every((day) => !day.isRestDay && day.workout !== null)).toBe(true);
+      expect(week.days.reduce((count, day) => count + Number(!!day.workout) + Number(!!day.secondaryWorkout), 0))
+        .toBe(runsPerWeek);
+      expect(scheduledMileage(week)).toBeCloseTo(week.totalMileage, 1);
+      expect(week.days.find((day) => day.dayOfWeek === "Sunday")?.workout?.type).toBe("long");
+    }
+    expect(plan.runnerProfile.preferredRestDay).toBe("None");
+  });
+
   it("has adjustment rules for low mileage runners", () => {
     const plan = generatePlan(makeProfile({ currentWeeklyMileage: 10 }));
     expect(plan.adjustmentRules.length).toBeGreaterThan(0);

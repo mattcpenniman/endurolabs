@@ -53,7 +53,7 @@ export interface RunnerProfile {
   restingHeartRate?: number | null;       // bpm
   raceName?: string;                      // optional label for the race
   trainingDaysPerWeek: number;
-  preferredRestDay: string;               // "Monday", "Tuesday", etc.
+  preferredRestDay: string;               // "Monday", "Tuesday", etc.; "None" for seven training days
   recentInjuryHistory: string;            // free text
   averageEasyPace: number | null;         // min/mile
   averageMarathonPace: number | null;     // min/mile
