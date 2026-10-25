@@ -23,6 +23,6 @@ describe("race resources", () => {
     bytes.set([255, 216, 255]);
     expect(validateRaceAttachment("C:\\photos\\finish\r\n.jpg", bytes).filename).toBe("finish.jpg");
     expect(() => validateRaceAttachment("a.jpg", new Uint8Array())).toThrow("non-empty");
-    expect(() => validateRaceAttachment("a.jpg", new Uint8Array(MAX_RACE_ATTACHMENT_BYTES + 1))).toThrow("5 MB");
+    expect(() => validateRaceAttachment("a.jpg", new Uint8Array(MAX_RACE_ATTACHMENT_BYTES + 1))).toThrow("15 MB");
   });
 });

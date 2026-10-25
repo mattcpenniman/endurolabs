@@ -88,7 +88,7 @@ export default function RaceResourcesCard({ activityId }: { activityId: string }
             event.target.value = "";
             if (!file) return;
             void mutate(async () => {
-              if (!file.size || file.size > MAX_RACE_ATTACHMENT_BYTES) throw new Error("Choose a non-empty file up to 5 MB");
+              if (!file.size || file.size > MAX_RACE_ATTACHMENT_BYTES) throw new Error("Choose a non-empty file up to 15 MB");
               const form = new FormData();
               form.set("file", file);
               const body = await request(endpoint, { method: "POST", body: form });
@@ -97,7 +97,7 @@ export default function RaceResourcesCard({ activityId }: { activityId: string }
             }, "Attachment uploaded");
           }} />
         </label>
-        <p className="mt-2 text-xs text-gray-500">PDF, JPEG, or PNG · Up to 5 MB each · Up to 10 per race</p>
+        <p className="mt-2 text-xs text-gray-500">PDF, JPEG, or PNG · Up to 15 MB each · Up to 10 per race</p>
         {busy && <p role="status" className="mt-2 text-sm text-gray-500">Saving...</p>}
       </div>
     </>}

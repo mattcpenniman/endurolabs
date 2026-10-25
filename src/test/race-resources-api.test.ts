@@ -97,7 +97,7 @@ describe("private race resources API", () => {
   });
   it("rejects oversized streamed bodies before parsing or persistence", async () => {
     state.rows = [[{ id }]];
-    expect((await POST(new Request(url, { method: "POST", body: new Uint8Array(5 * 1024 * 1024 + 65537) }), context)).status).toBe(413);
+    expect((await POST(new Request(url, { method: "POST", body: new Uint8Array(15 * 1024 * 1024 + 65537) }), context)).status).toBe(413);
     expect(state.writes).toEqual([]);
   });
   it("downloads exact private bytes and scopes the attachment to the selected race", async () => {

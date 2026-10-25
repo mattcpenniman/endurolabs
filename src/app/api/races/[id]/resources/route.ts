@@ -39,7 +39,7 @@ async function handle(request: Request, context: Context): Promise<NextResponse>
       length += value.length;
       if (length > MAX_RACE_ATTACHMENT_BYTES + 64 * 1024) {
         await reader.cancel();
-        return NextResponse.json({ error: "Choose a file up to 5 MB" }, { status: 413 });
+        return NextResponse.json({ error: "Choose a file up to 15 MB" }, { status: 413 });
       }
       chunks.push(value);
     }
