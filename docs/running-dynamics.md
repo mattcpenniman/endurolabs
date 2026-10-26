@@ -97,8 +97,15 @@ conservative display can hide a brief valid portion of an incomplete bin; the
 read-only expandable values table retains that bin's weighted mean and coverage.
 Pace uses a separate labeled scale and excludes invalid/stationary/gap intervals.
 
-The existing Stats tab shows five provider averages, corresponding trace means,
-coverage and a selectable responsive SVG dynamics/pace chart. Stride uses meters
+The existing Stats tab headlines each available full-trace mean, labeled
+`Full-trace average`, with independent coverage and a supplemental provider run
+average. Missing provider summaries say `Not stored`: historical dynamics-only
+backfills preserve summary fields, so absent summaries do not mean the trace is
+unavailable. If a metric has no trace average, its stored provider average is
+the headline, labeled `Provider run average`, with the trace marked unavailable
+(or loading while detail is pending). Missing both remains unavailable, including
+absent balance; no values are synthesized or persisted by this display choice.
+The tab includes a selectable responsive SVG dynamics/pace chart. Stride uses meters
 or feet with explicit units; oscillation stays cm, contact time ms, and ratio
 percentage points. Balance explicitly labels left/right and derives right only
 from valid left. Descriptive copy stresses pace, terrain and sensor variation;
