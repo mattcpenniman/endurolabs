@@ -36,15 +36,20 @@ export default function RunningDynamicsStats({ activity, detail, units }: {
     <p className="text-xs text-gray-500">Compare at similar pace and terrain. Device and sensor differences affect these measurements; lower is not universally better. These are descriptions, not a form score.</p>
     <p className="text-xs text-gray-500">Stride length describes forward travel; oscillation describes vertical movement; ratio relates vertical movement to stride length. Contact time describes time on the ground, and balance its left/right distribution.</p>
     <dl className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-      {DYNAMICS_KEYS.map((key) => <div key={key} className="rounded-lg bg-enduro-50 p-3">
+      {DYNAMICS_KEYS.map((key) => {
+        const traceAverage = report?.metrics[key].average;
+        const hasTraceAverage = traceAverage != null;
+        return <div key={key} className="rounded-lg bg-enduro-50 p-3">
         <dt className="text-xs text-enduro-700">{DYNAMICS_LABELS[key]}</dt>
-        <dd className="mt-1 text-sm font-semibold text-enduro-900">{formatDynamics(key, activity[key], units)}</dd>
-        <dd className="mt-1 text-[11px] text-gray-600">Provider run average</dd>
-        <dd className="mt-2 text-xs text-gray-700">Trace: {formatDynamics(key, report?.metrics[key].average, units)}</dd>
+        <dd className="mt-1 text-sm font-semibold text-enduro-900">{formatDynamics(key, hasTraceAverage ? traceAverage : activity[key], units)}</dd>
+        <dd className="mt-1 text-[11px] text-gray-600">{hasTraceAverage ? "Full-trace average" : "Provider run average"}</dd>
+        <dd className="mt-2 text-xs text-gray-700">{hasTraceAverage
+          ? `Provider run average: ${activity[key] == null ? "Not stored" : formatDynamics(key, activity[key], units)}`
+          : `Trace: ${detail ? "Unavailable" : "Loading…"}`}</dd>
         <dd className="text-[11px] text-gray-500">{formatDynamicsCoverage(report?.metrics[key])}</dd>
-      </div>)}
+      </div>; })}
     </dl>
-    <p className="text-xs text-gray-500">Trace averages use full stored samples, independently per metric, with both endpoints present. Gaps over 30 s and stationary/invalid-speed intervals are excluded. Provider averages may use different filtering. Eligible time: {report ? `${report.eligibleSeconds.toFixed(1)} s of ${report.durationSeconds.toFixed(1)} s recorded` : "unavailable"}.</p>
+    <p className="text-xs text-gray-500">Full-trace averages are shown when available; otherwise the stored provider run average is shown. Historical detail backfills do not populate provider averages, so these may be not stored even when a trace average is available. Trace averages use full stored samples, independently per metric, with both endpoints present. Gaps over 30 s and stationary/invalid-speed intervals are excluded. Provider averages may use different filtering. Eligible time: {report ? `${report.eligibleSeconds.toFixed(1)} s of ${report.durationSeconds.toFixed(1)} s recorded` : "unavailable"}.</p>
     {!detail ? <p role="status" className="text-sm text-gray-500">Loading dynamics…</p> : <>
       <label className="block text-xs text-gray-700">Chart metric
         <select className="ml-2 max-w-full rounded border border-gray-300 p-2" value={selected} onChange={(event) => setSelected(event.target.value as DynamicsKey)}>

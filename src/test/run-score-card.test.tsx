@@ -162,6 +162,26 @@ describe("Run card score tab", () => {
     expect(panel.querySelector("svg")).toBeNull();
   });
 
+  it("headlines measured trace averages even when historical provider summaries are missing or different", async () => {
+    const samples = [0, 10, 20].map((elapsedSeconds) => ({ elapsedSeconds, speedMetersPerSecond: 3,
+      heartRate: null, power: null, cadence: null, strideLengthCm: 113.69,
+      verticalOscillationCm: 8.58, verticalRatioPercent: 7.55, groundContactTimeMs: 241,
+      groundContactBalanceLeftPercent: null }));
+    const run = { ...activity("historical-dynamics", 180), verticalRatioPercent: 8.1 };
+    await act(async () => root.render(<RunStats activity={run} detail={{ samples: [], splits: [], dynamics: buildDynamicsReport(samples, 20) }} units="imperial" />));
+    const tiles = [...container.querySelectorAll('[aria-label="Running dynamics"] dl > div')];
+    for (const [index, value] of [[0, "8.58 cm"], [1, "7.55%"], [2, "241.0 ms"], [4, "3.73 ft"]] as const) {
+      expect(tiles[index].querySelector("dd")!.textContent).toBe(value);
+      expect(tiles[index].textContent).toContain("Full-trace average");
+      expect(tiles[index].textContent).toContain("20.0 s valid · 100% of eligible time");
+    }
+    expect(tiles[0].textContent).toContain("Provider run average: Not stored");
+    expect(tiles[1].textContent).toContain("Provider run average: 8.10%");
+    expect(tiles[3].querySelector("dd")!.textContent).toBe("Unavailable");
+    expect(tiles[3].textContent).toContain("Trace: Unavailable");
+    expect(tiles[3].textContent).toContain("0.0 s valid · 0% of eligible time");
+  });
+
   it("never displays the previous activity's dynamics while a switched activity loads", async () => {
     const samples = [0, 10].map((elapsedSeconds) => ({ elapsedSeconds, speedMetersPerSecond: 3,
       heartRate: null, power: null, cadence: null, strideLengthCm: 150 }));
@@ -169,10 +189,10 @@ describe("Run card score tab", () => {
     vi.stubGlobal("fetch", vi.fn((url: string) => url.endsWith("dynamics-next") ? new Promise((resolve) => { finish = resolve; }) : Promise.resolve({ ok: true, json: async () => ({ samples, splits: [], dynamics: buildDynamicsReport(samples, 10) }) })));
     await act(async () => root.render(<GarminActivityMapCard activities={[activity("dynamics-first", 180), activity("dynamics-next", 180)]} />));
     await act(async () => [...container.querySelectorAll<HTMLButtonElement>('[role="tab"]')].find((button) => button.textContent === "Stats")!.click());
-    expect(container.textContent).toContain("Trace: 4.92 ft");
+    expect(container.textContent).toContain("4.92 ftFull-trace average");
     const picker = container.querySelector("select")!;
     await act(async () => { picker.value = "dynamics-next"; picker.dispatchEvent(new Event("change", { bubbles: true })); });
-    expect(container.textContent).not.toContain("Trace: 4.92 ft");
+    expect(container.textContent).not.toContain("4.92 ft");
     expect(container.textContent).toContain("Loading dynamics");
     await act(async () => finish?.({ ok: true, json: async () => ({ samples: [], splits: [], dynamics: buildDynamicsReport([], 10) }) }));
     expect(container.textContent).toContain("No complete chart intervals");
