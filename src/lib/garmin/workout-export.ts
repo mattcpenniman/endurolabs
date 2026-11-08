@@ -1,5 +1,5 @@
 /** Pure mapping of EnduroLab running prescriptions to Garmin Connect workouts. */
-import type { DailyPlan, Workout, WorkoutSegment } from "../training/models";
+import type { DailyPlan, PaceZones, Workout, WorkoutSegment } from "../training/models";
 
 const MILES_TO_METERS = 1609.344;
 const RUNNING = { sportTypeId: 1, sportTypeKey: "running", displayOrder: 1 };
@@ -58,7 +58,7 @@ export function workoutCalendarDate(value: string): string {
   return date;
 }
 
-function step(segment: WorkoutSegment, order: number, target: "pace" | "power"): GarminWorkoutStep {
+function step(segment: WorkoutSegment, order: number, target: "pace" | "power", easyRange?: PaceZones["easy"]): GarminWorkoutStep {
   if (NON_RUNNING.has(segment.type)) throw new Error("Non-running segment cannot be exported");
   if (segment.distance !== undefined && segment.duration !== undefined) {
     // Threshold ladders prescribe a timed float and retain a rounded distance
@@ -96,6 +96,14 @@ function step(segment: WorkoutSegment, order: number, target: "pace" | "power"):
     };
     result.targetValueOne = target === "power" ? anchor : MILES_TO_METERS / (anchor * 60);
     result.targetValueTwo = result.targetValueOne;
+    if (target === "pace" && segment.type === "easy" && easyRange) {
+      // Legacy plans name the slower bound "min"; normalize numerically before
+      // reciprocating pace into Garmin's lower/upper speed bounds.
+      const first = positive(easyRange.min, "Easy pace bound");
+      const second = positive(easyRange.max, "Easy pace bound");
+      result.targetValueOne = MILES_TO_METERS / (Math.max(first, second) * 60);
+      result.targetValueTwo = MILES_TO_METERS / (Math.min(first, second) * 60);
+    }
   } else if (target === "power" || segment.power !== undefined) {
     throw new Error(`Segment has no ${target} prescription; select a supported target explicitly`);
   }
@@ -151,7 +159,7 @@ function textStrideSteps(workout: Workout, firstOrder: number): GarminWorkoutSte
 /** Expand repeats with between-rep recovery only, consuming known aggregate recovery rows. */
 export function mapGarminWorkout(
   workout: Workout,
-  options: { name: string; marker: string; target?: "pace" | "power"; cadence?: boolean; strides?: boolean },
+  options: { name: string; marker: string; target?: "pace" | "power"; cadence?: boolean; strides?: boolean; easyRange?: PaceZones["easy"] },
 ): GarminWorkoutPayload {
   if (NON_RUNNING.has(workout.type) || !workout.segments.length) throw new Error("Not a running workout");
   const target = options.target ?? "pace";
@@ -190,13 +198,13 @@ export function mapGarminWorkout(
     }
     for (let rep = 0; rep < repetitions; rep++) {
       steps.push(step({ ...segment, description: repetitions > 1
-        ? `${segment.description} (rep ${rep + 1}/${repetitions})` : segment.description }, steps.length + 1, target));
+        ? `${segment.description} (rep ${rep + 1}/${repetitions})` : segment.description }, steps.length + 1, target, options.easyRange));
       if (rep < repetitions - 1 && segment.restBetween) {
         steps.push(step({
           type: "recovery", duration: segment.restBetween / 60,
           pace: recovery?.pace, power: recovery?.power,
           description: "Between-rep recovery", effort: recovery?.effort,
-        }, steps.length + 1, target));
+        }, steps.length + 1, target, options.easyRange));
       }
     }
   }

@@ -22,6 +22,45 @@ both cadence bounds before sync is successful. Previously confirmed exports show
 as changed and update in place on explicit resync. Unresolved older exports first
 reconcile their exact original prescription; the following sync adds cadence.
 
+### Pace targets and ranges
+
+**Easy has documented pace ranges.** Vector **DOC-749**,
+`EnduroLab/training-paces-for-5k-to-15k-runners-table-19-2.md`, transcribes
+**Table 19.2: Training Paces for 5K to 15K Runners**, pages 250–251, from the
+user-supplied photograph IMG_3236.jpeg. The book title, author and edition are not
+visible in that photograph. Its Easy columns specify ranges per mile and per
+kilometer by current race ability; M/T/I/R columns specify single targets.
+Examples: the 19:56 5K row gives Easy **7:46–8:16/mi**, the 20:17 row
+**7:50–8:20/mi**, and the 20:39 row **7:58–8:28/mi**. These are not a universal
+±15-second tolerance around any prescribed pace. This corrects VEC-1553's initial
+finding based only on the checked-in single-target VDOT table.
+
+For VEC-1553 the user selected **the saved plan's existing Easy range**, not a
+new Table 19.2 race-ability lookup. `calculatePaceZones` calculates those bounds
+independently (normally ±15 sec/mi about the Easy anchor); Table 19.2 establishes
+that Easy ranges exist, but is not the source of each saved plan's bounds.
+No planner calculations, saved workouts or workout IDs change.
+
+Single-run sync, full-plan sync and saved-run CLI export pass the saved plan's
+`paceZones.easy` to the shared `mapGarminWorkout` mapper. Every paced segment
+explicitly typed `easy`, including Easy warm-ups and cool-downs, exports those
+bounds rather than its single pace. For example, saved bounds of **7:50–8:20/mi**
+become Garmin's lower speed **1609.344/500 m/s** and upper speed
+**1609.344/470 m/s**. Legacy min/max pace names are normalized before conversion.
+Distances, durations, cadence goals and repeat structure are unchanged.
+
+Recovery and M/T/I/R segments keep their single prescribed pace; no range is
+invented for them. Power targets, unpaced segments, relaxed strides, and the
+CLI's standalone `--test-intervals` diagnostic remain unchanged. If an older plan
+has no Easy range, the exporter keeps the single pace; present nonpositive or
+nonfinite Easy bounds stop the export rather than producing invalid speeds.
+
+Previously confirmed single-pace exports show **Changed since sync** and update
+in place only on explicit resync. Unresolved pre-range writes first reconcile
+their original fingerprint/payload (including older cadence, stride and double
+labels); a subsequent sync applies the range. Range-only edits also change the
+fingerprint. No automatic Garmin write or watch-delivery guarantee is implied.
+
 ### Strides
 
 Saved text-only **Easy + Strides** and race-week shakeout prescriptions export

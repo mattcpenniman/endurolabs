@@ -84,6 +84,7 @@ try {
   const key = digest([row.user_id, row.id, date, secondary, workout.id]).slice(0, 16);
   const payload = mapGarminWorkout(workout, {
     name: `EL ${date} ${workout.title.slice(0, 50)} [${key}]`,
+    easyRange: standalone ? undefined : plan.paceZones?.easy,
     marker: `EnduroLab export ${key}`, target: target as "pace" | "power", cadence: process.argv.includes("--cadence"),
   });
   const fingerprint = digest({ payload, date });

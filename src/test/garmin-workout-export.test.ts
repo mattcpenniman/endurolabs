@@ -29,6 +29,38 @@ const zones: PaceZones = {
 };
 
 describe("Garmin workout mapping", () => {
+  it.each([{ min: 8 + 20 / 60, max: 7 + 50 / 60 }, { min: 7 + 50 / 60, max: 8 + 20 / 60 }])(
+    "exports saved Easy bounds as ordered speeds, including bookends (%j)", (easyRange) => {
+      const original = structuredClone(workout);
+      const ranged = mapGarminWorkout(workout, { ...options, easyRange });
+      const legacy = mapGarminWorkout(workout, options);
+      ranged.workoutSegments[0].workoutSteps.forEach((item, index) => {
+        if (workout.segments[index].type === "easy") {
+          expect(item.targetValueOne).toBeCloseTo(1609.344 / 500);
+          expect(item.targetValueTwo).toBeCloseTo(1609.344 / 470);
+          expect(item.targetValueOne).toBeLessThan(item.targetValueTwo!);
+          expect(item.endConditionValue).toBe(legacy.workoutSegments[0].workoutSteps[index].endConditionValue);
+        } else expect(item).toEqual(legacy.workoutSegments[0].workoutSteps[index]);
+      });
+      expect(workout).toEqual(original);
+    });
+  it("keeps power, recovery, and unpaced steps unchanged", () => {
+    const easyRange = { min: 9, max: 8 };
+    const powerRun = { ...workout, segments: workout.segments.map((segment) => ({ ...segment, power: 250 })) };
+    expect(mapGarminWorkout(powerRun, { ...options, target: "power", easyRange }))
+      .toEqual(mapGarminWorkout(powerRun, { ...options, target: "power" }));
+    for (const segment of [
+      { type: "recovery" as const, duration: 2, pace: 10, description: "Jog" },
+      { type: "easy" as const, duration: 1, description: "Unpaced" },
+    ]) {
+      const run = { ...workout, segments: [segment] };
+      expect(mapGarminWorkout(run, { ...options, easyRange })).toEqual(mapGarminWorkout(run, options));
+    }
+  });
+  it.each([0, -1, NaN, Infinity])("rejects an invalid saved Easy bound %s rather than inventing a target", (min) => {
+    expect(() => mapGarminWorkout(workout, { ...options, easyRange: { min, max: 8 } })).toThrow("Easy pace bound");
+  });
+
   it.each([8, 10, 14])("exports interval builders at recovery pace %s, including single-rep sessions", (recoveryPace) => {
     const paceZones = { ...zones, recovery: recoveryPace };
     for (const count of [1, 2, 3]) {

@@ -2,7 +2,7 @@
 import { createHash } from "node:crypto";
 import { mapGarminWorkout, workoutCalendarDate } from "./workout-export";
 import type { WorkoutSyncState, WorkoutSyncVersion } from "./workout-sync";
-import type { MarathonPlan, Workout } from "../training/models";
+import type { MarathonPlan, PaceZones, Workout } from "../training/models";
 
 export interface PlanSyncEntry {
   workout: Workout;
@@ -27,28 +27,32 @@ function digest(value: unknown): string {
 
 export function plannedWorkoutVersion(userId: string, planId: string, workout: Workout,
   date: string, secondary: boolean, target: "pace" | "power", state: WorkoutSyncState,
-  doubleDay = false, cadence = true, strides = true): WorkoutSyncVersion {
+  doubleDay = false, cadence = true, strides = true, easyRange?: PaceZones["easy"]): WorkoutSyncVersion {
   const key = state.confirmed?.payload.description.split("\n")[0].replace("EnduroLab export ", "") ??
     digest([userId, planId, date, secondary, workout.id]).slice(0, 16);
   const payload = mapGarminWorkout(workout, {
     name: `EL ${date} ${doubleDay ? secondary ? "PM / second · " : "AM / first · " : ""}${workout.title.slice(0, 50)} [${key}]`,
-    marker: `EnduroLab export ${key}`, target, cadence, strides,
+    marker: `EnduroLab export ${key}`, target, cadence, strides, easyRange,
   });
   const fingerprint = digest({ payload, date });
   payload.description += `\nSHA256 ${fingerprint}`;
   // New labels/targets must not strand an older write whose outcome is unknown.
   const unresolved = state.pending?.fingerprint ?? state.creation?.fingerprint;
   if (unresolved && unresolved !== fingerprint) {
+    if (easyRange) {
+      const legacy = plannedWorkoutVersion(userId, planId, workout, date, secondary, target, state, doubleDay, cadence, strides);
+      if (legacy.fingerprint === unresolved) return legacy;
+    }
     if (doubleDay) {
-      const legacy = plannedWorkoutVersion(userId, planId, workout, date, secondary, target, state, false, cadence, strides);
+      const legacy = plannedWorkoutVersion(userId, planId, workout, date, secondary, target, state, false, cadence, strides, easyRange);
       if (legacy.fingerprint === unresolved) return legacy;
     }
     if (cadence) {
-      const legacy = plannedWorkoutVersion(userId, planId, workout, date, secondary, target, state, doubleDay, false, strides);
+      const legacy = plannedWorkoutVersion(userId, planId, workout, date, secondary, target, state, doubleDay, false, strides, easyRange);
       if (legacy.fingerprint === unresolved) return legacy;
     }
     if (strides) {
-      const legacy = plannedWorkoutVersion(userId, planId, workout, date, secondary, target, state, doubleDay, cadence, false);
+      const legacy = plannedWorkoutVersion(userId, planId, workout, date, secondary, target, state, doubleDay, cadence, false, easyRange);
       if (legacy.fingerprint === unresolved) return legacy;
     }
   }
@@ -74,7 +78,7 @@ export function buildPlanSyncReport(userId: string, planId: string, plan: Marath
       }
       try {
         const desired = plannedWorkoutVersion(userId, planId, workout, workoutCalendarDate(day.date), secondary, target, state,
-          Boolean(day.secondaryWorkout && !["rest", "strength", "cross_training"].includes(day.secondaryWorkout.type)));
+          Boolean(day.secondaryWorkout && !["rest", "strength", "cross_training"].includes(day.secondaryWorkout.type)), true, true, plan.paceZones?.easy);
         entry.status = state.pending || state.creation ? "unresolved"
           : !state.confirmed ? "not_synced"
           : state.confirmed.fingerprint === desired.fingerprint ? "synced" : "changed";

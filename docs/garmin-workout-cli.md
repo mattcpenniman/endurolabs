@@ -41,6 +41,16 @@ in a trusted administrative environment containing the original encryption key.
 
 ## Mapping and scope
 
+Saved-run pace exports use the owned plan's `paceZones.easy` bounds for paced
+segments typed `easy`, including Easy bookends. Other pace types keep their
+single targets. This uses existing saved bounds, not a new Table 19.2 lookup;
+see [pace targets and ranges](garmin-workout-sync.md#pace-targets-and-ranges).
+The standalone diagnostic below deliberately retains its midpoint targets.
+Adding ranges changes saved-run payload fingerprints: the create-only CLI stops
+on a conflicting old journal rather than replaying it. Do not delete an unresolved
+journal to bypass that protection; reconcile its original write first. Use product
+sync for durable in-place updates of product-managed exports.
+
 `--cadence` adds a secondary 180–190 spm goal to every running step alongside
 pace or power. Omit it to preserve older CLI previews/journals; changing this
 option changes the prescription and the create-only CLI will stop on an existing
