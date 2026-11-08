@@ -24,25 +24,42 @@ reconcile their exact original prescription; the following sync adds cadence.
 
 ### Pace targets and ranges
 
-Garmin pace exports currently use the saved segment's **single prescribed pace**,
-converted from minutes/mile to meters/second. Both Garmin target bounds are set
-to that same speed; the exporter does not add a tolerance or substitute the
-plan's Easy zone bounds. This applies to single-run sync, full-plan sync and the
-CLI, which share `mapGarminWorkout` in `src/lib/garmin/workout-export.ts`.
+**Easy has documented pace ranges.** Vector **DOC-749**,
+`EnduroLab/training-paces-for-5k-to-15k-runners-table-19-2.md`, transcribes
+**Table 19.2: Training Paces for 5K to 15K Runners**, pages 250–251, from the
+user-supplied photograph IMG_3236.jpeg. The book title, author and edition are not
+visible in that photograph. Its Easy columns specify ranges per mile and per
+kilometer by current race ability; M/T/I/R columns specify single targets.
+Examples: the 19:56 5K row gives Easy **7:46–8:16/mi**, the 20:17 row
+**7:50–8:20/mi**, and the 20:39 row **7:58–8:28/mi**. These are not a universal
+±15-second tolerance around any prescribed pace. This corrects VEC-1553's initial
+finding based only on the checked-in single-target VDOT table.
 
-The checked-in [VDOT intensity table](vdot-training-intensities.md#are-these-pace-ranges)
-provides single pace targets, not pace bands. The
-[training-types reference](training-types-reference.md) provides %VO₂max/%HRmax
-ranges, not seconds-per-mile ranges, and the
-[elite plan](elite-training-plan.md) does not specify pace tolerances either.
-Accordingly, **no reference-documented pace range was found** for this export.
-The app's Easy ±15 sec/mi convention is separate from those references; it is not
-automatically exported or generalized to other zones. An 8:05/mi prescription
-therefore remains 8:05/mi in Garmin rather than inventing a 7:49–8:19/mi band.
+For VEC-1553 the user selected **the saved plan's existing Easy range**, not a
+new Table 19.2 race-ability lookup. `calculatePaceZones` calculates those bounds
+independently (normally ±15 sec/mi about the Easy anchor); Table 19.2 establishes
+that Easy ranges exist, but is not the source of each saved plan's bounds.
+No planner calculations, saved workouts or workout IDs change.
 
-No Garmin payload or saved-plan behavior changes with this documentation finding
-(VEC-1553). A future range policy would need explicit pace bounds and provenance,
-rather than treating physiological percentage ranges as pace tolerances.
+Single-run sync, full-plan sync and saved-run CLI export pass the saved plan's
+`paceZones.easy` to the shared `mapGarminWorkout` mapper. Every paced segment
+explicitly typed `easy`, including Easy warm-ups and cool-downs, exports those
+bounds rather than its single pace. For example, saved bounds of **7:50–8:20/mi**
+become Garmin's lower speed **1609.344/500 m/s** and upper speed
+**1609.344/470 m/s**. Legacy min/max pace names are normalized before conversion.
+Distances, durations, cadence goals and repeat structure are unchanged.
+
+Recovery and M/T/I/R segments keep their single prescribed pace; no range is
+invented for them. Power targets, unpaced segments, relaxed strides, and the
+CLI's standalone `--test-intervals` diagnostic remain unchanged. If an older plan
+has no Easy range, the exporter keeps the single pace; present nonpositive or
+nonfinite Easy bounds stop the export rather than producing invalid speeds.
+
+Previously confirmed single-pace exports show **Changed since sync** and update
+in place only on explicit resync. Unresolved pre-range writes first reconcile
+their original fingerprint/payload (including older cadence, stride and double
+labels); a subsequent sync applies the range. Range-only edits also change the
+fingerprint. No automatic Garmin write or watch-delivery guarantee is implied.
 
 ### Strides
 

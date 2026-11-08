@@ -16,6 +16,28 @@ function saved(): SavedWorkoutExport {
   } };
 }
 describe("Garmin full-plan status", () => {
+  it("detects new Easy ranges and range-only edits in the full-plan report", () => {
+    const withZones = { ...plan(), paceZones: { easy: { min: 8.5, max: 8 } } } as MarathonPlan;
+    const row = saved();
+    expect(buildPlanSyncReport("user", "plan", withZones, [row], "pace").entries[0].status).toBe("changed");
+    const current = plannedWorkoutVersion("user", "plan", workout, date, false, "pace", row.state,
+      false, true, true, withZones.paceZones.easy);
+    expect(current.payload.workoutName).toBe(row.state.confirmed!.payload.workoutName);
+    row.state.confirmed = { ...current, workoutId: 42 };
+    expect(buildPlanSyncReport("user", "plan", withZones, [row], "pace").entries[0].status).toBe("synced");
+    withZones.paceZones.easy.min = 9;
+    expect(buildPlanSyncReport("user", "plan", withZones, [row], "pace").entries[0].status).toBe("changed");
+  });
+  it.each([false, true])("reconciles pre-range unknown writes before adding ranges (double day: %s)", (doubleDay) => {
+    const legacy = plannedWorkoutVersion("user", "plan", workout, date, false, "pace", {}, doubleDay, false, false);
+    for (const state of [
+      { creation: { phase: "creating" as const, fingerprint: legacy.fingerprint } },
+      { confirmed: { ...legacy, workoutId: 42 }, pending: { ...legacy, phase: "updating" as const } },
+    ]) {
+      expect(plannedWorkoutVersion("user", "plan", workout, date, false, "pace", state, true, true, true,
+        { min: 9, max: 8 })).toEqual(legacy);
+    }
+  });
   const strideRun: Workout = { ...workout, title: "Easy + Strides",
     description: "Easy followed by 6–8 relaxed 20–30 second strides with full recovery." };
   it("marks text-only stride exports changed and preserves their remote identity", () => {

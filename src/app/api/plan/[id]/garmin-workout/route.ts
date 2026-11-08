@@ -101,7 +101,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
       select state from garmin_workout_exports where user_id=${user.id} and plan_id=${id} and source_workout_id=${workout.id}`;
     let state = existing?.state ?? {};
     const { payload, fingerprint } = plannedWorkoutVersion(user.id, id, workout, date, secondary, body.target ?? "pace", state,
-      Boolean(day.secondaryWorkout && !["rest", "strength", "cross_training"].includes(day.secondaryWorkout.type)));
+      Boolean(day.secondaryWorkout && !["rest", "strength", "cross_training"].includes(day.secondaryWorkout.type)), true, true, plan.paceZones?.easy);
     const [connection] = await sql<Array<{ encrypted_tokens: string; status: string }>>`
       select encrypted_tokens, status from garmin_connections where user_id=${user.id}`;
     if (!connection || connection.status !== "connected") {

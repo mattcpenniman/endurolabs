@@ -63,25 +63,23 @@
 
 ### Are these pace ranges?
 
-No. Each VDOT row above supplies a **single target time** for each listed
-intensity/distance, not a fast–slow pace band. The different VDOT rows describe
-different fitness levels; adjacent rows are not the bounds of one runner's zone.
-The [training-types reference](training-types-reference.md) specifies ranges of
-%VO₂max and %HRmax, but those are physiological intensity ranges, not documented
-seconds-per-mile tolerances. The [elite plan](elite-training-plan.md) prescribes
-E/M/T/I/R sessions without adding fast–slow pace bounds.
+This particular VDOT table supplies a **single target time** for each listed
+intensity/distance, not a fast–slow pace band. Adjacent VDOT rows are not the
+bounds of one runner's zone. However, **Table 19.2 does document Easy ranges**;
+see [the source and export policy](garmin-workout-sync.md#pace-targets-and-ranges).
+It lists single M/T/I/R targets, but Easy ranges per mile and per kilometer,
+selected by current race ability. For example, its 20:17 5K row gives an Easy
+range of **7:50–8:20/mi**. The [training-types reference](training-types-reference.md)
+provides physiological %VO₂max/%HRmax ranges, not seconds-per-mile tolerances.
 
 EnduroLab's `calculatePaceZones` in `src/lib/training/zone-calculator.ts` separately
-defines an Easy band of **±0.25 min/mi (±15 sec/mi)** around the supplied Easy pace
-or its calculated Easy estimate. That is an **application convention**, not a
-pace range specified by these reference tables. Its legacy `easy.min` field is
-the slower bound and `easy.max` is the faster bound. Marathon, threshold, VO₂ and
-recovery pace are single values in the application's zone model.
-
-For example, an Easy anchor of **8:05/mi** would yield an application Easy band
-of **7:50–8:20/mi**, not 7:49–8:19/mi. Neither band is prescribed by the references.
-There is no documented pace tolerance here to apply to Garmin exports; see the
-[Garmin pace-target policy](garmin-workout-sync.md#pace-targets-and-ranges).
+calculates an Easy band of **±0.25 min/mi (±15 sec/mi)** around the supplied Easy
+pace or its calculated estimate. This is an **application convention**, not a
+Table 19.2 row lookup. Its legacy `easy.min` field is the slower bound and
+`easy.max` is the faster bound. An Easy anchor of **8:05/mi** gives application
+bounds of **7:50–8:20/mi**, not 7:49–8:19/mi. Garmin exports those saved Easy bounds
+without changing the planner or deriving new bounds from adjacent table rows.
+Marathon, threshold, VO₂ and recovery pace remain single values in the app.
 
 - **E:** Easy pace
 - **M:** Marathon pace

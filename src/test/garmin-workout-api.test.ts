@@ -20,11 +20,11 @@ function request(value: unknown = body, origin?: string): NextRequest {
     method: "POST", body: JSON.stringify(value), headers: origin ? { Origin: origin } : {},
   });
 }
-function database(options: { owned?: boolean; locked?: boolean; connected?: boolean } = {}) {
+function database(options: { owned?: boolean; locked?: boolean; connected?: boolean; easyRange?: { min: number; max: number } } = {}) {
   const sql = Object.assign(vi.fn(async (parts: TemplateStringsArray) => {
     const query = parts.join("?");
     if (query.includes("pg_try_advisory_lock")) return [{ ok: options.locked !== false }];
-    if (query.includes("from plans")) return options.owned === false ? [] : [{ plan_data: { weeks: [{ days: [{ date: body.date, workout, isRestDay: false }] }] } }];
+    if (query.includes("from plans")) return options.owned === false ? [] : [{ plan_data: { paceZones: options.easyRange ? { easy: options.easyRange } : undefined, weeks: [{ days: [{ date: body.date, workout, isRestDay: false }] }] } }];
     if (query.includes("from garmin_workout_exports")) return [];
     if (query.includes("from garmin_connections")) return options.connected === false ? [] : [{ encrypted_tokens: "sealed", status: "connected" }];
     return [];
@@ -43,6 +43,14 @@ describe("Planned Garmin workout API", () => {
       await journal.save({ confirmed: { ...version, workoutId: 42 } });
       return { workoutId: 42, date: version.date, verified: true };
     });
+  });
+  it("POST exports the saved plan Easy range rather than a single segment pace", async () => {
+    database({ easyRange: { min: 8 + 20 / 60, max: 7 + 50 / 60 } });
+    expect((await POST(request(), context)).status).toBe(200);
+    const version = mocks.sync.mock.calls[0][2] as WorkoutSyncVersion;
+    const step = version.payload.workoutSegments[0].workoutSteps[0];
+    expect(step.targetValueOne).toBeCloseTo(1609.344 / 500);
+    expect(step.targetValueTwo).toBeCloseTo(1609.344 / 470);
   });
   it("requires authentication before acquiring a connection", async () => {
     mocks.auth.mockResolvedValue(null);
