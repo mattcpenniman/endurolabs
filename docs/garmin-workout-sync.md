@@ -22,6 +22,28 @@ both cadence bounds before sync is successful. Previously confirmed exports show
 as changed and update in place on explicit resync. Unresolved older exports first
 reconcile their exact original prescription; the following sync adds cadence.
 
+### Pace targets and ranges
+
+Garmin pace exports currently use the saved segment's **single prescribed pace**,
+converted from minutes/mile to meters/second. Both Garmin target bounds are set
+to that same speed; the exporter does not add a tolerance or substitute the
+plan's Easy zone bounds. This applies to single-run sync, full-plan sync and the
+CLI, which share `mapGarminWorkout` in `src/lib/garmin/workout-export.ts`.
+
+The checked-in [VDOT intensity table](vdot-training-intensities.md#are-these-pace-ranges)
+provides single pace targets, not pace bands. The
+[training-types reference](training-types-reference.md) provides %VO₂max/%HRmax
+ranges, not seconds-per-mile ranges, and the
+[elite plan](elite-training-plan.md) does not specify pace tolerances either.
+Accordingly, **no reference-documented pace range was found** for this export.
+The app's Easy ±15 sec/mi convention is separate from those references; it is not
+automatically exported or generalized to other zones. An 8:05/mi prescription
+therefore remains 8:05/mi in Garmin rather than inventing a 7:49–8:19/mi band.
+
+No Garmin payload or saved-plan behavior changes with this documentation finding
+(VEC-1553). A future range policy would need explicit pace bounds and provenance,
+rather than treating physiological percentage ranges as pace tolerances.
+
 ### Strides
 
 Saved text-only **Easy + Strides** and race-week shakeout prescriptions export

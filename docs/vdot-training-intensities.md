@@ -61,6 +61,28 @@
 
 ## Pace Key
 
+### Are these pace ranges?
+
+No. Each VDOT row above supplies a **single target time** for each listed
+intensity/distance, not a fast–slow pace band. The different VDOT rows describe
+different fitness levels; adjacent rows are not the bounds of one runner's zone.
+The [training-types reference](training-types-reference.md) specifies ranges of
+%VO₂max and %HRmax, but those are physiological intensity ranges, not documented
+seconds-per-mile tolerances. The [elite plan](elite-training-plan.md) prescribes
+E/M/T/I/R sessions without adding fast–slow pace bounds.
+
+EnduroLab's `calculatePaceZones` in `src/lib/training/zone-calculator.ts` separately
+defines an Easy band of **±0.25 min/mi (±15 sec/mi)** around the supplied Easy pace
+or its calculated Easy estimate. That is an **application convention**, not a
+pace range specified by these reference tables. Its legacy `easy.min` field is
+the slower bound and `easy.max` is the faster bound. Marathon, threshold, VO₂ and
+recovery pace are single values in the application's zone model.
+
+For example, an Easy anchor of **8:05/mi** would yield an application Easy band
+of **7:50–8:20/mi**, not 7:49–8:19/mi. Neither band is prescribed by the references.
+There is no documented pace tolerance here to apply to Garmin exports; see the
+[Garmin pace-target policy](garmin-workout-sync.md#pace-targets-and-ranges).
+
 - **E:** Easy pace
 - **M:** Marathon pace
 - **T:** Threshold pace
