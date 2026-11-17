@@ -90,6 +90,8 @@ export const garminConnections = pgTable("garmin_connections", {
   garminUsername: varchar("garmin_username", { length: 255 }).notNull(),
   garminDisplayName: varchar("garmin_display_name", { length: 255 }),
   encryptedTokens: text("encrypted_tokens").notNull(),
+  /** Durable background OAuth check schedule; independent of activity sync TTL. */
+  nextTokenCheckAt: timestamp("next_token_check_at"),
   /** Opt-in "remember me": AES-256-GCM sealed Garmin password used to re-authenticate an expired session. */
   encryptedPassword: text("encrypted_password"),
   rememberMe: boolean("remember_me").default(false).notNull(),
