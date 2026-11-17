@@ -20,6 +20,17 @@ process.on("SIGINT", () => { stopping = true; });
 
 const sleep = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds));
 while (!stopping) {
+  // One due connection per pass; DB scheduling survives worker restarts.
+  try {
+    const response = await fetch(`${appUrl}/api/internal/garmin-session-maintenance`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${secret}` },
+      signal: AbortSignal.timeout(65_000),
+    });
+    if (!response.ok) throw new Error(`Session maintenance returned ${response.status}`);
+  } catch (error) {
+    console.error("Garmin session maintenance pass failed:", error.message);
+  }
   const currentDate = new Date().toISOString().slice(0, 10);
   if (lastSchedulerDate !== currentDate) {
     try {
