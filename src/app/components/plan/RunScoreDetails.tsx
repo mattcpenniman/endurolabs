@@ -103,7 +103,7 @@ export default function RunScoreDetails({ score, onEffortChange }: {
       </div>
       <p className="text-xs leading-relaxed text-gray-500">
         {score.partial ? `Partial score: ${score.availableWeight}% of the component weight is available. Missing components are omitted and the remaining weights are renormalized. ` : "Weighted average: cadence 30%, effort 50%, distance 20%. "}
-        Cadence uses your 180 spm goal, not a universal ideal. Faster or higher-power running earns no extra credit beyond the prescribed target.
+        Cadence uses your 180 spm goal, not a universal ideal. A pace at or below the target upper bound earns full effort credit; only a pace above it loses credit. Measured watts are graded against the band and higher watts earn no extra credit.
         Modeled watts are never graded as measured power. This score is not a validated fitness or race-readiness metric.
       </p>
     </>}

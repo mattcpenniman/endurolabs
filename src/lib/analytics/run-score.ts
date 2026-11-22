@@ -1,12 +1,12 @@
 /**
- * Explainable run-score-v2 coaching heuristic. Pure; this is execution feedback,
+ * Explainable run-score-v3 coaching heuristic. Pure; this is execution feedback,
  * not a validated fitness/readiness metric. Missing components are not zeroes.
  */
 import { normalizeActivityCadence } from "@/lib/activities/activity-chart";
 import type { ActivityChartSample } from "@/lib/activities/models";
 import type { MarathonPlan, Workout, WorkoutSegment } from "@/lib/training/models";
 
-export const RUN_SCORE_VERSION = "run-score-v2";
+export const RUN_SCORE_VERSION = "run-score-v3";
 export const RUN_EFFORT_OPTIONS = {
   recovery: "Recovery", easy: "Easy", marathon_pace: "Marathon", threshold: "Threshold", vo2: "VO2",
 } as const;
@@ -104,6 +104,16 @@ function rangeScore(value: number, range: [number, number]): number {
   return deviationScore(deviation, 0, 0.25);
 }
 
+/**
+ * Pace-targeted effort: any pace at or below the target band's upper bound earns
+ * full credit; only pace above the upper bound (too slow) loses credit, linearly
+ * to zero at 25% above the bound. Measured power keeps the symmetric band rule.
+ */
+function paceScore(value: number, range: [number, number]): number {
+  if (value <= range[1]) return 10;
+  return deviationScore((value - range[1]) / range[1], 0, 0.25);
+}
+
 /** Full credit at/above 180 spm; linear decline to zero at/below 170. */
 function cadenceCredit(cadence: number): number {
   return Math.max(0, Math.min(10, cadence - 170));
@@ -155,7 +165,7 @@ export function buildRunScore(input: RunScoreInput): RunScore {
         if (span >= 30 && start.elevationMeters != null && sample.elevationMeters != null && elevationDistance > 0) {
           const adjusted = gradeAdjustedSpeed(speed, (sample.elevationMeters - start.elevationMeters) / elevationDistance);
           if (adjusted !== null) {
-            effortTotal += rangeScore(1609.344 / adjusted / 60, target.pace) * dt;
+            effortTotal += paceScore(1609.344 / adjusted / 60, target.pace) * dt;
             effortSeconds += dt; gradeSeconds += dt;
           }
         }
@@ -180,7 +190,7 @@ export function buildRunScore(input: RunScoreInput): RunScore {
       basis: powerSeconds > 0 ? gradeSeconds > 0 ? "Measured power + grade-adjusted pace" : "Measured power" : "Grade-adjusted pace",
       detail: targets.length === 0 ? `${selectedEffort === "planned" ? "Planned effort" : RUN_EFFORT_OPTIONS[selectedEffort]} selected; no configured pace/power zones available for scoring.`
         : effortScore === null ? "Need ≥2 min and ≥50% trace coverage with measured anchored power or valid elevation/speed."
-        : "Time-weighted target adherence; full credit inside the target range, 0 at 25% outside. Work/recovery targets follow planned segment times (an approximation, not detected laps). Grade uses the Minetti energy-cost model.",
+        : "Time-weighted target adherence; any pace at or below the target upper bound earns full credit, and pace above it loses credit linearly to 0 at 25% above. Measured anchored watts keep the symmetric band rule. Work/recovery targets follow planned segment times (an approximation, not detected laps). Grade uses the Minetti energy-cost model.",
       coverage: valid(duration) ? Math.min(1, effortSeconds / duration) : null },
     { key: "distance", label: "Planned distance", weight: 20, score: distanceScore, basis: "Provider distance",
       detail: distanceScore === null ? "No matched running-distance target." : `${round(input.distanceMeters / 1609.344)} / ${round(distanceTarget!)} mi; full credit within 5%, 0 at 50% deviation.`, coverage: null },

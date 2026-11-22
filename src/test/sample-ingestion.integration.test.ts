@@ -118,10 +118,10 @@ suite("sample ingestion PostgreSQL integration", () => {
     const original = samples(true);
     await upsertActivitySamples(fixtureActivityId, original);
     await upsertActivitySamples(fixtureActivityId, original);
-    const [first] = await sql`select id, metrics from activity_analytics where activity_id = ${fixtureActivityId} and algorithm_version = 'run-score-v2'`;
+    const [first] = await sql`select id, metrics from activity_analytics where activity_id = ${fixtureActivityId} and algorithm_version = 'run-score-v3'`;
     expect(first.metrics.runScore).toMatchObject({ score: 8, partial: true, availableWeight: 30 });
     await upsertActivitySamples(fixtureActivityId, original.map((sample) => ({ ...sample, cadence: 150 })));
-    const rows = await sql`select id, metrics from activity_analytics where activity_id = ${fixtureActivityId} and algorithm_version = 'run-score-v2'`;
+    const rows = await sql`select id, metrics from activity_analytics where activity_id = ${fixtureActivityId} and algorithm_version = 'run-score-v3'`;
     expect(rows).toHaveLength(1);
     expect(rows[0].id).toBe(first.id);
     expect(rows[0].metrics.runScore.score).toBe(0);
@@ -142,9 +142,9 @@ suite("sample ingestion PostgreSQL integration", () => {
     const { eq } = await import("drizzle-orm");
     const { loadRunScores } = await import("@/lib/analytics/run-score-persistence");
     const rows = await db.select().from(runActivities).where(eq(runActivities.id, fixtureActivityId));
-    const [before] = await sql`select metrics from activity_analytics where activity_id = ${fixtureActivityId} and algorithm_version = 'run-score-v2'`;
+    const [before] = await sql`select metrics from activity_analytics where activity_id = ${fixtureActivityId} and algorithm_version = 'run-score-v3'`;
     expect((await loadRunScores(rows, { dryRun: true })).get(fixtureActivityId)).toMatchObject({ score: 9.4, partial: false });
-    const [preview] = await sql`select metrics from activity_analytics where activity_id = ${fixtureActivityId} and algorithm_version = 'run-score-v2'`;
+    const [preview] = await sql`select metrics from activity_analytics where activity_id = ${fixtureActivityId} and algorithm_version = 'run-score-v3'`;
     expect(preview.metrics).toEqual(before.metrics);
     await loadRunScores(rows);
     const changedPlan = { ...planData, weeks: [{ days: [{ workout: { ...workout, totalDistance: workout.totalDistance * 2 } }] }] };
