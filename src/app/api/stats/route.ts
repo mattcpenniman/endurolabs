@@ -21,6 +21,7 @@ import {
 } from "@/lib/db/schema";
 import { getCurrentUser } from "@/lib/auth";
 import { MarathonPlan } from "@/lib/training/models";
+import { hasDatedSchedule } from "@/lib/training/plan-schedule";
 import { RunActivity } from "@/lib/activities/models";
 import { resolveSummaryPower } from "@/lib/activities/serialize";
 import { applyCalculatedSummaryPower, loadSummaryPowerModel } from "@/lib/activities/summary-power-estimate";
@@ -565,8 +566,22 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
       priorRow = candidateRows[0];
     }
 
-    const currentPlan = (currentRow.planData as MarathonPlan) ?? (currentRow.runnerProfile as unknown as MarathonPlan);
+    const currentPlanData: unknown = currentRow.planData ?? currentRow.runnerProfile;
+    if (!hasDatedSchedule(currentPlanData)) {
+      return NextResponse.json(
+        { error: "This plan has no dated weekly schedule, so stats cannot be computed for it. Choose another current plan." },
+        { status: 422 },
+      );
+    }
+    const currentPlan = currentPlanData;
     currentPlan.id = currentRow.id;
+
+    // An undated prior plan is skipped rather than failing the whole page.
+    let priorPlanNotice: string | null = null;
+    if (priorRow && !hasDatedSchedule(priorRow.planData ?? priorRow.runnerProfile)) {
+      priorPlanNotice = `${priorRow.raceName ?? "The selected prior plan"} has no dated weekly schedule, so it was left out of the comparison.`;
+      priorRow = null;
+    }
     const priorPlan = priorRow
       ? ((priorRow.planData as MarathonPlan) ?? (priorRow.runnerProfile as unknown as MarathonPlan))
       : null;
@@ -734,6 +749,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     return NextResponse.json({
       currentPlanId: currentRow.id,
       priorPlanId: priorRow?.id ?? null,
+      priorPlanNotice,
       comparison,
       aerobicDecoupling: {
         current: currentDecoupling,
