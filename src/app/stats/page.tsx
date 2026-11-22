@@ -19,6 +19,7 @@ import {
   type UnitSystem,
 } from "@/lib/units/format";
 import type { RunnerProfile, MarathonPlan } from "@/lib/training/models";
+import { hasDatedSchedule } from "@/lib/training/plan-schedule";
 import type { GarminConnectionStatus } from "@/lib/activities/models";
 import {
   PlanComparison,
@@ -51,6 +52,7 @@ interface SavedPlanRow {
 interface StatsResponse {
   currentPlanId: string;
   priorPlanId?: string | null;
+  priorPlanNotice?: string | null;
   comparison: PlanComparison;
   aerobicDecoupling: {
     current: DecouplingActivity[];
@@ -119,11 +121,12 @@ export default function StatsPage() {
     setPlans(rows);
     const activeCurrent = currentPlanIdFromAuth ?? rows[0]?.id ?? null;
     setCurrentPlanId(activeCurrent);
-    const priorIdx = activeCurrent ? rows.findIndex((r) => r.id === activeCurrent) : -1;
+    const priorCandidates = rows.filter((r) => r.id === activeCurrent || hasDatedSchedule(r.planData));
+    const priorIdx = activeCurrent ? priorCandidates.findIndex((r) => r.id === activeCurrent) : -1;
     const priorRow = priorIdx > 0
-      ? rows[priorIdx - 1]
-      : rows[(priorIdx + 1) % rows.length];
-    setPriorPlanId(priorRow?.id ?? null);
+      ? priorCandidates[priorIdx - 1]
+      : priorCandidates[(priorIdx + 1) % priorCandidates.length];
+    setPriorPlanId(priorRow && priorRow.id !== activeCurrent ? priorRow.id : null);
     setAuthingDone(true);
   }, [router]);
 
@@ -270,7 +273,7 @@ export default function StatsPage() {
                 >
                   {plans.map((p) => (
                     <option key={p.id} value={p.id}>
-                      {p.raceName ?? `Plan ${p.id.slice(0, 8)}`}
+                      {planOptionLabel(p)}
                     </option>
                   ))}
                 </select>
@@ -284,8 +287,8 @@ export default function StatsPage() {
                 >
                   <option value="">— none —</option>
                   {plans.map((p) => (
-                    <option key={p.id} value={p.id} disabled={p.id === currentPlanId}>
-                      {p.raceName ?? `Plan ${p.id.slice(0, 8)}`}
+                    <option key={p.id} value={p.id} disabled={p.id === currentPlanId || !hasDatedSchedule(p.planData)}>
+                      {planOptionLabel(p)}
                     </option>
                   ))}
                 </select>
@@ -294,6 +297,9 @@ export default function StatsPage() {
           </div>
           {error && (
             <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">{error}</div>
+          )}
+          {stats?.priorPlanNotice && (
+            <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">{stats.priorPlanNotice}</div>
           )}
         </header>
 
@@ -522,6 +528,11 @@ function PlanComparisonCard({ summary, title, highlight = true }: {
       </div>
     </div>
   );
+}
+
+function planOptionLabel(plan: SavedPlanRow): string {
+  const name = plan.raceName ?? `Plan ${plan.id.slice(0, 8)}`;
+  return hasDatedSchedule(plan.planData) ? name : `${name} (no dated schedule)`;
 }
 
 function Row({ label, value, tone = "text-gray-900" }: { label: string; value: string; tone?: string }) {
