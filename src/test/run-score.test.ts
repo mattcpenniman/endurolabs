@@ -28,8 +28,11 @@ describe("run execution score", () => {
     expect(score()).toMatchObject({ score: 10, partial: false, availableWeight: 100 });
     expect(score().components[0].detail).toContain("180");
   });
-  it("penalizes running an easy run too fast and does not reward more watts", () => {
-    expect(effort(score({ samples: trace({ speedMetersPerSecond: 5 }) }))).toBe(0);
+  it("earns full effort credit for a pace at or below the target upper bound", () => {
+    // 5 m/s is well above the worked-example easy band's upper bound — full credit now.
+    expect(effort(score({ samples: trace({ speedMetersPerSecond: 5 }) }))).toBe(10);
+    // 100% slower than the band's upper bound scores zero.
+    expect(effort(score({ samples: trace({ speedMetersPerSecond: 1609.344 / (plan.paceZones.easy.min * 2 * 60) }) }))).toBe(0);
     expect(score({ distanceMeters: 3218.688 * 1.5 }).components[2].score).toBe(0);
   });
   it("defaults unmatched runs to Easy without inventing numeric zones", () => {
