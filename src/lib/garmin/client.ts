@@ -249,6 +249,17 @@ interface AuthenticatedGarminClient extends GarminConnectClient {
   };
 }
 
+/** Daily wellness history; no running cadence/activity steps are used. */
+export async function fetchDailySteps(client: GarminConnectClient, startDate: string, endDate: string): Promise<unknown> {
+  const { validateStepsRange } = await import("@/lib/garmin/daily-steps");
+  validateStepsRange(startDate, endDate);
+  const authenticatedClient = client as AuthenticatedGarminClient;
+  if (!authenticatedClient.httpClient?.get) throw new Error("Installed Garmin client does not expose its authenticated transport");
+  return authenticatedClient.httpClient.get(
+    `https://connectapi.garmin.com/usersummary-service/stats/steps/daily/${startDate}/${endDate}`
+  );
+}
+
 export async function fetchHistoryActivitiesPage(
   client: GarminConnectClient,
   offset: number,

@@ -119,6 +119,17 @@ export const garminWorkoutExports = pgTable("garmin_workout_exports", {
   uniqueIndex("garmin_workout_exports_source_unique").on(table.userId, table.planId, table.sourceWorkoutId),
 ]);
 
+/** Daily wellness totals, independent of run activities and plan ownership. */
+export const garminDailySteps = pgTable("garmin_daily_steps", {
+  userId: uuid("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  localDate: varchar("local_date", { length: 10 }).notNull(),
+  totalSteps: integer("total_steps"), // null means Garmin has not supplied a total
+  fetchedAt: timestamp("fetched_at").defaultNow().notNull(),
+}, (table) => [
+  primaryKey({ columns: [table.userId, table.localDate] }),
+  check("garmin_daily_steps_nonnegative", sql`${table.totalSteps} >= 0`),
+]);
+
 export const garminSyncJobs = pgTable("garmin_sync_jobs", {
   id: uuid("id").primaryKey().defaultRandom(),
   userId: uuid("user_id")
