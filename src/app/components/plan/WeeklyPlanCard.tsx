@@ -18,6 +18,7 @@ import { summarizeRunScores } from "@/lib/analytics/run-score";
 import { RunScoreBadge, RunScoreSummaryBadge } from "./RunScoreDetails";
 import { GarminWorkoutSyncButton } from "./GarminWorkoutSyncButton";
 import { resizeWorkout } from "@/lib/training/workout-edit";
+import { DailyStepsBadge, localToday, useDailySteps } from "./DailySteps";
 import { useUnits } from "@/app/components/units/UnitsProvider";
 import {
   formatElevationGain,
@@ -461,6 +462,7 @@ export default function WeeklyPlanCard({
   onActivityClick,
 }: WeeklyPlanCardProps) {
   const { units } = useUnits();
+  const dailySteps = useDailySteps(week.days.map((day) => day.date), isExpanded && /^[0-9a-f-]{36}$/i.test(planId));
   const [localDays, setLocalDays] = useState<DailyPlan[]>(
     [...week.days].sort((a, b) => dayDisplayOrder[a.dayOfWeek] - dayDisplayOrder[b.dayOfWeek])
   );
@@ -1079,6 +1081,13 @@ export default function WeeklyPlanCard({
       {/* Expanded content */}
       {isExpanded && (
         <div className="border-t border-gray-100 px-4 pb-4">
+          <div className="mt-3 flex flex-wrap items-center gap-2 text-xs text-slate-500" role="status">
+            {dailySteps.loading && <span>Loading Garmin daily steps…</span>}
+            {dailySteps.error && <><span>{dailySteps.error}</span><button type="button" className="underline" onClick={dailySteps.refresh}>Retry steps</button></>}
+            {!dailySteps.loading && !dailySteps.error && Object.keys(dailySteps.totals).length > 0 && (
+              <button type="button" className="underline" onClick={dailySteps.refresh}>Refresh daily steps</button>
+            )}
+          </div>
           <form
             onSubmit={submitMileageAdjustment}
             className="mt-4 rounded-xl border border-enduro-200 bg-enduro-50 p-4"
@@ -1257,6 +1266,7 @@ export default function WeeklyPlanCard({
                           {day.dayOfWeek}
                         </span>
                         <span className="text-xs text-slate-500">{formatPlanDate(day.date)}</span>
+                        <DailyStepsBadge steps={dailySteps.totals[day.date.slice(0, 10)]} today={day.date.slice(0, 10) === localToday()} />
                       </div>
                       <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-slate-600">
                         <span className="rounded bg-slate-100 px-2 py-1">
