@@ -20,6 +20,20 @@ for implementation validation.
 
 - Opening a saved plan week first loads persisted daily totals and then imports
   that week's dates through today. Older weeks therefore import lazily too.
+- While a saved week stays expanded and the tab is visible, steps refresh every
+  hour and at the next **browser-local midnight**, whichever comes first. The
+  midnight refresh reimports the displayed dates (including the day that just
+  ended) and includes the new day if it belongs to that week. This is not a
+  guarantee that Garmin has finalized the previous day's total at midnight;
+  subsequent hourly imports can pick up corrections.
+- Hidden tabs do not poll. Returning to the tab catches up once if the hourly or
+  midnight refresh is due; it does not replay every missed interval. Collapsing
+  the week or leaving the page stops its refresh timer. There is no closed-page
+  sync or server-side steps schedule. Only expanded weeks are refreshed.
+- Reloading/reopening a saved week or clicking **Refresh daily steps** also
+  requests an import, subject to the server cache below. Ordinary activity sync
+  is separate and does not refresh steps. Sync the device to Garmin Connect first
+  if its daily total is behind the watch.
 - Every available day's header has a footprint icon and formatted step count,
   including rest days and true zero totals. Missing totals have no badge.
 - Today is labeled **so far**. These are the last imported Garmin totals, not a
@@ -30,9 +44,11 @@ for implementation validation.
 - Errors are non-blocking and offer **Retry steps**. A busy activity/maintenance
   worker returns a conflict rather than starting another Garmin session. If the
   foreground activity sync wins the connection lease, retry steps after it ends.
-- Recent dates (last seven days) refresh after 15 minutes; older dates after six
-  hours. Refresh obeys these TTLs. Missing dates have nullable checkpoints, not
-  fake zeros. Empty responses do not erase known historical totals.
+- Recent dates (last seven days) are eligible for a provider refresh after 15
+  minutes; older dates after six hours. These are server cache TTLs, **not polling
+  intervals**. Manual and automatic refresh both obey them. Missing dates have
+  nullable checkpoints, not fake zeros. Empty responses do not erase known
+  historical totals.
 - The existing connection lease fences ingestion and token persistence. The
   session is restored/refreshed and encrypted tokens saved before requesting
   history. This feature never attempts password login, MFA, or changes the

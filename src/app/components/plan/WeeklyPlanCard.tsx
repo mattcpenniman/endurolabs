@@ -18,7 +18,7 @@ import { summarizeRunScores } from "@/lib/analytics/run-score";
 import { RunScoreBadge, RunScoreSummaryBadge } from "./RunScoreDetails";
 import { GarminWorkoutSyncButton } from "./GarminWorkoutSyncButton";
 import { resizeWorkout } from "@/lib/training/workout-edit";
-import { DailyStepsBadge, localToday, useDailySteps } from "./DailySteps";
+import { DailyStepsBadge, DailyStepsRefreshNote, localToday, useDailySteps } from "./DailySteps";
 import { useUnits } from "@/app/components/units/UnitsProvider";
 import {
   formatElevationGain,
@@ -1085,7 +1085,10 @@ export default function WeeklyPlanCard({
             {dailySteps.loading && <span>Loading Garmin daily steps…</span>}
             {dailySteps.error && <><span>{dailySteps.error}</span><button type="button" className="underline" onClick={dailySteps.refresh}>Retry steps</button></>}
             {!dailySteps.loading && !dailySteps.error && Object.keys(dailySteps.totals).length > 0 && (
-              <button type="button" className="underline" onClick={dailySteps.refresh}>Refresh daily steps</button>
+              <>
+                <button type="button" className="underline" onClick={dailySteps.refresh}>Refresh daily steps</button>
+                <DailyStepsRefreshNote />
+              </>
             )}
           </div>
           <form

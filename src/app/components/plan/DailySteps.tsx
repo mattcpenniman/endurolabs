@@ -8,6 +8,15 @@ export function localToday(): string {
   return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
 }
 
+const STEPS_REFRESH_INTERVAL_MS = 60 * 60_000;
+
+/** Refresh hourly or at the next browser-local midnight, whichever comes first. */
+function nextRefreshTime(): number {
+  const now = new Date();
+  const midnight = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1);
+  return Math.min(now.getTime() + STEPS_REFRESH_INTERVAL_MS, midnight.getTime());
+}
+
 export function useDailySteps(dates: string[], enabled: boolean): {
   totals: Record<string, number>; loading: boolean; error: string | null; refresh: () => void;
 } {
@@ -15,19 +24,34 @@ export function useDailySteps(dates: string[], enabled: boolean): {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [revision, setRevision] = useState(0);
-  const pastDates = dates.map((date) => date.slice(0, 10)).filter((date) => isCalendarDate(date) && date <= localToday()).sort();
-  const startDate = pastDates[0];
-  const endDate = pastDates.at(-1);
+  const dateKey = dates.map((date) => date.slice(0, 10)).filter(isCalendarDate).sort().join(",");
   useEffect(() => {
-    if (!enabled || !startDate || !endDate) return;
-    const range = { startDate, endDate };
+    if (!enabled || !dateKey) return;
     let active = true;
+    let inFlight = false;
+    let nextRefreshAt = Date.now();
+    let timer: ReturnType<typeof setTimeout> | undefined;
     const controller = new AbortController();
     function accept(days: DailySteps[]): void {
       if (active) setTotals(Object.fromEntries(days.map((day) => [day.localDate, day.totalSteps])));
     }
+    function schedule(): void {
+      clearTimeout(timer);
+      if (active && !inFlight && document.visibilityState === "visible") {
+        timer = setTimeout(() => { void load(); }, Math.max(0, nextRefreshAt - Date.now()));
+      }
+    }
     async function load(): Promise<void> {
-      setLoading(true); setError(null); setTotals({});
+      if (!active || inFlight || document.visibilityState !== "visible") return;
+      // Recompute at request time so midnight includes the newly started day too.
+      const pastDates = dateKey.split(",").filter((date) => date <= localToday());
+      const startDate = pastDates[0];
+      const endDate = pastDates.at(-1);
+      nextRefreshAt = nextRefreshTime();
+      if (!startDate || !endDate) { schedule(); return; }
+      const range = { startDate, endDate };
+      inFlight = true;
+      setLoading(true); setError(null);
       try {
         const query = new URLSearchParams(range);
         const stored = await fetch(`/api/integrations/garmin/steps?${query}`, { cache: "no-store", signal: controller.signal });
@@ -40,12 +64,32 @@ export function useDailySteps(dates: string[], enabled: boolean): {
         accept(body.days);
       } catch (failure) {
         if (active) setError(failure instanceof Error ? failure.message : "Steps import unavailable");
-      } finally { if (active) setLoading(false); }
+      } finally {
+        inFlight = false;
+        if (active) { setLoading(false); schedule(); }
+      }
     }
+    function visibilityChanged(): void {
+      clearTimeout(timer);
+      if (document.visibilityState !== "visible") return;
+      if (Date.now() >= nextRefreshAt) void load();
+      else schedule();
+    }
+    setTotals({});
+    document.addEventListener("visibilitychange", visibilityChanged);
     void load();
-    return () => { active = false; controller.abort(); };
-  }, [enabled, startDate, endDate, revision]);
+    return () => {
+      active = false;
+      clearTimeout(timer);
+      document.removeEventListener("visibilitychange", visibilityChanged);
+      controller.abort();
+    };
+  }, [enabled, dateKey, revision]);
   return { totals, loading, error, refresh: () => setRevision((value) => value + 1) };
+}
+
+export function DailyStepsRefreshNote(): React.JSX.Element {
+  return <span>Steps refresh hourly while this week is open and visible, and after local midnight. Returning to this tab catches up when due. Sync your device to Garmin Connect first.</span>;
 }
 
 export function DailyStepsBadge({ steps, today = false }: { steps: number | undefined; today?: boolean }): React.JSX.Element | null {
