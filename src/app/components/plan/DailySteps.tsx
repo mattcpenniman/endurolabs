@@ -17,7 +17,8 @@ function nextRefreshTime(): number {
   return Math.min(now.getTime() + STEPS_REFRESH_INTERVAL_MS, midnight.getTime());
 }
 
-export function useDailySteps(dates: string[], enabled: boolean): {
+/** Saved weeks load persisted totals even when collapsed; only expanded weeks import or poll. */
+export function useDailySteps(dates: string[], enabled: boolean, expanded = true): {
   totals: Record<string, number>; loading: boolean; error: string | null; refresh: () => void;
 } {
   const [totals, setTotals] = useState<Record<string, number>>({});
@@ -25,6 +26,9 @@ export function useDailySteps(dates: string[], enabled: boolean): {
   const [error, setError] = useState<string | null>(null);
   const [revision, setRevision] = useState(0);
   const dateKey = dates.map((date) => date.slice(0, 10)).filter(isCalendarDate).sort().join(",");
+  useEffect(() => {
+    setTotals({}); setError(null); setLoading(false);
+  }, [enabled, dateKey]);
   useEffect(() => {
     if (!enabled || !dateKey) return;
     let active = true;
@@ -37,7 +41,7 @@ export function useDailySteps(dates: string[], enabled: boolean): {
     }
     function schedule(): void {
       clearTimeout(timer);
-      if (active && !inFlight && document.visibilityState === "visible") {
+      if (active && expanded && !inFlight && document.visibilityState === "visible") {
         timer = setTimeout(() => { void load(); }, Math.max(0, nextRefreshAt - Date.now()));
       }
     }
@@ -47,7 +51,7 @@ export function useDailySteps(dates: string[], enabled: boolean): {
       const pastDates = dateKey.split(",").filter((date) => date <= localToday());
       const startDate = pastDates[0];
       const endDate = pastDates.at(-1);
-      nextRefreshAt = nextRefreshTime();
+      nextRefreshAt = expanded ? nextRefreshTime() : Infinity;
       if (!startDate || !endDate) { schedule(); return; }
       const range = { startDate, endDate };
       inFlight = true;
@@ -56,7 +60,8 @@ export function useDailySteps(dates: string[], enabled: boolean): {
         const query = new URLSearchParams(range);
         const stored = await fetch(`/api/integrations/garmin/steps?${query}`, { cache: "no-store", signal: controller.signal });
         if (stored.ok) accept((await stored.json()).days);
-        if (!active) return;
+        else if (!expanded) throw new Error("Daily steps unavailable");
+        if (!active || !expanded) return;
         const result = await fetch("/api/integrations/garmin/steps", { method: "POST", headers: { "Content-Type": "application/json" },
           body: JSON.stringify(range), signal: controller.signal });
         const body = await result.json();
@@ -75,7 +80,6 @@ export function useDailySteps(dates: string[], enabled: boolean): {
       if (Date.now() >= nextRefreshAt) void load();
       else schedule();
     }
-    setTotals({});
     document.addEventListener("visibilitychange", visibilityChanged);
     void load();
     return () => {
@@ -84,7 +88,7 @@ export function useDailySteps(dates: string[], enabled: boolean): {
       document.removeEventListener("visibilitychange", visibilityChanged);
       controller.abort();
     };
-  }, [enabled, dateKey, revision]);
+  }, [enabled, expanded, dateKey, revision]);
   return { totals, loading, error, refresh: () => setRevision((value) => value + 1) };
 }
 

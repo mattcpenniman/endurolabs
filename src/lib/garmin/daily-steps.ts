@@ -9,6 +9,37 @@ export interface StepsRange {
   endDate: string;
 }
 
+export interface StepsCheckpoint {
+  localDate: string;
+  totalSteps: number | null;
+  fetchedAt: Date;
+}
+
+/** Fetch only due unfinished/missing dates, never spanning finalized days between them. */
+export function pendingStepsRanges(range: StepsRange, cached: StepsCheckpoint[], now: Date): StepsRange[] {
+  validateStepsRange(range.startDate, range.endDate);
+  const checkpoints = new Map(cached.map((row) => [row.localDate, row]));
+  const recentBoundary = new Date(now.getTime() - 7 * 86_400_000).toISOString().slice(0, 10);
+  const ranges: StepsRange[] = [];
+  let previousPending = 0;
+  for (let timestamp = Date.parse(range.startDate); timestamp <= Date.parse(range.endDate); timestamp += 86_400_000) {
+    const localDate = new Date(timestamp).toISOString().slice(0, 10);
+    const row = checkpoints.get(localDate);
+    if (row) {
+      // Garmin dates have no timezone. A post-day fetch after midnight in UTC-12
+      // is safely after this calendar day ended everywhere, including the athlete's zone.
+      const finalized = row.totalSteps !== null && row.fetchedAt.getTime() >= timestamp + 36 * 3_600_000;
+      const fresh = now.getTime() - row.fetchedAt.getTime() < (localDate >= recentBoundary ? 15 * 60_000 : 6 * 3_600_000);
+      if (finalized || fresh) continue;
+    }
+    const previous = ranges.at(-1);
+    if (previous && timestamp === previousPending + 86_400_000) previous.endDate = localDate;
+    else ranges.push({ startDate: localDate, endDate: localDate });
+    previousPending = timestamp;
+  }
+  return ranges;
+}
+
 export interface WeeklyStepsSummary {
   totalSteps: number;
   averageSteps: number;

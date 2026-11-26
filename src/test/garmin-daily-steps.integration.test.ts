@@ -70,6 +70,33 @@ suite("daily steps PostgreSQL ingestion", () => {
     await expect(syncDailySteps(owner, range)).rejects.toThrow();
     expect((await loadDailySteps(owner, range))[0].totalSteps).toBe(12345);
   });
+  it("requests only missing dates between finalized saved totals", async () => {
+    await syncDailySteps(owner, range);
+    await db.update(garminDailySteps).set({ fetchedAt: new Date(0) }).where(and(
+      eq(garminDailySteps.userId, owner), eq(garminDailySteps.localDate, "2026-03-02"),
+    ));
+    mocks.fetch.mockClear().mockResolvedValue([{ calendarDate: "2026-03-02", totalSteps: 456 }]);
+    await syncDailySteps(owner, range);
+    expect(mocks.fetch).toHaveBeenCalledExactlyOnceWith({}, "2026-03-02", "2026-03-02");
+    expect(await loadDailySteps(owner, range)).toEqual([
+      { localDate: "2026-03-01", totalSteps: 12345 }, { localDate: "2026-03-02", totalSteps: 456 }, { localDate: "2026-03-03", totalSteps: 0 },
+    ]);
+    mocks.open.mockClear(); mocks.fetch.mockClear();
+    expect((await syncDailySteps(owner, range)).skippedByTtl).toBe(true);
+    expect(mocks.open).not.toHaveBeenCalled(); expect(mocks.fetch).not.toHaveBeenCalled();
+  });
+  it("does not finalize a same-day partial total after an empty provider response", async () => {
+    const partialFetchedAt = new Date("2026-03-01T18:00:00Z");
+    await db.insert(garminDailySteps).values({ userId: owner, localDate: "2026-03-01", totalSteps: 1000, fetchedAt: partialFetchedAt });
+    mocks.fetch.mockResolvedValue([]);
+    await syncDailySteps(owner, { startDate: "2026-03-01", endDate: "2026-03-01" });
+    const [saved] = await db.select().from(garminDailySteps).where(eq(garminDailySteps.userId, owner));
+    expect(saved.totalSteps).toBe(1000); expect(saved.fetchedAt).toEqual(partialFetchedAt);
+    mocks.fetch.mockClear().mockResolvedValue([{ calendarDate: "2026-03-01", totalSteps: 2345 }]);
+    await syncDailySteps(owner, { startDate: "2026-03-01", endDate: "2026-03-01" });
+    expect(mocks.fetch).toHaveBeenCalledOnce();
+    expect(await loadDailySteps(owner, range)).toEqual([{ localDate: "2026-03-01", totalSteps: 2345 }]);
+  });
   it("fences writes and cleanup after another worker takes ownership", async () => {
     mocks.fetch.mockImplementation(async () => {
       await db.update(garminConnections).set({ activeWorkerToken: "replacement" }).where(eq(garminConnections.userId, owner));

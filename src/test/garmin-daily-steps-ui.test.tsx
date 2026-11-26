@@ -4,6 +4,8 @@ import { createRoot } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
 import { DailyStepsBadge, DailyStepsRefreshNote, WeeklyStepsBadge, useDailySteps } from "@/app/components/plan/DailySteps";
+import WeeklyPlanCard from "@/app/components/plan/WeeklyPlanCard";
+import type { WeeklyPlan } from "@/lib/training/models";
 (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 const roots: ReturnType<typeof createRoot>[] = [];
 beforeEach(() => {
@@ -15,14 +17,14 @@ afterEach(async () => {
   for (const root of roots.splice(0)) await act(async () => root.unmount());
   document.body.replaceChildren(); vi.unstubAllGlobals(); vi.restoreAllMocks(); vi.useRealTimers();
 });
-function Harness({ dates, enabled = true }: { dates: string[]; enabled?: boolean }): React.JSX.Element {
-  const state = useDailySteps(dates, enabled);
+function Harness({ dates, enabled = true, expanded = true }: { dates: string[]; enabled?: boolean; expanded?: boolean }): React.JSX.Element {
+  const state = useDailySteps(dates, enabled, expanded);
   return <div><WeeklyStepsBadge dates={dates} totals={state.totals} />{dates.map((date) => <DailyStepsBadge key={date} steps={state.totals[date]} />)}<span>{state.error}</span><button onClick={state.refresh}>Retry steps</button></div>;
 }
-async function mount(dates: string[], enabled = true) {
+async function mount(dates: string[], enabled = true, expanded = true) {
   const node = document.createElement("div"); document.body.append(node);
   const root = createRoot(node); roots.push(root);
-  await act(async () => root.render(<Harness dates={dates} enabled={enabled} />));
+  await act(async () => root.render(<Harness dates={dates} enabled={enabled} expanded={expanded} />));
   return { node, root };
 }
 describe("Garmin daily steps UI", () => {
@@ -57,10 +59,61 @@ describe("Garmin daily steps UI", () => {
     expect(html).toContain("Missing and future days are excluded");
     expect(renderToStaticMarkup(<WeeklyStepsBadge dates={dates} totals={{}} />)).toBe("");
   });
-  it("does not request collapsed/unsaved views or future history", async () => {
+  it("does not request unsaved views or future history, including collapsed weeks", async () => {
     const fetcher = vi.fn(); vi.stubGlobal("fetch", fetcher);
-    await mount(["2025-01-01"], false); await mount(["2999-01-01"]);
+    await mount(["2025-01-01"], false); await mount(["2025-01-01"], false, false);
+    await mount(["2999-01-01"]); await mount(["2999-01-01"], true, false);
     expect(fetcher).not.toHaveBeenCalled();
+  });
+  it("shows saved weekly totals on initial collapsed render without importing or polling", async () => {
+    const fetcher = mockImports();
+    const { node } = await mount(["2026-11-25"], true, false);
+    expect(node.querySelector('[aria-label^="Garmin weekly steps"]')?.textContent).toContain("18,447 steps");
+    expect(fetcher).toHaveBeenCalledTimes(1);
+    expect(fetcher.mock.calls[0][0]).toBe("/api/integrations/garmin/steps?startDate=2026-11-25&endDate=2026-11-25");
+    expect(fetcher.mock.calls[0][1]?.method).not.toBe("POST");
+    await act(async () => vi.advanceTimersByTimeAsync(24 * 60 * 60_000));
+    await act(async () => document.dispatchEvent(new Event("visibilitychange")));
+    expect(fetcher).toHaveBeenCalledTimes(1);
+    expect(vi.getTimerCount()).toBe(0);
+  });
+  it("renders the footprint summary in the real collapsed week header on first load", async () => {
+    const fetcher = mockImports();
+    const week: WeeklyPlan = {
+      weekNumber: 1, startDate: "2026-11-23", endDate: "2026-11-29", phase: "base",
+      days: [{ date: "2026-11-25", dayOfWeek: "Wednesday", workout: null, isRestDay: true, plannedMileage: 0 }],
+      totalMileage: 0, isDownWeek: false, longRunDistance: 0,
+      intensityDistribution: { easy: 0, threshold: 0, marathon: 0, vo2: 0 },
+    };
+    const node = document.createElement("div"); document.body.append(node);
+    const root = createRoot(node); roots.push(root);
+    const props = {
+      planId: "11111111-1111-4111-8111-111111111111", week, isExpanded: false,
+      onToggle: vi.fn(), dailyLogs: [], onDailyLogSaved: vi.fn(),
+      intensityTargetPercents: { marathon: 0, threshold: 0, vo2: 0 }, onIntensityTargetChange: vi.fn(), onMileageChange: vi.fn(),
+    };
+    await act(async () => root.render(<WeeklyPlanCard {...props} />));
+    const header = node.querySelector('button[aria-expanded="false"]');
+    expect(header?.querySelector('[aria-label^="Garmin weekly steps"]')?.textContent).toContain("👣18,447 steps");
+    expect(fetcher).toHaveBeenCalledTimes(1);
+    await act(async () => root.render(<WeeklyPlanCard {...props} planId="preview" />));
+    expect(node.querySelector('[aria-label^="Garmin weekly steps"]')).toBeNull();
+    expect(fetcher).toHaveBeenCalledTimes(1);
+  });
+  it("imports on expansion after loading a collapsed summary", async () => {
+    const fetcher = mockImports();
+    const { node, root } = await mount(["2026-11-25"], true, false);
+    await act(async () => root.render(<Harness dates={["2026-11-25"]} />));
+    expect(fetcher).toHaveBeenCalledTimes(3);
+    expect(fetcher.mock.calls[2][1]?.method).toBe("POST");
+    expect(node.textContent).toContain("22,008 steps/day avg");
+  });
+  it("leaves unavailable collapsed history absent instead of importing or showing zero", async () => {
+    const fetcher = vi.fn(async () => ({ ok: true, json: async () => ({ days: [] }) }));
+    vi.stubGlobal("fetch", fetcher);
+    const { node } = await mount(["2026-11-25"], true, false);
+    expect(node.querySelector('[aria-label^="Garmin weekly steps"]')).toBeNull();
+    expect(fetcher).toHaveBeenCalledTimes(1);
   });
   it("never displays a late response for a different week", async () => {
     let resolve: (value: unknown) => void = () => {};
@@ -142,15 +195,15 @@ describe("Garmin daily steps UI", () => {
   it("cleans up timers on collapse and unmount", async () => {
     const fetcher = mockImports();
     const { root, node } = await mount(["2026-11-25"]);
-    await act(async () => root.render(<Harness dates={["2026-11-25"]} enabled={false} />));
-    expect(node.textContent).toContain("22,008 steps/day avg");
+    await act(async () => root.render(<Harness dates={["2026-11-25"]} expanded={false} />));
+    expect(node.textContent).toContain("18,447 steps/day avg");
     await act(async () => vi.advanceTimersByTimeAsync(60 * 60_000));
-    expect(fetcher).toHaveBeenCalledTimes(2);
+    expect(fetcher).toHaveBeenCalledTimes(3);
     await act(async () => root.render(<Harness dates={["2026-11-25"]} />));
-    expect(fetcher).toHaveBeenCalledTimes(4);
+    expect(fetcher).toHaveBeenCalledTimes(5);
     await act(async () => root.unmount()); roots.splice(roots.indexOf(root), 1);
     await act(async () => vi.advanceTimersByTimeAsync(60 * 60_000));
-    expect(fetcher).toHaveBeenCalledTimes(4);
+    expect(fetcher).toHaveBeenCalledTimes(5);
     expect(vi.getTimerCount()).toBe(0);
   });
 
