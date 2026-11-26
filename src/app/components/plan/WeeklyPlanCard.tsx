@@ -18,7 +18,7 @@ import { summarizeRunScores } from "@/lib/analytics/run-score";
 import { RunScoreBadge, RunScoreSummaryBadge } from "./RunScoreDetails";
 import { GarminWorkoutSyncButton } from "./GarminWorkoutSyncButton";
 import { resizeWorkout } from "@/lib/training/workout-edit";
-import { DailyStepsBadge, DailyStepsRefreshNote, localToday, useDailySteps } from "./DailySteps";
+import { DailyStepsBadge, DailyStepsRefreshNote, WeeklyStepsBadge, localToday, useDailySteps } from "./DailySteps";
 import { useUnits } from "@/app/components/units/UnitsProvider";
 import {
   formatElevationGain,
@@ -1044,6 +1044,7 @@ export default function WeeklyPlanCard({
               </span>
             )}
             <span>Long {formatMiles(week.longRunDistance)} mi</span>
+            <WeeklyStepsBadge dates={week.days.map((day) => day.date)} totals={dailySteps.totals} />
             <span className="rounded bg-green-50 px-2 py-1 text-green-700">
               Easy {formatMiles(week.intensityDistribution.easy)} mi
             </span>

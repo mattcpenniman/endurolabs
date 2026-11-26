@@ -36,6 +36,14 @@ for implementation validation.
   if its daily total is behind the watch.
 - Every available day's header has a footprint icon and formatted step count,
   including rest days and true zero totals. Missing totals have no badge.
+- The week header shows the **weekly steps total** and **steps/day average** once
+  its daily totals load, with `N/7 days with data` (or the actual number of dates
+  in the week). It remains visible after collapsing a loaded week, without
+  starting extra requests for collapsed weeks. The average divides by days with
+  imported totals only, including rest days and true zeros, never missing or
+  future days. Incomplete weeks and totals including today are labeled **so far**;
+  today's incomplete total is included in the average. Entirely unavailable or
+  future weeks show no summary. The summary updates with the same daily refresh.
 - Today is labeled **so far**. These are the last imported Garmin totals, not a
   live pedometer. Steps include running and non-running activity; they are never
   added to mileage, readiness, run scores, or activity records.

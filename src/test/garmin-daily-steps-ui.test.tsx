@@ -3,7 +3,7 @@ import React, { act } from "react";
 import { createRoot } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
-import { DailyStepsBadge, DailyStepsRefreshNote, useDailySteps } from "@/app/components/plan/DailySteps";
+import { DailyStepsBadge, DailyStepsRefreshNote, WeeklyStepsBadge, useDailySteps } from "@/app/components/plan/DailySteps";
 (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 const roots: ReturnType<typeof createRoot>[] = [];
 beforeEach(() => {
@@ -17,7 +17,7 @@ afterEach(async () => {
 });
 function Harness({ dates, enabled = true }: { dates: string[]; enabled?: boolean }): React.JSX.Element {
   const state = useDailySteps(dates, enabled);
-  return <div>{dates.map((date) => <DailyStepsBadge key={date} steps={state.totals[date]} />)}<span>{state.error}</span><button onClick={state.refresh}>Retry steps</button></div>;
+  return <div><WeeklyStepsBadge dates={dates} totals={state.totals} />{dates.map((date) => <DailyStepsBadge key={date} steps={state.totals[date]} />)}<span>{state.error}</span><button onClick={state.refresh}>Retry steps</button></div>;
 }
 async function mount(dates: string[], enabled = true) {
   const node = document.createElement("div"); document.body.append(node);
@@ -47,6 +47,15 @@ describe("Garmin daily steps UI", () => {
     expect(JSON.parse(fetcher.mock.calls[1][1]!.body as string)).toEqual({ startDate: "2025-01-01", endDate: "2025-01-02" });
     fail = false; await act(async () => node.querySelector("button")!.click());
     expect(node.textContent).toContain("2,000 steps"); expect(node.textContent).toContain("0 steps"); expect(node.textContent).not.toContain("Garmin is syncing");
+  });
+  it("renders weekly totals, rounded known-day averages and partial coverage accessibly", () => {
+    const dates = ["2026-11-23", "2026-11-24", "2026-11-25", "2026-11-26"];
+    const html = renderToStaticMarkup(<WeeklyStepsBadge dates={dates} totals={{ "2026-11-23": 0, "2026-11-25": 10001 }} />);
+    expect(html).toContain("10,001 steps so far");
+    expect(html).toContain("5,001 steps/day average");
+    expect(html).toContain("2/4 days with data");
+    expect(html).toContain("Missing and future days are excluded");
+    expect(renderToStaticMarkup(<WeeklyStepsBadge dates={dates} totals={{}} />)).toBe("");
   });
   it("does not request collapsed/unsaved views or future history", async () => {
     const fetcher = vi.fn(); vi.stubGlobal("fetch", fetcher);
@@ -79,6 +88,7 @@ describe("Garmin daily steps UI", () => {
     await act(async () => vi.advanceTimersByTimeAsync(1));
     expect(fetcher).toHaveBeenCalledTimes(4);
     expect(node.textContent).toContain("22,008 steps");
+    expect(node.textContent).toContain("22,008 steps/day avg");
   });
 
   it("refreshes at local midnight and includes the new day without losing yesterday", async () => {
@@ -131,8 +141,9 @@ describe("Garmin daily steps UI", () => {
 
   it("cleans up timers on collapse and unmount", async () => {
     const fetcher = mockImports();
-    const { root } = await mount(["2026-11-25"]);
+    const { root, node } = await mount(["2026-11-25"]);
     await act(async () => root.render(<Harness dates={["2026-11-25"]} enabled={false} />));
+    expect(node.textContent).toContain("22,008 steps/day avg");
     await act(async () => vi.advanceTimersByTimeAsync(60 * 60_000));
     expect(fetcher).toHaveBeenCalledTimes(2);
     await act(async () => root.render(<Harness dates={["2026-11-25"]} />));

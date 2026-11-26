@@ -1,7 +1,7 @@
 "use client";
 /** Private weekly daily-step loading. Missing totals stay absent; running data stays untouched. */
 import { useEffect, useState } from "react";
-import { isCalendarDate, type DailySteps } from "@/lib/garmin/daily-steps";
+import { isCalendarDate, summarizeWeeklySteps, type DailySteps } from "@/lib/garmin/daily-steps";
 
 export function localToday(): string {
   const now = new Date();
@@ -90,6 +90,18 @@ export function useDailySteps(dates: string[], enabled: boolean): {
 
 export function DailyStepsRefreshNote(): React.JSX.Element {
   return <span>Steps refresh hourly while this week is open and visible, and after local midnight. Returning to this tab catches up when due. Sync your device to Garmin Connect first.</span>;
+}
+
+export function WeeklyStepsBadge({ dates, totals }: { dates: string[]; totals: Record<string, number> }): React.JSX.Element | null {
+  const summary = summarizeWeeklySteps(dates, totals, localToday());
+  if (!summary) return null;
+  const label = `Garmin weekly steps: ${summary.totalSteps.toLocaleString("en-US")} steps${summary.partial ? " so far" : ""} · ${Math.round(summary.averageSteps).toLocaleString("en-US")} steps/day average · ${summary.daysWithData}/${summary.totalDays} days with data`;
+  return <span aria-label={label} title={`${label}. Average uses only days with imported totals, including rest days and true zeros. Missing and future days are excluded; today's total is incomplete. Last imported Garmin data, including running and other daily activity.`}
+    className="inline-flex flex-wrap items-center gap-1 rounded bg-slate-100 px-2 py-1 text-xs font-medium text-slate-600">
+    <span aria-hidden="true">👣</span>{summary.totalSteps.toLocaleString("en-US")} steps{summary.partial ? " so far" : ""}
+    <span>· {Math.round(summary.averageSteps).toLocaleString("en-US")} steps/day avg</span>
+    <span className="font-normal">· {summary.daysWithData}/{summary.totalDays} days with data</span>
+  </span>;
 }
 
 export function DailyStepsBadge({ steps, today = false }: { steps: number | undefined; today?: boolean }): React.JSX.Element | null {
