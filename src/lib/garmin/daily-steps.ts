@@ -9,6 +9,29 @@ export interface StepsRange {
   endDate: string;
 }
 
+export interface WeeklyStepsSummary {
+  totalSteps: number;
+  averageSteps: number;
+  daysWithData: number;
+  totalDays: number;
+  partial: boolean;
+}
+
+/** Average known calendar-day totals only; missing/future days never become zeros. */
+export function summarizeWeeklySteps(dates: string[], totals: Record<string, number>, today: string): WeeklyStepsSummary | null {
+  const weekDates = [...new Set(dates.map((date) => date.slice(0, 10)).filter(isCalendarDate))];
+  const knownDates = weekDates.filter((date) => date <= today && Number.isSafeInteger(totals[date]) && totals[date] >= 0);
+  if (!knownDates.length) return null;
+  const totalSteps = knownDates.reduce((sum, date) => sum + totals[date], 0);
+  return {
+    totalSteps,
+    averageSteps: totalSteps / knownDates.length,
+    daysWithData: knownDates.length,
+    totalDays: weekDates.length,
+    partial: knownDates.length < weekDates.length || weekDates.includes(today),
+  };
+}
+
 export function isCalendarDate(value: unknown): value is string {
   return typeof value === "string" && /^\d{4}-\d{2}-\d{2}$/.test(value)
     && Number.isFinite(Date.parse(value))
