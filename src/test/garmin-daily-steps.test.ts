@@ -1,6 +1,6 @@
 /** Garmin's daily endpoint totals retain local dates and distinguish missing from zero. */
 import { describe, expect, it } from "vitest";
-import { chunkStepsRange, normalizeDailySteps, summarizeWeeklySteps, validateStepsRange } from "@/lib/garmin/daily-steps";
+import { chunkStepsRange, normalizeDailySteps, pendingStepsRanges, summarizeWeeklySteps, validateStepsRange, type StepsCheckpoint } from "@/lib/garmin/daily-steps";
 const range = { startDate: "2026-03-01", endDate: "2026-03-07" };
 describe("Garmin daily steps", () => {
   it("maps whole-day totals including zero, not activity steps or goals", () => {
@@ -31,6 +31,48 @@ describe("Garmin daily steps", () => {
     expect(chunkStepsRange({ startDate: "2024-02-01", endDate: "2024-03-01" })).toEqual([
       { startDate: "2024-02-01", endDate: "2024-02-28" }, { startDate: "2024-02-29", endDate: "2024-03-01" },
     ]);
+  });
+});
+
+describe("unfinished steps request selection", () => {
+  const now = new Date("2026-11-25T18:00:00Z");
+  const week = { startDate: "2026-11-23", endDate: "2026-11-25" };
+  function checkpoint(localDate: string, fetchedAt: string, totalSteps: number | null = 1000): StepsCheckpoint {
+    return { localDate, fetchedAt: new Date(fetchedAt), totalSteps };
+  }
+  it("skips finalized totals, including zero, and requests only today's unfinished total", () => {
+    expect(pendingStepsRanges(week, [
+      checkpoint("2026-11-23", "2026-11-24T12:00:00Z", 0),
+      checkpoint("2026-11-24", "2026-11-25T12:00:00Z"),
+      checkpoint("2026-11-25", "2026-11-25T17:00:00Z"),
+    ], now)).toEqual([{ startDate: "2026-11-25", endDate: "2026-11-25" }]);
+  });
+  it("does not re-pull a fully finalized historical week regardless of age", () => {
+    expect(pendingStepsRanges(range, Array.from({ length: 7 }, (_, index) =>
+      checkpoint(`2026-03-0${index + 1}`, "2026-03-09T00:00:00Z")), now)).toEqual([]);
+  });
+  it("refreshes same-day or timezone-uncertain checkpoints once after day-end", () => {
+    expect(pendingStepsRanges(week, [
+      checkpoint("2026-11-23", "2026-11-23T23:00:00Z"),
+      checkpoint("2026-11-24", "2026-11-25T11:59:59Z"),
+    ], now)).toEqual([week]);
+  });
+  it("groups adjacent missing days without including finalized dates in the gaps", () => {
+    expect(pendingStepsRanges(range, [checkpoint("2026-03-03", "2026-03-05T00:00:00Z")], now)).toEqual([
+      { startDate: "2026-03-01", endDate: "2026-03-02" },
+      { startDate: "2026-03-04", endDate: "2026-03-07" },
+    ]);
+  });
+  it("keeps null checkpoints unfinished and obeys recent and historical retry TTLs", () => {
+    expect(pendingStepsRanges(week, [
+      checkpoint("2026-11-23", "2026-11-25T17:50:00Z", null),
+      checkpoint("2026-11-24", "2026-11-25T17:45:00Z", null),
+      checkpoint("2026-11-25", "2026-11-25T17:50:00Z"),
+    ], now)).toEqual([{ startDate: "2026-11-24", endDate: "2026-11-24" }]);
+    expect(pendingStepsRanges({ startDate: "2026-03-01", endDate: "2026-03-02" }, [
+      checkpoint("2026-03-01", "2026-11-25T13:00:00Z", null),
+      checkpoint("2026-03-02", "2026-11-25T12:00:00Z", null),
+    ], now)).toEqual([{ startDate: "2026-03-02", endDate: "2026-03-02" }]);
   });
 });
 

@@ -462,7 +462,7 @@ export default function WeeklyPlanCard({
   onActivityClick,
 }: WeeklyPlanCardProps) {
   const { units } = useUnits();
-  const dailySteps = useDailySteps(week.days.map((day) => day.date), isExpanded && /^[0-9a-f-]{36}$/i.test(planId));
+  const dailySteps = useDailySteps(week.days.map((day) => day.date), /^[0-9a-f-]{36}$/i.test(planId), isExpanded);
   const [localDays, setLocalDays] = useState<DailyPlan[]>(
     [...week.days].sort((a, b) => dayDisplayOrder[a.dayOfWeek] - dayDisplayOrder[b.dayOfWeek])
   );

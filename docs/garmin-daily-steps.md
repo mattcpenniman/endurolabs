@@ -18,14 +18,15 @@ for implementation validation.
 
 ## Product behavior
 
-- Opening a saved plan week first loads persisted daily totals and then imports
-  that week's dates through today. Older weeks therefore import lazily too.
+- Saved plan weeks load persisted daily totals through today on initial display,
+  even when collapsed, so available weekly steps badges show without opening them.
+  Expanding a week also imports that week's dates through today. Older weeks
+  therefore import lazily too; collapsed weeks never start Garmin imports.
 - While a saved week stays expanded and the tab is visible, steps refresh every
   hour and at the next **browser-local midnight**, whichever comes first. The
   midnight refresh reimports the displayed dates (including the day that just
-  ended) and includes the new day if it belongs to that week. This is not a
-  guarantee that Garmin has finalized the previous day's total at midnight;
-  subsequent hourly imports can pick up corrections.
+  ended) and includes the new day if it belongs to that week. Requests select only
+  unfinished or missing dates; saved completed days are not pulled again.
 - Hidden tabs do not poll. Returning to the tab catches up once if the hourly or
   midnight refresh is due; it does not replay every missed interval. Collapsing
   the week or leaving the page stops its refresh timer. There is no closed-page
@@ -38,8 +39,9 @@ for implementation validation.
   including rest days and true zero totals. Missing totals have no badge.
 - The week header shows the **weekly steps total** and **steps/day average** once
   its daily totals load, with `N/7 days with data` (or the actual number of dates
-  in the week). It remains visible after collapsing a loaded week, without
-  starting extra requests for collapsed weeks. The average divides by days with
+  in the week). It is visible by default on collapsed weeks with stored totals,
+  using a database-only read, and remains visible after collapsing a loaded week.
+  Collapsed weeks do not poll or contact Garmin. The average divides by days with
   imported totals only, including rest days and true zeros, never missing or
   future days. Incomplete weeks and totals including today are labeled **so far**;
   today's incomplete total is included in the average. Entirely unavailable or
@@ -52,11 +54,19 @@ for implementation validation.
 - Errors are non-blocking and offer **Retry steps**. A busy activity/maintenance
   worker returns a conflict rather than starting another Garmin session. If the
   foreground activity sync wins the connection lease, retry steps after it ends.
-- Recent dates (last seven days) are eligible for a provider refresh after 15
-  minutes; older dates after six hours. These are server cache TTLs, **not polling
-  intervals**. Manual and automatic refresh both obey them. Missing dates have
-  nullable checkpoints, not fake zeros. Empty responses do not erase known
-  historical totals.
+- A non-null total (including zero) fetched after its calendar day ended is kept
+  as completed. Since Garmin dates carry no timezone, completion conservatively
+  requires a successful total fetched at/after **12:00 UTC the following day**
+  (midnight in UTC-12). Same-day totals get a post-day refresh, not frozen partials.
+  This is a cache policy, not a guarantee of Garmin/device finality; late device
+  uploads after completion will not automatically correct a completed total.
+- Only unfinished or missing dates are requested from Garmin, grouped into
+  adjacent ranges without including completed dates between them. Unfinished
+  recent dates (last seven days) retry after 15 minutes; older dates after six
+  hours. These are server cache TTLs, **not polling intervals**. Manual and
+  automatic refresh both obey them. Missing dates have nullable checkpoints,
+  not fake zeros. Empty responses do not erase known totals or mark a previously
+  partial total complete; those partial totals remain eligible for retry.
 - The existing connection lease fences ingestion and token persistence. The
   session is restored/refreshed and encrypted tokens saved before requesting
   history. This feature never attempts password login, MFA, or changes the
