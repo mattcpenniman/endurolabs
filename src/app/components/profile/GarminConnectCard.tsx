@@ -183,9 +183,9 @@ export default function GarminConnectCard({ connection, onChanged }: GarminConne
           {connection.rememberMe && (
             <span className="rounded bg-emerald-100 px-2 py-1 font-semibold text-emerald-700">Remembered</span>
           )}
-          <span className="rounded bg-gray-100 px-2 py-1">{connection.activities.length} runs stored</span>
+          <span className="rounded bg-gray-100 px-2 py-1">{connection.totalActivities ?? connection.activities.length} runs stored</span>
           <span className="rounded bg-gray-100 px-2 py-1">
-            {connection.activities.filter((activity) => activity.samplesFetchedAt).length} with detail
+            {connection.activitiesWithDetail ?? connection.activities.filter((activity) => activity.samplesFetchedAt).length} with detail
           </span>
           {connection.lastSyncAt && (
             <span className="rounded bg-gray-100 px-2 py-1">Last sync {new Date(connection.lastSyncAt).toLocaleString()}</span>

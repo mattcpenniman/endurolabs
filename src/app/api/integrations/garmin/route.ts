@@ -4,7 +4,7 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { randomUUID } from "crypto";
-import { and, desc, eq, isNull, lte, or } from "drizzle-orm";
+import { and, count, desc, eq, isNull, lte, or } from "drizzle-orm";
 import { getCurrentUser } from "@/lib/auth";
 import { db } from "@/lib/db/client";
 import { garminConnections, plans, runActivities } from "@/lib/db/schema";
@@ -45,12 +45,21 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
       .from(garminConnections)
       .where(eq(garminConnections.userId, user.id))
       .limit(1);
+    const activityScope = and(
+      eq(runActivities.userId, user.id),
+      eq(runActivities.source, "garmin"),
+      planId ? eq(runActivities.planId, planId) : undefined,
+    );
+    // Count the full scope, not the bounded activity list used for display/scoring.
+    // A successful empty detail response still has samplesFetchedAt and counts here.
+    const [totals] = await db.select({
+      totalActivities: count(),
+      activitiesWithDetail: count(runActivities.samplesFetchedAt),
+    }).from(runActivities).where(activityScope);
     const activities = await db
       .select()
       .from(runActivities)
-      .where(planId
-        ? and(eq(runActivities.userId, user.id), eq(runActivities.source, "garmin"), eq(runActivities.planId, planId))
-        : and(eq(runActivities.userId, user.id), eq(runActivities.source, "garmin")))
+      .where(activityScope)
       .orderBy(desc(runActivities.startTimeGmt))
       .limit(1000);
 
@@ -65,8 +74,10 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
       rememberMe: connection?.rememberMe ?? false,
       lastSyncAt: connection?.lastSyncAt?.toISOString() ?? null,
       lastError: connection?.lastError ?? null,
+      totalActivities: totals.totalActivities,
+      activitiesWithDetail: totals.activitiesWithDetail,
       activities: activities.map((row) => ({ ...serializeRunActivity(row), runScore: scores.get(row.id) ?? null })),
-    });
+    }, { headers: { "Cache-Control": "no-store" } });
   } catch (error) {
     console.error("Failed to load Garmin integration:", error);
     return NextResponse.json({ error: "Failed to load Garmin integration" }, { status: 500 });

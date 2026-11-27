@@ -2112,7 +2112,7 @@ function PlanPageContent(): React.ReactNode {
                     </div>
                     <p className="mt-1 text-sm text-gray-500">
                       {garminConnection.connected
-                        ? `Connected as ${garminConnection.displayName || garminConnection.username}. ${garminConnection.activities.length} runs stored.`
+                        ? `Connected as ${garminConnection.displayName || garminConnection.username}. ${garminConnection.totalActivities ?? garminConnection.activities.length} runs stored.`
                         : "Connect Garmin to import runs and match them to this plan."}{" "}
                       Login moved to your Profile.
                     </p>
