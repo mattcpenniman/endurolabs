@@ -62,6 +62,10 @@ export interface GarminConnectionStatus {
   rememberMe?: boolean;
   lastSyncAt?: string | null;
   lastError?: string | null;
+  /** Full owner/optional-plan Garmin count, independent of the activity list limit. */
+  totalActivities?: number;
+  /** Same scope, counting successful detail fetches (including valid empty responses). */
+  activitiesWithDetail?: number;
   activities: RunActivity[];
 }
 
